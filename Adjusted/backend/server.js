@@ -74,6 +74,11 @@ app.use("/api/transactions", authenticate, txRoutes);
 app.get("/health", (_, res) => res.json({ status: "ok", time: new Date().toISOString() }));
 
 // ── Boot: init DB schema first, then start HTTP server ───────────────────────
+// ── JSON error handler (must be registered last) ──────────────────────────
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(err.status || 500).json({ error: err.message || "Internal server error" });
+});
 async function start() {
   try {
     await initSchema();                          // creates tables + runs migrations
