@@ -1289,13 +1289,13 @@ export default function App(){
         {/* ══ HISTORY ══ */}
         {page==="history"&&(
           <div className="gcard" style={{padding:0,overflow:"hidden"}}>
-            <div style={{padding:mob?"14px 16px 12px":"22px 24px 16px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div style={{padding:mob?"14px 16px 12px":"22px 24px 16px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between",marginbottom:10px}}>
               <div className="stitle" style={{marginBottom:0}}>All Transactions</div>
               <span style={{fontSize:11,color:"var(--text3)",fontWeight:600}}>{txs.length} total</span>
             </div>
             <div className="txwrap">
               <table className="txt">
-                <thead style={{textAlign:"center",verticalAlign:"middle",padding:"12px 18px",display:"table-header-group"}}><tr><th>Type</th><th>Asset</th><th>Amount</th><th>Price</th><th>Total</th><th>Date</th><th>Status</th></tr></thead>
+                <thead><tr><th>Type</th><th>Asset</th><th>Amount</th><th>Price</th><th>Total</th><th>Date</th><th>Status</th></tr></thead>
                 <tbody>
                   {txs.map(tx=>(
                     <tr key={tx.id}>
