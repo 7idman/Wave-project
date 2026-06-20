@@ -76,7 +76,8 @@ app.get("/health", (_, res) => res.json({ status: "ok", time: new Date().toISOSt
 async function start() {
   try {
     await initSchema();                          // creates tables + runs migrations
-    app.listen(PORT, () => {
+    priceRoutes.fetchLivePrices().catch(console.warn);   // ← add this line
+    app.listen(PORT, () => {                       // creates tables + runs migrations
       console.log(`🚀 Wave API running on http://localhost:${PORT}`);
       console.log(`📦 Database: ${process.env.LIBSQL_URL || "file:wave.db"}`);
     });

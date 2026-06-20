@@ -40,9 +40,6 @@ async function fetchLivePrices() {
   lastFetch = Date.now();
 }
 
-// Refresh on server start (non-blocking)
-fetchLivePrices().catch(console.warn);
-
 // ── Routes ────────────────────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
@@ -84,3 +81,4 @@ router.get("/:symbol", async (req, res) => {
 });
 
 module.exports = router;
+module.exports.fetchLivePrices = fetchLivePrices; // Export for manual refresh from admin panel
