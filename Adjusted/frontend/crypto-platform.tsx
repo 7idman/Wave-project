@@ -199,8 +199,8 @@ const css=`
   .sitem:hover{color:var(--text);background:var(--surface2);}
   .sitem.active{color:#fff;background:linear-gradient(135deg,rgba(99,102,241,.25),rgba(139,92,246,.15));}
   .sicon{font-size:17px;width:22px;text-align:center;}
-  .sbot{margin-top:auto;padding:16px;border-top:1px solid var(--border); max-height:80px; margin-bottom:20px;}
-  .suser{display:flex;align-items:center;gap:10px;padding:12px;border-radius:12px;cursor:pointer;border:1px solid var(--border);transition:all .15s;background:var(--surface); margin-top:20px;}
+  .sbot{margin-top:auto;padding:16px;border-top:1px solid var(--border); max-height:80px;margin-bottom:20px;}
+  .suser{display:flex;align-items:center;gap:10px;padding:12px;border-radius:12px;cursor:pointer;border:1px solid var(--border);transition:all .15s;background:var(--surface);margin-top:20px;}
   .suser:hover{border-color:var(--indigo2);background:rgba(99,102,241,.08);}
   .av{border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Plus Jakarta Sans',sans-serif;font-weight:800;flex-shrink:0;background:linear-gradient(135deg,#6366F1,#8B5CF6);color:white;overflow:hidden;}
   .suname{font-size:12px;color:var(--text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
