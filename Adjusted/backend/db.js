@@ -71,74 +71,64 @@ async function batch(stmts) {
 
 // ── Schema bootstrap ────────────────────────────────────────────────────────
 async function initSchema() {
-  // Use batch with mode "deferred" — required for DDL on Turso cloud, works on local too
-  await db.batch([
-    {
-      sql: `CREATE TABLE IF NOT EXISTS users (
-        id               INTEGER PRIMARY KEY AUTOINCREMENT,
-        google_id        TEXT    UNIQUE,
-        email            TEXT    UNIQUE NOT NULL,
-        name             TEXT    NOT NULL,
-        password_hash    TEXT,
-        phone            TEXT,
-        phone_verified   INTEGER NOT NULL DEFAULT 0,
-        avatar_url       TEXT,
-        date_of_birth    TEXT,
-        country          TEXT,
-        kyc_id_status    TEXT    NOT NULL DEFAULT 'pending',
-        kyc_addr_status  TEXT    NOT NULL DEFAULT 'pending',
-        cash_balance     REAL    NOT NULL DEFAULT 10000.00,
-        created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
-        updated_at       TEXT    NOT NULL DEFAULT (datetime('now'))
-      )`,
-      args: [],
-    },
-    {
-      sql: `CREATE TABLE IF NOT EXISTS refresh_tokens (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        token      TEXT    UNIQUE NOT NULL,
-        expires_at TEXT    NOT NULL,
-        created_at TEXT    NOT NULL DEFAULT (datetime('now'))
-      )`,
-      args: [],
-    },
-    {
-      sql: `CREATE TABLE IF NOT EXISTS holdings (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        symbol     TEXT    NOT NULL,
-        amount     REAL    NOT NULL DEFAULT 0,
-        updated_at TEXT    NOT NULL DEFAULT (datetime('now')),
-        UNIQUE(user_id, symbol)
-      )`,
-      args: [],
-    },
-    {
-      sql: `CREATE TABLE IF NOT EXISTS transactions (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        type       TEXT    NOT NULL CHECK(type IN ('buy','sell','deposit','withdraw')),
-        symbol     TEXT    NOT NULL,
-        amount     REAL    NOT NULL,
-        price      REAL    NOT NULL,
-        fee        REAL    NOT NULL DEFAULT 0,
-        total      REAL    NOT NULL,
-        status     TEXT    NOT NULL DEFAULT 'completed',
-        created_at TEXT    NOT NULL DEFAULT (datetime('now'))
-      )`,
-      args: [],
-    },
-    {
-      sql: `CREATE TABLE IF NOT EXISTS price_cache (
-        symbol     TEXT PRIMARY KEY,
-        price      REAL NOT NULL,
-        change_24h REAL NOT NULL DEFAULT 0,
-        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-      )`,
-      args: [],
-    },
-  ], "write");
+  const tables = [
+    `CREATE TABLE IF NOT EXISTS users (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      google_id        TEXT    UNIQUE,
+      email            TEXT    UNIQUE NOT NULL,
+      name             TEXT    NOT NULL,
+      password_hash    TEXT,
+      phone            TEXT,
+      phone_verified   INTEGER NOT NULL DEFAULT 0,
+      avatar_url       TEXT,
+      date_of_birth    TEXT,
+      country          TEXT,
+      kyc_id_status    TEXT    NOT NULL DEFAULT 'pending',
+      kyc_addr_status  TEXT    NOT NULL DEFAULT 'pending',
+      cash_balance     REAL    NOT NULL DEFAULT 10000.00,
+      created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_at       TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS refresh_tokens (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token      TEXT    UNIQUE NOT NULL,
+      expires_at TEXT    NOT NULL,
+      created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS holdings (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      symbol     TEXT    NOT NULL,
+      amount     REAL    NOT NULL DEFAULT 0,
+      updated_at TEXT    NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(user_id, symbol)
+    )`,
+    `CREATE TABLE IF NOT EXISTS transactions (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      type       TEXT    NOT NULL CHECK(type IN ('buy','sell','deposit','withdraw')),
+      symbol     TEXT    NOT NULL,
+      amount     REAL    NOT NULL,
+      price      REAL    NOT NULL,
+      fee        REAL    NOT NULL DEFAULT 0,
+      total      REAL    NOT NULL,
+      status     TEXT    NOT NULL DEFAULT 'completed',
+      created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS price_cache (
+      symbol     TEXT PRIMARY KEY,
+      price      REAL NOT NULL,
+      change_24h REAL NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+  ];
+
+  for (const sql of tables) {
+    await db.execute(sql);
+  }
+
+  // ── Safe migrations (ADD COLUMN IF NOT EXISTS equivalent) ────────────────
 
   // ── Safe migrations (ADD COLUMN IF NOT EXISTS equivalent) ────────────────
   const migrations = [
