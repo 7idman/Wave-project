@@ -138,7 +138,7 @@ async function initSchema() {
       )`,
       args: [],
     },
-  ], "deferred");
+  ], "write");
 
   // ── Safe migrations (ADD COLUMN IF NOT EXISTS equivalent) ────────────────
   const migrations = [
