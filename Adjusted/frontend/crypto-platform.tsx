@@ -27,7 +27,7 @@ const LANG:Record<string,Record<string,string>>={
 
 /* ── API ── */
 // Uses Vite proxy (/api → http://localhost:4000/api) — no CORS issues
-const API_BASE = "/api";
+const API_BASE =  import.meta.env.VITE_API_URL || "/api";
 let _access:string|null = null, _refresh:string|null = null;
 const api = {
   setTokens(a:string,r:string){ _access=a; _refresh=r; },
