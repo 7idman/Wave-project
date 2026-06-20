@@ -1295,7 +1295,7 @@ export default function App(){
             </div>
             <div className="txwrap">
               <table className="txt">
-                <thead><tr><th>Type</th><th>Asset</th><th>Amount</th><th>Price</th><th>Total</th><th>Date</th><th>Status</th></tr></thead>
+                <thead style={{textAlign:"center",verticalAlign:"middle",padding:"12px 18px",display:"table-header-group"}}><tr><th>Type</th><th>Asset</th><th>Amount</th><th>Price</th><th>Total</th><th>Date</th><th>Status</th></tr></thead>
                 <tbody>
                   {txs.map(tx=>(
                     <tr key={tx.id}>
