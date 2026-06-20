@@ -467,7 +467,7 @@ export default function App(){
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
       setUser({name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined});
       setDemo(false);
-      toast2(`Welcome back, ${nm.split(" ")[0]}!`,"👋");
+      toast2(`Welcome back, ${nm.split(" ")[0]}!`,);
     }catch(err:any){setLoginErr(err.message||"Login failed. Check your email and password.");}
     finally{setLoading(false);}
   };
@@ -488,13 +488,13 @@ export default function App(){
       const nm=u.name||regName||"User";
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
       setUser({name:nm,email:u.email,initials});
-      setDemo(false);toast2(`Welcome to Wave, ${nm.split(" ")[0]}!`,"🎉");
+      setDemo(false);toast2(`Welcome to Wave, ${nm.split(" ")[0]}!`,);
     }catch(err:any){setLoginErr(err.message||"Registration failed.");}
     finally{setLoading(false);}
   };
   const doLogout=async()=>{
     try{await api.post("/auth/logout",{refreshToken:_refresh});}catch{}
-    api.clearTokens();setUser(null);setDemo(false);setPage("dashboard");toast2("Signed out","👋");
+    api.clearTokens();setUser(null);setDemo(false);setPage("dashboard");toast2("Signed out");
   };
 
   /* Save profile */
@@ -525,7 +525,7 @@ export default function App(){
       if(!demo) await api.patch("/auth/profile",{phone:phoneInput});
       setUser(p=>({...p!,phone:phoneInput}));
       setKycStatus(p=>({...p,phone:"verified"}));
-      setPhoneOpen(false);toast2("Phone number added","📱");
+      setPhoneOpen(false);toast2("Phone number added",);
     }catch(e:any){toast2(e.message,"⚠",false);}
     finally{setLoading(false);}
   };
@@ -537,7 +537,7 @@ export default function App(){
     // Simulate upload — in prod you'd upload to S3 and send URL to backend
     await new Promise(r=>setTimeout(r,1200));
     setKycStatus(p=>({...p,id:"review"}));
-    setIdOpen(false);toast2("ID submitted for review","📋");
+    setIdOpen(false);toast2("ID submitted for review",);
     setLoading(false);
   };
 
@@ -547,7 +547,7 @@ export default function App(){
     setLoading(true);
     await new Promise(r=>setTimeout(r,1200));
     setKycStatus(p=>({...p,address:"review"}));
-    setAddrOpen(false);toast2("Address proof submitted","🏠");
+    setAddrOpen(false);toast2("Address proof submitted",);
     setLoading(false);
   };
 
@@ -560,7 +560,7 @@ export default function App(){
     try{
       if(!demo) await api.patch("/auth/password",{currentPassword:pwCurrent,newPassword:pwNew});
       setPwOpen(false);setPwCurrent("");setPwNew("");setPwConfirm("");
-      toast2("Password changed","🔑");
+      toast2("Password changed",);
     }catch(e:any){toast2(e.message,"⚠",false);}
     finally{setLoading(false);}
   };
@@ -593,7 +593,7 @@ export default function App(){
       if(amt>port.cashBalance){setLoading(false);return toast2("Insufficient balance","⚠",false);}
       setPort(p=>({...p,cashBalance:parseFloat((p.cashBalance-amt).toFixed(2)),totalValue:parseFloat((p.totalValue-amt).toFixed(2))}));
       setTxs(p=>[{id:p.length+1,type:"withdraw",symbol:"USD",amount:amt,price:1,total:amt,created_at:new Date().toISOString().slice(0,10),status:"completed"},...p]);
-      toast2(`Withdrawn $${amt.toLocaleString()}`,"🏦");setTamt("");setLoading(false);return;
+      toast2(`Withdrawn $${amt.toLocaleString()}`,);setTamt("");setLoading(false);return;
     }
     const cp=prices[tcoin];const price=cp?.price||0;const sub=amt*price;const fee=sub*.001;const total=sub+fee;
     if(ttype==="buy"&&total>port.cashBalance){setLoading(false);return toast2("Insufficient balance","⚠",false);}
@@ -675,11 +675,11 @@ export default function App(){
               Continue with Google
             </button>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              <button className="btn btn-ghost" style={{padding:13,fontSize:13,borderRadius:12}} onClick={()=>{setUser({name:"Alex Morgan",email:"alex@example.com",initials:"AM"});setDemo(true);toast2("Welcome via Apple! Running in demo","🍎");}}>
+              <button className="btn btn-ghost" style={{padding:13,fontSize:13,borderRadius:12}} onClick={()=>{setUser({name:"Alex Morgan",email:"alex@example.com",initials:"AM"});setDemo(true);toast2("Welcome via Apple! Running in demo",);}}>
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.7 9.05 7.4c1.4.07 2.38.81 3.18.84.96-.19 1.95-.93 3.24-.99 1.38-.07 2.61.49 3.41 1.52-3.41 2.08-2.51 6.53.77 7.8-.54 1.47-1.26 2.84-2.6 3.71zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
                 Apple
               </button>
-              <button className="btn btn-ghost" style={{padding:13,fontSize:13,borderRadius:12}} onClick={()=>{setUser({name:"Alex Morgan",email:"alex@example.com",initials:"AM"});setDemo(true);toast2("Welcome via Facebook! Running in demo","👤");}}>
+              <button className="btn btn-ghost" style={{padding:13,fontSize:13,borderRadius:12}} onClick={()=>{setUser({name:"Alex Morgan",email:"alex@example.com",initials:"AM"});setDemo(true);toast2("Welcome via Facebook! Running in demo",);}}>
                 <svg width="17" height="17" viewBox="0 0 24 24"><path fill="#1877F2" d="M24 12.07C24 5.41 18.63 0 12 0S0 5.41 0 12.07C0 18.1 4.39 23.1 10.13 24v-8.44H7.08v-3.49h3.04V9.41c0-3.02 1.8-4.7 4.54-4.7 1.31 0 2.68.24 2.68.24v2.97h-1.51c-1.49 0-1.95.93-1.95 1.88v2.27h3.32l-.53 3.49h-2.79V24C19.61 23.1 24 18.1 24 12.07z"/></svg>
                 Facebook
               </button>
@@ -1427,7 +1427,7 @@ export default function App(){
                 <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:4}}>👤 {t("account")}</div>
                 <div style={{fontSize:12,color:"var(--text3)",marginBottom:16}}>Manage your account and data</div>
                 <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                  <button className="btn btn-action" style={{justifyContent:"flex-start"}} onClick={()=>toast2("Statement ready for download","📄")}>📄 Account Statement</button>
+                  <button className="btn btn-action" style={{justifyContent:"flex-start"}} onClick={()=>toast2("Statement ready for download",)}>Account Statement</button>
                   <button className="btn btn-action" style={{justifyContent:"flex-start"}} onClick={doLogout}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginRight:6,flexShrink:0}}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>{t("signOut")}</button>
                   <button className="btn btn-danger" style={{justifyContent:"flex-start"}} onClick={()=>setDeleteOpen(true)}>🗑 Close Account</button>
                 </div>
