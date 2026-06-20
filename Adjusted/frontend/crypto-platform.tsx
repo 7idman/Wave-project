@@ -587,7 +587,7 @@ export default function App(){
     if(ttype==="deposit"){
       setPort(p=>({...p,cashBalance:parseFloat((p.cashBalance+amt).toFixed(2)),totalValue:parseFloat((p.totalValue+amt).toFixed(2))}));
       setTxs(p=>[{id:p.length+1,type:"deposit",symbol:"USD",amount:amt,price:1,total:amt,created_at:new Date().toISOString().slice(0,10),status:"completed"},...p]);
-      toast2(`Deposited $${amt.toLocaleString()}`,"💰");setTamt("");setLoading(false);return;
+      toast2(`Deposited $${amt.toLocaleString()}`,"");setTamt("");setLoading(false);return;
     }
     if(ttype==="withdraw"){
       if(amt>port.cashBalance){setLoading(false);return toast2("Insufficient balance","⚠",false);}
@@ -1016,7 +1016,7 @@ export default function App(){
             <div className="tdate">{new Date().toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <div className="tchip">💰 {cur(port.cashBalance)}</div>
+            <div className="tchip"> {cur(port.cashBalance)}</div>
           </div>
         </div>
 
@@ -1510,7 +1510,7 @@ export default function App(){
                 <div key={i} className="setting-row" style={{borderBottom:i<4?"1px solid var(--border)":"none",paddingTop:12,paddingBottom:12}}>
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
                     <div style={{width:34,height:34,borderRadius:"50%",background:tx.type==="buy"||tx.type==="deposit"?"rgba(16,185,129,.15)":"rgba(239,68,68,.1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>
-                      {tx.type==="buy"?"🟢":tx.type==="sell"?"🔴":tx.type==="deposit"?"💰":"🏦"}
+                      {tx.type==="buy"?"🟢":tx.type==="sell"?"🔴":tx.type==="deposit"?"":"🏦"}
                     </div>
                     <div>
                       <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{tx.type.charAt(0).toUpperCase()+tx.type.slice(1)} {tx.symbol}</div>
