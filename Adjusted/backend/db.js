@@ -71,6 +71,12 @@ async function batch(stmts) {
 
 // ── Schema bootstrap ────────────────────────────────────────────────────────
 async function initSchema() {
+  // Run each CREATE TABLE individually instead of batching them together.
+  // Batching DDL statements against Turso's cloud HTTP API was triggering
+  // "Unexpected status code while fetching migration jobs: 400" regardless
+  // of batch mode ("deferred" or "write"). Running them one at a time avoids
+  // that code path entirely. Each uses IF NOT EXISTS, so this is safe to
+  // re-run on every boot even if a previous attempt partially completed.
   const tables = [
     `CREATE TABLE IF NOT EXISTS users (
       id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -127,8 +133,6 @@ async function initSchema() {
   for (const sql of tables) {
     await db.execute(sql);
   }
-
-  // ── Safe migrations (ADD COLUMN IF NOT EXISTS equivalent) ────────────────
 
   // ── Safe migrations (ADD COLUMN IF NOT EXISTS equivalent) ────────────────
   const migrations = [
