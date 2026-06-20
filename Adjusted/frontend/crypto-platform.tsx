@@ -1343,16 +1343,16 @@ export default function App(){
                 <div style={{flex:1}}>
                   <div style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontWeight:800,fontSize:20,color:"var(--text)"}}>{user.name}</div>
                   <div style={{fontSize:13,color:"var(--text2)",marginTop:2}}>{user.email}</div>
-                  {user.phone&&<div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>📱 {user.phone}</div>}
+                  {user.phone&&<div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>{user.phone}</div>}
                   <div style={{display:"flex",alignItems:"center",gap:8,marginTop:10,flexWrap:"wrap"}}>
                     <span className="badge badge-green">✓ Verified</span>
-                    {kycStatus.phone==="verified"&&<span className="badge badge-green">📱 Phone</span>}
-                    {kycStatus.id==="verified"&&<span className="badge badge-green">🪪 ID</span>}
+                    {kycStatus.phone==="verified"&&<span className="badge badge-green"> Phone</span>}
+                    {kycStatus.id==="verified"&&<span className="badge badge-green"> ID</span>}
                   </div>
                 </div>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                  <button className="btn btn-ghost" onClick={()=>{setEditName(user.name);setAvatarPreview(null);setEditOpen(true);}}>✏️ Edit Profile</button>
-                  <button className="btn btn-ghost" onClick={()=>setPwOpen(true)}>🔑 Change Password</button>
+                  <button className="btn btn-ghost" onClick={()=>{setEditName(user.name);setAvatarPreview(null);setEditOpen(true);}}>Edit Profile</button>
+                  <button className="btn btn-ghost" onClick={()=>setPwOpen(true)}>Change Password</button>
                 </div>
               </div>
             </div>
@@ -1402,7 +1402,7 @@ export default function App(){
 
               {/* KYC */}
               <div className="gcard">
-                <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:4}}>📋 KYC Verification</div>
+                <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:4}}>KYC Verification</div>
                 <div style={{fontSize:12,color:"var(--text3)",marginBottom:16}}>Increase your limits by verifying your identity</div>
                 {[
                   {label:"Email",         status:"done",              action:null},
