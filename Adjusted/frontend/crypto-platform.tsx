@@ -1510,7 +1510,7 @@ export default function App(){
                 <div key={i} className="setting-row" style={{borderBottom:i<4?"1px solid var(--border)":"none",paddingTop:12,paddingBottom:12}}>
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
                     <div style={{width:34,height:34,borderRadius:"50%",background:tx.type==="buy"||tx.type==="deposit"?"rgba(16,185,129,.15)":"rgba(239,68,68,.1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>
-                      {tx.type==="buy"?"🟢":tx.type==="sell"?"🔴":tx.type==="deposit"?}
+                      {tx.type==="buy"?"🟢":tx.type==="sell"?"🔴":tx.type==="deposit"}       {toast&&<div style={{position:"fixed",bottom:24,right:16,left:16,maxWidth:380,margin:"0 auto",padding:"13px 18px",borderRadius:100,background:toast.ok===false?"rgba(239,68,68,.9)":"rgba(16,185,129,.9)",color:"#fff",fontSize:13,fontWeight:700,zIndex:999,display:"flex",alignItems:"center",gap:9,backdropFilter:"blur(10px)"}}><span>{toast.icon}</span>{toast.msg}</div>}":"🏦"}
                     </div>
                     <div>
                       <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{tx.type.charAt(0).toUpperCase()+tx.type.slice(1)} {tx.symbol}</div>
