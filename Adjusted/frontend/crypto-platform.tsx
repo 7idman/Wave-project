@@ -286,7 +286,7 @@ const css=`
   .txcbot{display:flex;align-items:center;justify-content:space-between;}
   .txcamt{font-size:12px;color:var(--text3);font-weight:500;}
   .txctot{font-size:14px;font-weight:800;}
-  .settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:28px;max-width:900px;margin:0 auto;}
+  .settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:40px;max-width:900px;margin:0 auto;}
   .setting-row{display:flex;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid var(--border);}
   .setting-row:last-child{border-bottom:none;}
   .setting-label{font-size:13px;font-weight:600;color:var(--text);}
