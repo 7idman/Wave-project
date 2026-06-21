@@ -339,7 +339,6 @@ export default function App(){
   const[tamt,setTamt]         =useState("");
   const[loading,setLoading]   =useState(false);
   const[toast,setToast]       =useState<{msg:string;icon:string;ok?:boolean}|null>(null);
-  const[demo,setDemo]         =useState(false);
   const[email,setEmail]       =useState("");
   const[pw,setPw]             =useState("");
   const[sbOpen,setSbOpen]     =useState(false);
@@ -451,10 +450,12 @@ export default function App(){
       setTxs(tx.transactions??[]);
     }catch(e:any){console.warn("transactions:",e.message);}
   },[]);
-  useEffect(()=>{if(user&&!demo)loadData();},[user,loadData]); // demo excluded — uses fallback data
+  useEffect(()=>{if(user)loadData();},[user,loadData]);
 
   /* Auth */
-  const doGoogle=()=>{setUser({name:"Alex Morgan",email:"alex@example.com",initials:"AM"});setDemo(true);toast2("Welcome! Running in demo mode","👋");};
+  const oauthNotReady=(provider:string)=>{
+  toast2(`${provider} sign-in isn't connected yet — this will work automatically once ${provider} OAuth is configured on the backend.`,"⚠",false);
+};
   const doEmail=async()=>{
     if(!email)return setLoginErr("Please enter your email.");
     if(!pw)   return setLoginErr("Please enter your password.");
@@ -466,7 +467,6 @@ export default function App(){
       const nm=u.name||email.split("@")[0]||"User";
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
       setUser({name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined});
-      setDemo(false);
       toast2(`Welcome back, ${nm.split(" ")[0]}!`,);
     }catch(err:any){setLoginErr(err.message||"Login failed. Check your email and password.");}
     finally{setLoading(false);}
@@ -488,13 +488,13 @@ export default function App(){
       const nm=u.name||regName||"User";
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
       setUser({name:nm,email:u.email,initials});
-      setDemo(false);toast2(`Welcome to Wave, ${nm.split(" ")[0]}!`,);
+      toast2(`Welcome to Wave, ${nm.split(" ")[0]}!`,);
     }catch(err:any){setLoginErr(err.message||"Registration failed.");}
     finally{setLoading(false);}
   };
   const doLogout=async()=>{
     try{await api.post("/auth/logout",{refreshToken:_refresh});}catch{}
-    api.clearTokens();setUser(null);setDemo(false);setPage("dashboard");toast2("Signed out");
+   api.clearTokens();setUser(null);setPage("dashboard");toast2("Signed out");
   };
 
   /* Save profile */
@@ -502,16 +502,11 @@ export default function App(){
     if(!editName.trim()&&!avatarPreview)return toast2("Nothing to update","⚠",false);
     setLoading(true);
     try{
-      if(!demo){
-        const d=await api.patch("/auth/profile",{name:editName||undefined,avatar_url:avatarPreview||undefined});
-        const u=d.user;
-        const nm=u.name||editName||user?.name||"User";
-        const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
-        setUser(p=>({...p!,name:nm,initials,avatarUrl:u.avatarUrl||p?.avatarUrl}));
-      }else{
-        if(editName) setUser(p=>({...p!,name:editName,initials:editName.split(" ").map((w:string)=>w[0]).join("").slice(0,2).toUpperCase()}));
-        if(avatarPreview) setUser(p=>({...p!,avatarUrl:avatarPreview}));
-      }
+     const d=await api.patch("/auth/profile",{name:editName||undefined,avatar_url:avatarPreview||undefined});
+      const u=d.user;
+      const nm=u.name||editName||user?.name||"User";
+      const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
+ setUser(p=>({...p!,name:nm,initials,avatarUrl:u.avatarUrl||p?.avatarUrl}));
       setEditOpen(false);toast2("Profile updated","✓");
     }catch(e:any){toast2(e.message,"⚠",false);}
     finally{setLoading(false);}
@@ -522,7 +517,7 @@ export default function App(){
     if(!phoneInput.trim())return toast2("Enter a phone number","⚠",false);
     setLoading(true);
     try{
-      if(!demo) await api.patch("/auth/profile",{phone:phoneInput});
+      await api.patch("/auth/profile",{phone:phoneInput});
       setUser(p=>({...p!,phone:phoneInput}));
       setKycStatus(p=>({...p,phone:"verified"}));
       setPhoneOpen(false);toast2("Phone number added",);
@@ -558,7 +553,7 @@ export default function App(){
     if(pwNew.length<8)return toast2("Password must be at least 8 characters","⚠",false);
     setLoading(true);
     try{
-      if(!demo) await api.patch("/auth/password",{currentPassword:pwCurrent,newPassword:pwNew});
+      await api.patch("/auth/password",{currentPassword:pwCurrent,newPassword:pwNew});
       setPwOpen(false);setPwCurrent("");setPwNew("");setPwConfirm("");
       toast2("Password changed",);
     }catch(e:any){toast2(e.message,"⚠",false);}
@@ -577,13 +572,17 @@ export default function App(){
 
   /* Trade */
   const doTrade=async()=>{
-    const amt=parseFloat(tamt);
-    if(!amt||amt<=0)return toast2("Enter a valid amount","⚠",false);
-    setLoading(true);
-    if(!demo){
-      try{const d=await api.post("/trades",{type:ttype,symbol:tcoin,amount:amt});toast2(d.message,ttype==="buy"?"🟢":"🔴");setTamt("");await loadData();return;}
-      catch(e:any){toast2(e.message,"⚠",false);}finally{setLoading(false);}return;
-    }
+  const amt=parseFloat(tamt);
+  if(!amt||amt<=0)return toast2("Enter a valid amount","⚠",false);
+  setLoading(true);
+  try{
+    const d=await api.post("/trades",{type:ttype,symbol:tcoin,amount:amt});
+    toast2(d.message,ttype==="buy"?"🟢":"🔴");
+    setTamt("");
+    await loadData();
+  }catch(e:any){toast2(e.message,"⚠",false);}
+  finally{setLoading(false);}
+};
     if(ttype==="deposit"){
       setPort(p=>({...p,cashBalance:parseFloat((p.cashBalance+amt).toFixed(2)),totalValue:parseFloat((p.totalValue+amt).toFixed(2))}));
       setTxs(p=>[{id:p.length+1,type:"deposit",symbol:"USD",amount:amt,price:1,total:amt,created_at:new Date().toISOString().slice(0,10),status:"completed"},...p]);
@@ -670,7 +669,7 @@ export default function App(){
 
           {/* Social login buttons */}
           <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
-            <button className="btn btn-ghost" style={{width:"100%",padding:13,fontSize:13,borderRadius:12}} onClick={doGoogle}>
+           <button className="btn btn-ghost" style={{width:"100%",padding:13,fontSize:13,borderRadius:12}} onClick={()=>oauthNotReady("Google")}>
               <svg width="17" height="17" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
               Continue with Google
             </button>
@@ -695,8 +694,7 @@ export default function App(){
             <input className="inp" placeholder="Email address" type="email" autoComplete="email" style={{marginBottom:10}} value={email} onChange={e=>{setEmail(e.target.value);setLoginErr("");}}/>
             <input className="inp" placeholder="Password" type="password" autoComplete="current-password" style={{marginBottom:16}} value={pw} onChange={e=>{setPw(e.target.value);setLoginErr("");}} onKeyDown={e=>e.key==="Enter"&&doEmail()}/>
             <button className="btn btn-primary btn-lg" style={{width:"100%",borderRadius:12,marginBottom:12}} onClick={doEmail} disabled={loading}>{loading?"Signing in…":"Sign In"}</button>
-            <p style={{textAlign:"center",fontSize:12,color:"var(--text3)"}}>Just exploring? <span style={{color:"var(--indigo2)",cursor:"pointer",fontWeight:700}} onClick={doGoogle}>Try demo →</span></p>
-          </>}
+            
 
           {/* REGISTRATION FORM */}
           {authTab==="register"&&<>
