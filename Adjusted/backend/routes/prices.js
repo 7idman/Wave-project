@@ -6,6 +6,9 @@
  * Uses CoinGecko free API — no key required for basic usage.
  */
 
+
+
+
 const router = require("express").Router();
 const { queryOne, queryAll, execute } = require("../db");
 
@@ -21,6 +24,7 @@ let lastFetch    = 0;
 const CACHE_TTL  = 60_000; // 60 seconds
 
 // ── Fetch live prices from CoinGecko ─────────────────────────────────────────
+
 async function fetchLivePrices() {
   const ids = Object.values(COIN_IDS).join(",");
   const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`;
@@ -38,6 +42,33 @@ async function fetchLivePrices() {
     }
   }
   lastFetch = Date.now();
+}
+let lastFetch = 0;
+let isFetching = false;          // ← ADD THIS
+const CACHE_TTL = 60_000;
+
+async function fetchLivePrices() {
+  if (isFetching) return;        // ← ADD THIS — don't double-fetch
+  isFetching = true;             // ← ADD THIS
+  try {
+    const ids = Object.values(COIN_IDS).join(",");
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`;
+    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    if (!res.ok) throw new Error(`CoinGecko error: ${res.status}`);
+    const data = await res.json();
+    for (const [sym, id] of Object.entries(COIN_IDS)) {
+      const entry = data[id];
+      if (entry) {
+        await execute(
+          "UPDATE price_cache SET price = ?, change_24h = ?, updated_at = datetime('now') WHERE symbol = ?",
+          [entry.usd, entry.usd_24h_change ?? 0, sym]
+        );
+      }
+    }
+    lastFetch = Date.now();
+  } finally {
+    isFetching = false;          // ← ADD THIS — always release the lock
+  }
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────

@@ -14,6 +14,15 @@
  */
 
 require("dotenv").config();
+const rateLimit = require("express-rate-limit");
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,                   // max 10 attempts per IP per 15 min
+  message: { error: "Too many attempts, please try again later." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 const express   = require("express");
 const cors      = require("cors");
@@ -64,7 +73,9 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 // ── Routes ────────────────────────────────────────────────────────────────────
-app.use("/api/auth",         authRoutes);
+app.use("/api/auth/login",    authLimiter, authRoutes);
+app.use("/api/auth/register", authLimiter, authRoutes);
+app.use("/api/auth",          authRoutes);
 app.use("/api/prices",       priceRoutes);
 app.use("/api/trades",       authenticate, tradeRoutes);
 app.use("/api/portfolio",    authenticate, portfolioRoutes);
