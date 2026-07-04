@@ -12,7 +12,7 @@ require("dotenv").config();
 const express        = require("express");
 const cors           = require("cors");
 const session        = require("express-session");
-const SQLiteStore    = require("connect-sqlite3")(session);
+const MemoryStore    = require("memorystore")(session);
 const passport       = require("passport");
 const rateLimit      = require("express-rate-limit");
 const { initSchema } = require("./db");
@@ -27,12 +27,13 @@ const txRoutes        = require("./routes/transactions");
 const app  = express();
 const PORT = process.env.PORT || 4000;
 
-// ── Rate limiter — applied directly to auth routes ────────────────────────────
+// ── Rate limiter ──────────────────────────────────────────────────────────────
 // Concept: limits each IP to 10 login/register attempts per 15 minutes.
-// Prevents brute-force password attacks on a financial platform.
+// Only applied to /login and /register — NOT to /me or other auth routes.
+// This prevents brute-force password attacks without locking out normal users.
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
+  windowMs: 15 * 60 * 1000, // 15 minute window
+  max: 10,                   // max 10 attempts per IP per window
   message: { error: "Too many attempts, please try again later." },
   standardHeaders: true,
   legacyHeaders: false,
@@ -53,15 +54,18 @@ app.use(cors({
   credentials: true,
 }));
 
-// ── Body parser — 10mb for base64 avatar uploads ──────────────────────────────
+// ── Body parser ───────────────────────────────────────────────────────────────
 app.use(express.json({ limit: "10mb" }));
 
-// ── Session + Passport ────────────────────────────────────────────────────────
-// Concept: connect-sqlite3 stores sessions in a file on disk instead of RAM.
-// This prevents the MemoryStore memory leak where sessions pile up forever
-// and eventually crash the server when it runs out of RAM.
+// ── Session ───────────────────────────────────────────────────────────────────
+// Concept: memorystore keeps sessions in RAM like the default MemoryStore,
+// but automatically deletes expired sessions every hour via a cleanup timer.
+// This prevents the memory leak where sessions pile up forever and eventually
+// crash the server. No native C++ compilation needed — works on any OS.
 app.use(session({
-  store: new SQLiteStore({ db: "sessions.db", dir: "/tmp" }),
+  store: new MemoryStore({
+    checkPeriod: 60 * 60 * 1000, // clean up expired sessions every 1 hour
+  }),
   secret:            process.env.SESSION_SECRET || "wave_session_secret",
   resave:            false,
   saveUninitialized: false,
@@ -75,23 +79,26 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 // ── Routes ────────────────────────────────────────────────────────────────────
-// Concept: each route is registered ONCE only. The rate limiter is passed
-// as middleware directly to the specific routes that need it, not by
-// registering the same router multiple times (which caused double-handling).
-app.use("/api/auth",         authLimiter, authRoutes);
-app.use("/api/prices",       priceRoutes);
-app.use("/api/trades",       authenticate, tradeRoutes);
-app.use("/api/portfolio",    authenticate, portfolioRoutes);
-app.use("/api/transactions", authenticate, txRoutes);
+// Concept: rate limiter is applied ONLY to login and register, not to all
+// auth routes. /api/auth/me (called on every page load to verify the user
+// is still logged in) is deliberately excluded so normal browsing never
+// triggers the lockout.
+app.use("/api/auth/login",    authLimiter);
+app.use("/api/auth/register", authLimiter);
+app.use("/api/auth",          authRoutes);
+app.use("/api/prices",        priceRoutes);
+app.use("/api/trades",        authenticate, tradeRoutes);
+app.use("/api/portfolio",     authenticate, portfolioRoutes);
+app.use("/api/transactions",  authenticate, txRoutes);
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/health", (_, res) => res.json({ status: "ok", time: new Date().toISOString() }));
 
 // ── JSON error handler ────────────────────────────────────────────────────────
-// Concept: this MUST be registered last, after all routes. Express identifies
-// error handlers by their 4 arguments (err, req, res, next). Any route that
-// calls next(err) or throws will land here, returning clean JSON instead of
-// the default HTML error page that confuses the frontend.
+// Concept: this MUST be the last thing registered. Express identifies error
+// handlers by their 4 arguments (err, req, res, next). Any unhandled error
+// in any route lands here and returns clean JSON instead of an HTML page —
+// which was causing "Unexpected token < is not valid JSON" in the frontend.
 app.use((err, req, res, next) => {
   console.error(err);
   res.status(err.status || 500).json({ error: err.message || "Internal server error" });
