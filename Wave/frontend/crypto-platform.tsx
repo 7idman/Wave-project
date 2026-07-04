@@ -1069,7 +1069,7 @@ export default function App(){
                       <stop offset="95%" stopColor={priceDir[selCoin]?"#10B981":"#EF4444"} stopOpacity={0}/>
                     </linearGradient>
                   </defs>
-                  <XAxis dataKey="t" hide/><YAxis hide domain={["auto","auto"]}/><Tooltip content={<CT/>}/>
+                  <XAxis dataKey="t" hide/><YAxis hide domain={["auto","auto"]}/><Tooltip content={CT}/>
                   <Area type="monotone" dataKey="v" stroke={priceDir[selCoin]?"#10B981":"#EF4444"} strokeWidth={2.5} fill={`url(#ag-${selCoin}-${priceDir[selCoin]?1:0})`} dot={false}/>
                 </AreaChart>
               </ResponsiveContainer>
@@ -1210,7 +1210,7 @@ export default function App(){
                       <stop offset="95%" stopColor={priceDir[tcoin]?"#10B981":"#EF4444"} stopOpacity={0}/>
                     </linearGradient>
                   </defs>
-                  <XAxis dataKey="t" hide/><YAxis hide domain={["auto","auto"]}/><Tooltip content={<CT/>}/>
+                  <XAxis dataKey="t" hide/><YAxis hide domain={["auto","auto"]}/><Tooltip content={CT}/>
                   <Area type="monotone" dataKey="v" stroke={priceDir[tcoin]?"#10B981":"#EF4444"} strokeWidth={2.5} fill={`url(#tg-${tcoin}-${priceDir[tcoin]?1:0})`} dot={false}/>
                 </AreaChart>
               </ResponsiveContainer>
