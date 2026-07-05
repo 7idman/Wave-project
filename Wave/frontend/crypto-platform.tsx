@@ -1,13 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+﻿import { useState, useEffect, useCallback, useRef } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 
-/* ── Fonts ── */
+/* â”€â”€ Fonts â”€â”€ */
 const _fl = document.createElement("link");
 _fl.rel = "stylesheet";
 _fl.href = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800;900&display=swap";
 document.head.appendChild(_fl);
 
-/* ── Types ── */
+/* â”€â”€ Types â”€â”€ */
 interface CoinMeta    { name:string; color:string; symbol:string; }
 interface Price       { price:number; change24h:number; }
 interface Holding     { symbol:string; amount:number; price:number; change24h:number; value:number; }
@@ -17,16 +17,16 @@ interface User        { name:string; email:string; initials:string; phone?:strin
 interface ChartPt     { t:number; v:number; }
 interface AppSettings { twoFA:boolean; notifications:boolean; currency:string; theme:string; language:string; }
 
-/* ── Language translations ── */
+/* â”€â”€ Language translations â”€â”€ */
 const LANG:Record<string,Record<string,string>>={
-  English:{dashboard:"Dashboard",trade:"Trade",portfolio:"Portfolio",history:"Transaction History",settings:"Settings",privacy:"Privacy Policy",home:"Home",totalBalance:"Total Balance",portfolioValue:"Portfolio Value",cashBalance:"Cash Balance",available:"Available",invested:"Invested",liveMarkets:"Live Markets",myHoldings:"My Holdings",viewAll:"View all →",asset:"Asset",amount:"Amount",marketPrice:"Market Price",fee:"Fee",totalCost:"Total Cost",youReceive:"You Receive",buy:"Buy",sell:"Sell",deposit:"Deposit",withdraw:"Withdraw",processing:"Processing…",availableCash:"Available cash",balance:"Balance",paymentMethod:"Payment Method",withdrawTo:"Withdraw To",signOut:"Sign Out",editProfile:"Edit Profile",changePassword:"Change Password",security:"Security",preferences:"Preferences",kyc:"KYC Verification",account:"Account",morning:"morning",afternoon:"afternoon",evening:"evening"},
-  French:{dashboard:"Tableau de bord",trade:"Trader",portfolio:"Portefeuille",history:"Historique",settings:"Paramètres",privacy:"Politique de confidentialité",home:"Accueil",totalBalance:"Solde total",portfolioValue:"Valeur du portefeuille",cashBalance:"Solde en espèces",available:"Disponible",invested:"Investi",liveMarkets:"Marchés en direct",myHoldings:"Mes actifs",viewAll:"Voir tout →",asset:"Actif",amount:"Montant",marketPrice:"Prix du marché",fee:"Frais",totalCost:"Coût total",youReceive:"Vous recevez",buy:"Acheter",sell:"Vendre",deposit:"Dépôt",withdraw:"Retrait",processing:"Traitement…",availableCash:"Espèces disponibles",balance:"Solde",paymentMethod:"Mode de paiement",withdrawTo:"Retirer vers",signOut:"Déconnexion",editProfile:"Modifier le profil",changePassword:"Changer le mot de passe",security:"Sécurité",preferences:"Préférences",kyc:"Vérification KYC",account:"Compte",morning:"matin",afternoon:"après-midi",evening:"soir"},
-  Spanish:{dashboard:"Panel",trade:"Operar",portfolio:"Cartera",history:"Historial",settings:"Configuración",privacy:"Política de privacidad",home:"Inicio",totalBalance:"Saldo total",portfolioValue:"Valor del portafolio",cashBalance:"Saldo en efectivo",available:"Disponible",invested:"Invertido",liveMarkets:"Mercados en vivo",myHoldings:"Mis activos",viewAll:"Ver todo →",asset:"Activo",amount:"Monto",marketPrice:"Precio de mercado",fee:"Tarifa",totalCost:"Costo total",youReceive:"Recibes",buy:"Comprar",sell:"Vender",deposit:"Depositar",withdraw:"Retirar",processing:"Procesando…",availableCash:"Efectivo disponible",balance:"Saldo",paymentMethod:"Método de pago",withdrawTo:"Retirar a",signOut:"Cerrar sesión",editProfile:"Editar perfil",changePassword:"Cambiar contraseña",security:"Seguridad",preferences:"Preferencias",kyc:"Verificación KYC",account:"Cuenta",morning:"mañana",afternoon:"tarde",evening:"noche"},
-  Portuguese:{dashboard:"Painel",trade:"Negociar",portfolio:"Carteira",history:"Histórico",settings:"Configurações",privacy:"Política de privacidade",home:"Início",totalBalance:"Saldo total",portfolioValue:"Valor do portfólio",cashBalance:"Saldo em dinheiro",available:"Disponível",invested:"Investido",liveMarkets:"Mercados ao vivo",myHoldings:"Meus ativos",viewAll:"Ver tudo →",asset:"Ativo",amount:"Valor",marketPrice:"Preço de mercado",fee:"Taxa",totalCost:"Custo total",youReceive:"Você recebe",buy:"Comprar",sell:"Vender",deposit:"Depositar",withdraw:"Sacar",processing:"Processando…",availableCash:"Dinheiro disponível",balance:"Saldo",paymentMethod:"Método de pagamento",withdrawTo:"Sacar para",signOut:"Sair",editProfile:"Editar perfil",changePassword:"Alterar senha",security:"Segurança",preferences:"Preferências",kyc:"Verificação KYC",account:"Conta",morning:"manhã",afternoon:"tarde",evening:"noite"},
+  English:{dashboard:"Dashboard",trade:"Trade",portfolio:"Portfolio",history:"Transaction History",settings:"Settings",privacy:"Privacy Policy",home:"Home",totalBalance:"Total Balance",portfolioValue:"Portfolio Value",cashBalance:"Cash Balance",available:"Available",invested:"Invested",liveMarkets:"Live Markets",myHoldings:"My Holdings",viewAll:"View all â†’",asset:"Asset",amount:"Amount",marketPrice:"Market Price",fee:"Fee",totalCost:"Total Cost",youReceive:"You Receive",buy:"Buy",sell:"Sell",deposit:"Deposit",withdraw:"Withdraw",processing:"Processingâ€¦",availableCash:"Available cash",balance:"Balance",paymentMethod:"Payment Method",withdrawTo:"Withdraw To",signOut:"Sign Out",editProfile:"Edit Profile",changePassword:"Change Password",security:"Security",preferences:"Preferences",kyc:"KYC Verification",account:"Account",morning:"morning",afternoon:"afternoon",evening:"evening"},
+  French:{dashboard:"Tableau de bord",trade:"Trader",portfolio:"Portefeuille",history:"Historique",settings:"ParamÃ¨tres",privacy:"Politique de confidentialitÃ©",home:"Accueil",totalBalance:"Solde total",portfolioValue:"Valeur du portefeuille",cashBalance:"Solde en espÃ¨ces",available:"Disponible",invested:"Investi",liveMarkets:"MarchÃ©s en direct",myHoldings:"Mes actifs",viewAll:"Voir tout â†’",asset:"Actif",amount:"Montant",marketPrice:"Prix du marchÃ©",fee:"Frais",totalCost:"CoÃ»t total",youReceive:"Vous recevez",buy:"Acheter",sell:"Vendre",deposit:"DÃ©pÃ´t",withdraw:"Retrait",processing:"Traitementâ€¦",availableCash:"EspÃ¨ces disponibles",balance:"Solde",paymentMethod:"Mode de paiement",withdrawTo:"Retirer vers",signOut:"DÃ©connexion",editProfile:"Modifier le profil",changePassword:"Changer le mot de passe",security:"SÃ©curitÃ©",preferences:"PrÃ©fÃ©rences",kyc:"VÃ©rification KYC",account:"Compte",morning:"matin",afternoon:"aprÃ¨s-midi",evening:"soir"},
+  Spanish:{dashboard:"Panel",trade:"Operar",portfolio:"Cartera",history:"Historial",settings:"ConfiguraciÃ³n",privacy:"PolÃ­tica de privacidad",home:"Inicio",totalBalance:"Saldo total",portfolioValue:"Valor del portafolio",cashBalance:"Saldo en efectivo",available:"Disponible",invested:"Invertido",liveMarkets:"Mercados en vivo",myHoldings:"Mis activos",viewAll:"Ver todo â†’",asset:"Activo",amount:"Monto",marketPrice:"Precio de mercado",fee:"Tarifa",totalCost:"Costo total",youReceive:"Recibes",buy:"Comprar",sell:"Vender",deposit:"Depositar",withdraw:"Retirar",processing:"Procesandoâ€¦",availableCash:"Efectivo disponible",balance:"Saldo",paymentMethod:"MÃ©todo de pago",withdrawTo:"Retirar a",signOut:"Cerrar sesiÃ³n",editProfile:"Editar perfil",changePassword:"Cambiar contraseÃ±a",security:"Seguridad",preferences:"Preferencias",kyc:"VerificaciÃ³n KYC",account:"Cuenta",morning:"maÃ±ana",afternoon:"tarde",evening:"noche"},
+  Portuguese:{dashboard:"Painel",trade:"Negociar",portfolio:"Carteira",history:"HistÃ³rico",settings:"ConfiguraÃ§Ãµes",privacy:"PolÃ­tica de privacidade",home:"InÃ­cio",totalBalance:"Saldo total",portfolioValue:"Valor do portfÃ³lio",cashBalance:"Saldo em dinheiro",available:"DisponÃ­vel",invested:"Investido",liveMarkets:"Mercados ao vivo",myHoldings:"Meus ativos",viewAll:"Ver tudo â†’",asset:"Ativo",amount:"Valor",marketPrice:"PreÃ§o de mercado",fee:"Taxa",totalCost:"Custo total",youReceive:"VocÃª recebe",buy:"Comprar",sell:"Vender",deposit:"Depositar",withdraw:"Sacar",processing:"Processandoâ€¦",availableCash:"Dinheiro disponÃ­vel",balance:"Saldo",paymentMethod:"MÃ©todo de pagamento",withdrawTo:"Sacar para",signOut:"Sair",editProfile:"Editar perfil",changePassword:"Alterar senha",security:"SeguranÃ§a",preferences:"PreferÃªncias",kyc:"VerificaÃ§Ã£o KYC",account:"Conta",morning:"manhÃ£",afternoon:"tarde",evening:"noite"},
 };
 
-/* ── API ── */
-// Uses Vite proxy (/api → http://localhost:4000/api) — no CORS issues
+/* â”€â”€ API â”€â”€ */
+// Uses Vite proxy (/api â†’ http://localhost:4000/api) â€” no CORS issues
 const API_BASE =  import.meta.env.VITE_API_URL || "/api";
 let _access:string|null = null, _refresh:string|null = null;
 const api = {
@@ -49,7 +49,7 @@ const api = {
   patch:(p:string,b:any)=>api.request(p,{method:"PATCH",body:JSON.stringify(b)}),
 };
 
-/* ── Coins ── */
+/* â”€â”€ Coins â”€â”€ */
 const COINS:Record<string,CoinMeta>={
   BTC:{name:"Bitcoin",  color:"#F7931A",symbol:"BTC"},
   ETH:{name:"Ethereum", color:"#627EEA",symbol:"ETH"},
@@ -58,7 +58,7 @@ const COINS:Record<string,CoinMeta>={
   LINK:{name:"Chainlink",color:"#2A5ADA",symbol:"LINK"},
 };
 
-/* ── Chart data per time range ── */
+/* â”€â”€ Chart data per time range â”€â”€ */
 type Range = "1H"|"1D"|"1W"|"1M";
 const RANGE_POINTS:Record<Range,number>={
   "1H":20,"1D":40,"1W":80,"1M":120,
@@ -67,7 +67,7 @@ const RANGE_VOL:Record<Range,number>={
   "1H":.003,"1D":.008,"1W":.018,"1M":.035,
 };
 
-/* ── Fallback data ── */
+/* â”€â”€ Fallback data â”€â”€ */
 const FB_PRICES:Record<string,Price>={BTC:{price:67420.50,change24h:2.34},ETH:{price:3521.80,change24h:-1.12},SOL:{price:178.40,change24h:5.67},ADA:{price:0.612,change24h:-0.45},LINK:{price:18.92,change24h:3.21}};
 const FB_PORT:Portfolio={cashBalance:12450,totalPortfolioValue:18621,totalValue:31071,holdings:[{symbol:"BTC",amount:0.12,price:67420.50,change24h:2.34,value:8090},{symbol:"ETH",amount:1.5,price:3521.80,change24h:-1.12,value:5282},{symbol:"SOL",amount:20,price:178.40,change24h:5.67,value:3568}]};
 const FB_TXS:Tx[]=[{id:1,type:"buy",symbol:"BTC",amount:0.05,price:65200,total:3263,created_at:"2025-03-28",status:"completed"},{id:2,type:"sell",symbol:"ETH",amount:0.8,price:3400,total:2697,created_at:"2025-03-25",status:"completed"},{id:3,type:"buy",symbol:"SOL",amount:10,price:165,total:1651,created_at:"2025-03-20",status:"completed"},{id:4,type:"buy",symbol:"ETH",amount:0.5,price:3510,total:1756,created_at:"2025-03-15",status:"completed"}];
@@ -75,7 +75,7 @@ const FB_TXS:Tx[]=[{id:1,type:"buy",symbol:"BTC",amount:0.05,price:65200,total:3
 const genChart=(base:number,n:number,vol:number):ChartPt[]=>
   Array.from({length:n},(_,i)=>{base*=1+(Math.random()-.49)*vol;return{t:i,v:parseFloat(base.toFixed(2))};});
 
-/* ── Market stats per coin ── */
+/* â”€â”€ Market stats per coin â”€â”€ */
 const COIN_STATS:Record<string,{cap:string;vol:string;supply:string}>={
   BTC:{cap:"$1.32T",vol:"$48.2B",supply:"19.7M"},
   ETH:{cap:"$423B", vol:"$22.1B",supply:"120.2M"},
@@ -84,7 +84,7 @@ const COIN_STATS:Record<string,{cap:string;vol:string;supply:string}>={
   LINK:{cap:"$11B", vol:"$720M", supply:"587M"},
 };
 
-/* ── Coin SVG Icons ── */
+/* â”€â”€ Coin SVG Icons â”€â”€ */
 const CoinIcon=({symbol,size=32}:{symbol:string;size?:number})=>{
   const icons:Record<string,JSX.Element>={
     BTC:<svg width={size} height={size} viewBox="0 0 32 32"><circle cx="16" cy="16" r="16" fill="#F7931A"/><path d="M21.5 14.2c.3-2-1.2-3.1-3.3-3.8l.7-2.7-1.6-.4-.6 2.6-1.3-.3.6-2.6-1.7-.4-.7 2.7-1-.3-2.2-.5-.4 1.7s1.2.3 1.2.3c.7.2.8.6.8.9l-.8 3.4c0 .1.1.1.1.1h-.2l-.9 3.6c-.1.2-.3.5-.8.4 0 0-1.2-.3-1.2-.3l-.8 1.8 2.1.5 1.1.3-.7 2.8 1.7.4.7-2.8 1.3.3-.7 2.8 1.7.4.7-2.8c2.8.5 4.8.3 5.7-2.2.7-2-.1-3.1-1.5-3.8.9-.4 1.7-1 1.9-2.2zm-3.4 4.8c-.5 2-3.9 1-5 .7l.9-3.5c1.1.3 4.6.9 4.1 2.8zm.5-4.8c-.5 1.8-3.3 1-4.2.7l.8-3.2c.9.2 3.8.7 3.4 2.5z" fill="#fff"/></svg>,
@@ -98,7 +98,7 @@ const CoinIcon=({symbol,size=32}:{symbol:string;size?:number})=>{
   return <div style={{width:size,height:size,borderRadius:"50%",background:c?.color||"#333",display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*.35,fontWeight:800,color:"#fff",flexShrink:0}}>{symbol[0]}</div>;
 };
 
-/* ── Wave Logo ── */
+/* â”€â”€ Wave Logo â”€â”€ */
 const WaveLogo=({size=28}:{size?:number})=>(
   <svg width={size} height={size} viewBox="0 0 32 32" fill="none">
     <rect x="7" y="14" width="4" height="11" rx="2" fill="#818CF8" opacity="0.7"/>
@@ -115,7 +115,7 @@ const Toggle=({on,onToggle}:{on:boolean;onToggle:()=>void})=>(
   </button>
 );
 
-/* ── Modal ── */
+/* â”€â”€ Modal â”€â”€ */
 const Modal=({open,onClose,title,children}:{open:boolean;onClose:()=>void;title:string;children:React.ReactNode})=>{
   if(!open) return null;
   return(
@@ -123,7 +123,7 @@ const Modal=({open,onClose,title,children}:{open:boolean;onClose:()=>void;title:
       <div style={{background:"#161822",border:"1px solid rgba(255,255,255,.1)",borderRadius:20,padding:"28px 24px",width:"100%",maxWidth:460,position:"relative",boxShadow:"0 24px 60px rgba(0,0,0,.5)"}} onClick={e=>e.stopPropagation()}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
           <span style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontWeight:800,fontSize:18,color:"#F1F2F8"}}>{title}</span>
-          <button onClick={onClose} style={{width:30,height:30,borderRadius:"50%",background:"rgba(255,255,255,.08)",border:"none",cursor:"pointer",color:"#9496A8",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+          <button onClick={onClose} style={{width:30,height:30,borderRadius:"50%",background:"rgba(255,255,255,.08)",border:"none",cursor:"pointer",color:"#9496A8",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>âœ•</button>
         </div>
         {children}
       </div>
@@ -131,10 +131,10 @@ const Modal=({open,onClose,title,children}:{open:boolean;onClose:()=>void;title:
   );
 };
 
-/* ── CSS ── */
+/* â”€â”€ CSS â”€â”€ */
 const css=`
   :root{--bg:#0F1117;--bg2:#161822;--bg3:#1C1E2E;--surface:rgba(255,255,255,.04);--surface2:rgba(255,255,255,.07);--border:rgba(255,255,255,.08);--border2:rgba(255,255,255,.13);--text:#F1F2F8;--text2:#9496A8;--text3:#5C5E72;--indigo:#6366F1;--indigo2:#818CF8;--green:#10B981;--red:#EF4444;--yellow:#F59E0B;--purple:#8B5CF6;--r:18px;--r2:12px;}
-  /* ── LIGHT THEME ── */
+  /* â”€â”€ LIGHT THEME â”€â”€ */
   .theme-light{--bg:#F0F2FF;--bg2:#FFFFFF;--bg3:#E8ECFF;--surface:rgba(99,102,241,.06);--surface2:rgba(99,102,241,.1);--border:rgba(99,102,241,.15);--border2:rgba(99,102,241,.25);--text:#0F1117;--text2:#3A3C52;--text3:#6B6D85;--indigo:#5558E8;--indigo2:#4F46E5;}
   .theme-light .gcard{background:#FFFFFF;box-shadow:0 2px 12px rgba(99,102,241,.08);}
   .theme-light .stat{background:#FFFFFF;box-shadow:0 2px 12px rgba(99,102,241,.08);}
@@ -219,7 +219,7 @@ const css=`
   .mlogo{font-family:'Plus Jakarta Sans',sans-serif;font-weight:800;font-size:17px;color:var(--text);}
   .mmenu{width:32px;height:32px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);-webkit-tap-highlight-color:transparent;background:none;border:none;padding:0;}
   .mchip{padding:7px 14px;border-radius:100px;background:linear-gradient(135deg,rgba(99,102,241,.2),rgba(139,92,246,.15));border:1px solid rgba(99,102,241,.3);color:var(--indigo2);font-size:11px;font-weight:700;}
-  /* coin + range pills — 2-row grid on mobile so they don't overflow */
+  /* coin + range pills â€” 2-row grid on mobile so they don't overflow */
   .coin-pills{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;}
   .range-pills{display:flex;gap:4px;}
   @media(max-width:640px){
@@ -300,7 +300,7 @@ const css=`
   .dbadge{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:100px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.2);color:#F59E0B;font-size:10px;font-weight:700;}
   .ct-err{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:var(--r2);padding:11px 14px;font-size:13px;color:#EF4444;font-weight:600;margin-bottom:14px;}
   .avatar-ring{width:88px;height:88px;border-radius:50%;border:3px solid var(--indigo2);box-shadow:0 0 0 3px rgba(99,102,241,.2);cursor:pointer;position:relative;overflow:hidden;flex-shrink:0;}
-  .avatar-ring:hover::after{content:'📷';position:absolute;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;font-size:24px;}
+  .avatar-ring:hover::after{content:'ðŸ“·';position:absolute;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;font-size:24px;}
   @media(max-width:900px){.sidebar{width:200px;}.main{margin-left:200px;padding:26px 22px;}.stats{grid-template-columns:repeat(2,1fr);}.crow{grid-template-columns:1fr;}.hgrid{grid-template-columns:repeat(2,1fr);}.tgrid{grid-template-columns:1fr;}.settings-grid{grid-template-columns:1fr;}.pbig{font-size:26px;}.stat-value{font-size:22px;}}
   @media(max-width:640px){.sidebar{transform:translateX(-100%);width:260px;}.sidebar.open{transform:translateX(0);}.overlay.open{display:block;}.bnav{display:flex;}.mtop{display:flex;}.main{margin-left:0;padding:0 14px calc(96px + env(safe-area-inset-bottom,16px));}.topbar{display:none;}.stats{grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px;}.crow{grid-template-columns:1fr;gap:12px;margin-bottom:14px;}.hgrid{grid-template-columns:repeat(2,1fr);gap:10px;}.tgrid{grid-template-columns:1fr;}.settings-grid{grid-template-columns:1fr;}.stat{padding:16px;}.stat-value{font-size:20px;}.gcard{padding:16px;}.hi{padding:14px;}.tcrd{padding:16px;}.pbig{font-size:24px;}.hamt{font-size:18px;}.stitle{font-size:16px;}.txwrap table{display:none;}.txcards{display:flex;}}
   @media(max-width:375px){.stat-value{font-size:18px;}.pbig{font-size:21px;}.hamt{font-size:16px;}.stats,.hgrid{gap:8px;}.bni{font-size:8px;padding:8px 2px 7px;}.bni-icon{font-size:17px;}}
@@ -312,7 +312,7 @@ const css=`
 `;
 const _se=document.createElement("style");_se.textContent=css;document.head.appendChild(_se);
 
-/* ════════════════ APP ════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• APP â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 export default function App(){
   const[user,setUser]         =useState<User|null>(null);
   const[page,setPage]         =useState("dashboard");
@@ -325,7 +325,7 @@ export default function App(){
   const[regDob,setRegDob]     =useState("");
   const[regCountry,setRegCountry]=useState("");
   const[regAgree,setRegAgree] =useState(false);
-  const[showTerms,setShowTerms]=useState<string>(""); // "terms"|"privacy"|"" — inline on login page
+  const[showTerms,setShowTerms]=useState<string>(""); // "terms"|"privacy"|"" â€” inline on login page
   const[prices,setPrices]     =useState<Record<string,Price>>(FB_PRICES);
   const[priceDir,setPriceDir] =useState<Record<string,boolean>>(Object.fromEntries(Object.keys(FB_PRICES).map(s=>[s,(FB_PRICES[s].change24h||0)>=0])));
   const[port,setPort]         =useState<Portfolio>(FB_PORT);
@@ -411,7 +411,7 @@ export default function App(){
     return()=>clearInterval(iv);
   },[chartRange]);
 
-  // Trade chart is separate — regens on tradeRange change
+  // Trade chart is separate â€” regens on tradeRange change
   const[tradeCharts,setTradeCharts]=useState<Record<string,ChartPt[]>>({});
   useEffect(()=>{
     const d:Record<string,ChartPt[]>={};
@@ -421,13 +421,13 @@ export default function App(){
 
   useEffect(()=>{document.body.style.overflow=sbOpen?"hidden":"";return()=>{document.body.style.overflow="";};},[sbOpen]);
 
-  const toast2=(msg:string,icon="✓",ok=true)=>{setToast({msg,icon,ok});setTimeout(()=>setToast(null),3500);};
+  const toast2=(msg:string,icon="âœ“",ok=true)=>{setToast({msg,icon,ok});setTimeout(()=>setToast(null),3500);};
 
   const loadData=useCallback(async()=>{
-    // Each call is independent — one failing won't block the others
+    // Each call is independent â€” one failing won't block the others
     try{
       const p=await api.get("/prices");
-      // prices returns {BTC:{price,change24h,...}} — map to our format
+      // prices returns {BTC:{price,change24h,...}} â€” map to our format
       const mapped:Record<string,Price>={};
       Object.entries(p).forEach(([sym,v]:any)=>{
         mapped[sym]={price:v.price||0,change24h:v.change24h||0};
@@ -454,7 +454,7 @@ export default function App(){
 
   /* Auth */
   const oauthNotReady=(provider:string)=>{
-  toast2(`${provider} sign-in isn't connected yet — this will work automatically once ${provider} OAuth is configured on the backend.`,"⚠",false);
+  toast2(`${provider} sign-in isn't connected yet â€” this will work automatically once ${provider} OAuth is configured on the backend.`,"âš ",false);
 };
   const doEmail=async()=>{
     if(!email)return setLoginErr("Please enter your email.");
@@ -499,7 +499,7 @@ export default function App(){
 
   /* Save profile */
   const doSaveProfile=async()=>{
-    if(!editName.trim()&&!avatarPreview)return toast2("Nothing to update","⚠",false);
+    if(!editName.trim()&&!avatarPreview)return toast2("Nothing to update","âš ",false);
     setLoading(true);
     try{
      const d=await api.patch("/auth/profile",{name:editName||undefined,avatar_url:avatarPreview||undefined});
@@ -507,29 +507,29 @@ export default function App(){
       const nm=u.name||editName||user?.name||"User";
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
  setUser(p=>({...p!,name:nm,initials,avatarUrl:u.avatarUrl||p?.avatarUrl}));
-      setEditOpen(false);toast2("Profile updated","✓");
-    }catch(e:any){toast2(e.message,"⚠",false);}
+      setEditOpen(false);toast2("Profile updated","âœ“");
+    }catch(e:any){toast2(e.message,"âš ",false);}
     finally{setLoading(false);}
   };
 
   /* Add phone */
   const doAddPhone=async()=>{
-    if(!phoneInput.trim())return toast2("Enter a phone number","⚠",false);
+    if(!phoneInput.trim())return toast2("Enter a phone number","âš ",false);
     setLoading(true);
     try{
       await api.patch("/auth/profile",{phone:phoneInput});
       setUser(p=>({...p!,phone:phoneInput}));
       setKycStatus(p=>({...p,phone:"verified"}));
       setPhoneOpen(false);toast2("Phone number added",);
-    }catch(e:any){toast2(e.message,"⚠",false);}
+    }catch(e:any){toast2(e.message,"âš ",false);}
     finally{setLoading(false);}
   };
 
   /* Submit ID */
   const doSubmitID=async()=>{
-    if(!idFile)return toast2("Please select a file","⚠",false);
+    if(!idFile)return toast2("Please select a file","âš ",false);
     setLoading(true);
-    // Simulate upload — in prod you'd upload to S3 and send URL to backend
+    // Simulate upload â€” in prod you'd upload to S3 and send URL to backend
     await new Promise(r=>setTimeout(r,1200));
     setKycStatus(p=>({...p,id:"review"}));
     setIdOpen(false);toast2("ID submitted for review",);
@@ -538,7 +538,7 @@ export default function App(){
 
   /* Submit address */
   const doSubmitAddr=async()=>{
-    if(!addrFile)return toast2("Please select a file","⚠",false);
+    if(!addrFile)return toast2("Please select a file","âš ",false);
     setLoading(true);
     await new Promise(r=>setTimeout(r,1200));
     setKycStatus(p=>({...p,address:"review"}));
@@ -548,15 +548,15 @@ export default function App(){
 
   /* Change password */
   const doChangePassword=async()=>{
-    if(!pwCurrent||!pwNew)return toast2("Fill in all fields","⚠",false);
-    if(pwNew!==pwConfirm)return toast2("Passwords don't match","⚠",false);
-    if(pwNew.length<8)return toast2("Password must be at least 8 characters","⚠",false);
+    if(!pwCurrent||!pwNew)return toast2("Fill in all fields","âš ",false);
+    if(pwNew!==pwConfirm)return toast2("Passwords don't match","âš ",false);
+    if(pwNew.length<8)return toast2("Password must be at least 8 characters","âš ",false);
     setLoading(true);
     try{
       await api.patch("/auth/password",{currentPassword:pwCurrent,newPassword:pwNew});
       setPwOpen(false);setPwCurrent("");setPwNew("");setPwConfirm("");
       toast2("Password changed",);
-    }catch(e:any){toast2(e.message,"⚠",false);}
+    }catch(e:any){toast2(e.message,"âš ",false);}
     finally{setLoading(false);}
   };
 
@@ -564,7 +564,7 @@ export default function App(){
   const onAvatarPick=(e:React.ChangeEvent<HTMLInputElement>)=>{
     const f=e.target.files?.[0];
     if(!f) return;
-    if(f.size>5*1024*1024)return toast2("Image must be under 5MB","⚠",false);
+    if(f.size>5*1024*1024)return toast2("Image must be under 5MB","âš ",false);
     const r=new FileReader();
     r.onload=ev=>setAvatarPreview(ev.target?.result as string);
     r.readAsDataURL(f);
@@ -572,46 +572,68 @@ export default function App(){
 
   /* Trade */
   const doTrade=async()=>{
-  const amt=parseFloat(tamt);
-  if(!amt||amt<=0)return toast2("Enter a valid amount","⚠",false);
-  setLoading(true);
-  try{
-    const d=await api.post("/trades",{type:ttype,symbol:tcoin,amount:amt});
-    toast2(d.message,ttype==="buy"?"🟢":"🔴");
-    setTamt("");
-    await loadData();
-  }catch(e:any){toast2(e.message,"⚠",false);}
-  finally{setLoading(false);}
-};
-    if(ttype==="deposit"){
-      setPort(p=>({...p,cashBalance:parseFloat((p.cashBalance+amt).toFixed(2)),totalValue:parseFloat((p.totalValue+amt).toFixed(2))}));
-      setTxs(p=>[{id:p.length+1,type:"deposit",symbol:"USD",amount:amt,price:1,total:amt,created_at:new Date().toISOString().slice(0,10),status:"completed"},...p]);
-      toast2(`Deposited $${amt.toLocaleString()}`,"");setTamt("");setLoading(false);return;
+    const amt=parseFloat(tamt);
+    if(!amt || amt <= 0) return toast2("Enter a valid amount", "⚠", false);
+    setLoading(true);
+
+    try {
+      if (ttype === "deposit") {
+        setPort((p) => ({...p, cashBalance: parseFloat((p.cashBalance + amt).toFixed(2)), totalValue: parseFloat((p.totalValue + amt).toFixed(2))}));
+        setTxs((p) => [{id: p.length + 1, type: "deposit", symbol: "USD", amount: amt, price: 1, total: amt, created_at: new Date().toISOString().slice(0, 10), status: "completed"}, ...p]);
+        toast2(`Deposited $${amt.toLocaleString()}`, "");
+        setTamt("");
+        return;
+      }
+
+      if (ttype === "withdraw") {
+        if (amt > port.cashBalance) {
+          setLoading(false);
+          return toast2("Insufficient balance", "⚠", false);
+        }
+        setPort((p) => ({...p, cashBalance: parseFloat((p.cashBalance - amt).toFixed(2)), totalValue: parseFloat((p.totalValue - amt).toFixed(2))}));
+        setTxs((p) => [{id: p.length + 1, type: "withdraw", symbol: "USD", amount: amt, price: 1, total: amt, created_at: new Date().toISOString().slice(0, 10), status: "completed"}, ...p]);
+        toast2(`Withdrawn $${amt.toLocaleString()}`);
+        setTamt("");
+        return;
+      }
+
+      const cp = prices[tcoin];
+      const price = cp?.price || 0;
+      const sub = amt * price;
+      const fee = sub * 0.001;
+      const total = sub + fee;
+
+      if (ttype === "buy" && total > port.cashBalance) {
+        setLoading(false);
+        return toast2("Insufficient balance", "⚠", false);
+      }
+
+      const eh = port.holdings.find((h) => h.symbol === tcoin);
+      if (ttype === "sell" && (!eh || eh.amount < amt)) {
+        setLoading(false);
+        return toast2("Insufficient holdings", "⚠", false);
+      }
+
+      setPort((p) => {
+        const nc = ttype === "buy" ? p.cashBalance - total : p.cashBalance + (sub - fee);
+        let nh = p.holdings.map((h) => h.symbol === tcoin ? { ...h, amount: parseFloat((ttype === "buy" ? h.amount + amt : h.amount - amt).toFixed(6)), value: (ttype === "buy" ? h.amount + amt : h.amount - amt) * price } : h);
+        if (ttype === "buy" && !eh) nh = [...nh, {symbol: tcoin, amount: amt, price, change24h: cp?.change24h || 0, value: sub}];
+        const tvp = nh.reduce((s, h) => s + h.value, 0);
+        return { ...p, cashBalance: parseFloat(nc.toFixed(2)), holdings: nh, totalPortfolioValue: tvp, totalValue: nc + tvp };
+      });
+
+      setTxs((prev) => [{id: prev.length + 1, type: ttype, symbol: tcoin, amount: amt, price, total: parseFloat(total.toFixed(2)), created_at: new Date().toISOString().slice(0, 10), status: "completed"}, ...prev]);
+      toast2(`${ttype === "buy" ? "Bought" : "Sold"} ${amt} ${tcoin}`, ttype === "buy" ? "🟢" : "🔴");
+      setTamt("");
+    } catch (e: any) {
+      toast2(e.message, "⚠", false);
+    } finally {
+      setLoading(false);
     }
-    if(ttype==="withdraw"){
-      if(amt>port.cashBalance){setLoading(false);return toast2("Insufficient balance","⚠",false);}
-      setPort(p=>({...p,cashBalance:parseFloat((p.cashBalance-amt).toFixed(2)),totalValue:parseFloat((p.totalValue-amt).toFixed(2))}));
-      setTxs(p=>[{id:p.length+1,type:"withdraw",symbol:"USD",amount:amt,price:1,total:amt,created_at:new Date().toISOString().slice(0,10),status:"completed"},...p]);
-      toast2(`Withdrawn $${amt.toLocaleString()}`,);setTamt("");setLoading(false);return;
-    }
-    const cp=prices[tcoin];const price=cp?.price||0;const sub=amt*price;const fee=sub*.001;const total=sub+fee;
-    if(ttype==="buy"&&total>port.cashBalance){setLoading(false);return toast2("Insufficient balance","⚠",false);}
-    const eh=port.holdings.find(h=>h.symbol===tcoin);
-    if(ttype==="sell"&&(!eh||eh.amount<amt)){setLoading(false);return toast2("Insufficient holdings","⚠",false);}
-    setPort(p=>{
-      const nc=ttype==="buy"?p.cashBalance-total:p.cashBalance+(sub-fee);
-      let nh=p.holdings.map(h=>h.symbol===tcoin?{...h,amount:parseFloat((ttype==="buy"?h.amount+amt:h.amount-amt).toFixed(6)),value:(ttype==="buy"?h.amount+amt:h.amount-amt)*price}:h);
-      if(ttype==="buy"&&!eh)nh=[...nh,{symbol:tcoin,amount:amt,price,change24h:cp?.change24h||0,value:sub}];
-      const tvp=nh.reduce((s,h)=>s+h.value,0);
-      return{...p,cashBalance:parseFloat(nc.toFixed(2)),holdings:nh,totalPortfolioValue:tvp,totalValue:nc+tvp};
-    });
-    setTxs(prev=>[{id:prev.length+1,type:ttype,symbol:tcoin,amount:amt,price,total:parseFloat(total.toFixed(2)),created_at:new Date().toISOString().slice(0,10),status:"completed"},...prev]);
-    toast2(`${ttype==="buy"?"Bought":"Sold"} ${amt} ${tcoin}`,ttype==="buy"?"🟢":"🔴");
-    setTamt("");setLoading(false);
   };
 
   /* Currency symbol helper */
-  const CURRENCY_SYMBOLS:Record<string,string>={USD:"$",EUR:"€",GBP:"£",NGN:"₦",BTC:"₿"};
+  const CURRENCY_SYMBOLS:Record<string,string>={USD:"$",EUR:"â‚¬",GBP:"Â£",NGN:"â‚¦",BTC:"â‚¿"};
   const CURRENCY_RATES:Record<string,number>={USD:1,EUR:0.92,GBP:0.79,NGN:1580,BTC:0.0000148};
   const cur=(usd:number)=>{
     const sym=CURRENCY_SYMBOLS[appSettings.currency]||"$";
@@ -628,7 +650,7 @@ export default function App(){
   const tsub=tamt&&tci?(parseFloat(tamt)*tci.price).toFixed(2):"0.00";
   const tfee=tamt&&tci?(parseFloat(tamt)*tci.price*.001).toFixed(2):"0.00";
   const ttot=(parseFloat(tsub)+parseFloat(tfee)).toFixed(2);
-  const NAV=[{id:"dashboard",icon:"⬡",label:"Dashboard",short:"Home"},{id:"trade",icon:"⇄",label:"Trade",short:"Trade"},{id:"portfolio",icon:"◈",label:"Portfolio",short:"Portfolio"},{id:"history",icon:"⊞",label:"History",short:"History"}];
+  const NAV=[{id:"dashboard",icon:"â¬¡",label:"Dashboard",short:"Home"},{id:"trade",icon:"â‡„",label:"Trade",short:"Trade"},{id:"portfolio",icon:"â—ˆ",label:"Portfolio",short:"Portfolio"},{id:"history",icon:"âŠž",label:"History",short:"History"}];
   const LABELS:Record<string,string>={dashboard:t("dashboard"),trade:t("trade"),portfolio:t("portfolio"),history:t("history"),settings:t("settings"),privacy:t("privacy"),notifications:"Notifications"};
   const nav=(id:string)=>{setPage(id);setSbOpen(false);};
   const pieData=port.holdings.filter(h=>h.amount>0).map(h=>({name:h.symbol,value:h.value,color:COINS[h.symbol]?.color||"#ccc"}));
@@ -640,211 +662,158 @@ export default function App(){
   );
 
   const kycLabel=(status:string)=>{
-    if(status==="verified") return <span className="badge badge-green">✓ Verified</span>;
-    if(status==="review")   return <span className="badge badge-blue">⏳ In Review</span>;
+    if(status==="verified") return <span className="badge badge-green">âœ“ Verified</span>;
+    if(status==="review")   return <span className="badge badge-blue">â³ In Review</span>;
     return null;
   };
 
-  /* ═══════════ LOGIN ═══════════ */
-  if(!user) return(
-    <div className="app" style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:20,position:"relative",overflow:"hidden"}}>
-      <div style={{position:"fixed",top:-150,left:-100,width:500,height:500,borderRadius:"50%",background:"radial-gradient(circle,rgba(99,102,241,.15),transparent 70%)",pointerEvents:"none"}}/>
-      <div style={{position:"fixed",bottom:-100,right:-80,width:400,height:400,borderRadius:"50%",background:"radial-gradient(circle,rgba(139,92,246,.12),transparent 70%)",pointerEvents:"none"}}/>
-      <div style={{position:"relative",zIndex:1,width:"100%",maxWidth:420}}>
-        <div style={{textAlign:"center",marginBottom:28}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:10,marginBottom:12}}><WaveLogo size={38}/><span style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontWeight:800,fontSize:28,color:"var(--text)"}}>Wave</span></div>
-          <p style={{color:"var(--text3)",fontSize:14,fontWeight:500}}>Professional crypto investing platform</p>
-        </div>
-        <div className="gcard" style={{padding:"28px 24px"}}>
-          {/* Tabs */}
-          <div style={{display:"flex",background:"rgba(255,255,255,.05)",borderRadius:100,padding:4,marginBottom:22,border:"1px solid var(--border)"}}>
-            {(["login","register"] as const).map(t=>(
-              <button key={t} onClick={()=>{setAuthTab(t);setLoginErr("");}} style={{flex:1,padding:"9px",borderRadius:100,border:"none",cursor:"pointer",fontSize:13,fontWeight:700,transition:"all .15s",background:authTab===t?"linear-gradient(135deg,#6366F1,#8B5CF6)":"transparent",color:authTab===t?"#fff":"var(--text3)"}}>
-                {t==="login"?"Sign In":"Create Account"}
-              </button>
-            ))}
+  /* â•â•â•â•â•â•â•â•â•â•â• LOGIN â•â•â•â•â•â•â•â•â•â•â• */
+  if (!user) {
+    return (
+      <div className="app" style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:20,position:"relative",overflow:"hidden"}}>
+        <div style={{position:"fixed",top:-150,left:-100,width:500,height:500,borderRadius:"50%",background:"radial-gradient(circle,rgba(99,102,241,.15),transparent 70%)",pointerEvents:"none"}} />
+        <div style={{position:"fixed",bottom:-100,right:-80,width:400,height:400,borderRadius:"50%",background:"radial-gradient(circle,rgba(139,92,246,.12),transparent 70%)",pointerEvents:"none"}} />
+        <div style={{position:"relative",zIndex:1,width:"100%",maxWidth:420}}>
+          <div style={{textAlign:"center",marginBottom:28}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:10,marginBottom:12}}>
+              <WaveLogo size={38} />
+              <span style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontWeight:800,fontSize:28,color:"var(--text)"}}>Wave</span>
+            </div>
+            <p style={{color:"var(--text3)",fontSize:14,fontWeight:500}}>Professional crypto investing platform</p>
           </div>
 
-          {loginErr&&<div className="ct-err">⚠ {loginErr}</div>}
+          <div className="gcard" style={{padding:"28px 24px"}}>
+            <div style={{display:"flex",background:"rgba(255,255,255,.05)",borderRadius:100,padding:4,marginBottom:22,border:"1px solid var(--border)"}}>
+              {(["login","register"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => { setAuthTab(tab); setLoginErr(""); }}
+                  style={{flex:1,padding:"9px",borderRadius:100,border:"none",cursor:"pointer",fontSize:13,fontWeight:700,transition:"all .15s",background:authTab===tab?"linear-gradient(135deg,#6366F1,#8B5CF6)":"transparent",color:authTab===tab?"#fff":"var(--text3)"}}
+                >
+                  {tab === "login" ? "Sign In" : "Create Account"}
+                </button>
+              ))}
+            </div>
 
-          {/* Social login buttons */}
-          <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
-           <button className="btn btn-ghost" style={{width:"100%",padding:13,fontSize:13,borderRadius:12}} onClick={()=>oauthNotReady("Google")}>
-              <svg width="17" height="17" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-              Continue with Google
-            </button>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              <button className="btn btn-ghost" style={{padding:13,fontSize:13,borderRadius:12}} onClick={()=>{setUser({name:"Alex Morgan",email:"alex@example.com",initials:"AM"});setDemo(true);toast2("Welcome via Apple! Running in demo",);}}>
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.7 9.05 7.4c1.4.07 2.38.81 3.18.84.96-.19 1.95-.93 3.24-.99 1.38-.07 2.61.49 3.41 1.52-3.41 2.08-2.51 6.53.77 7.8-.54 1.47-1.26 2.84-2.6 3.71zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
-                Apple
+            {loginErr && <div className="ct-err">âš  {loginErr}</div>}
+
+            <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+              <button className="btn btn-ghost" style={{width:"100%",padding:13,fontSize:13,borderRadius:12}} onClick={() => oauthNotReady("Google")}>
+                <svg width="17" height="17" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                Continue with Google
               </button>
-              <button className="btn btn-ghost" style={{padding:13,fontSize:13,borderRadius:12}} onClick={()=>{setUser({name:"Alex Morgan",email:"alex@example.com",initials:"AM"});setDemo(true);toast2("Welcome via Facebook! Running in demo",);}}>
-                <svg width="17" height="17" viewBox="0 0 24 24"><path fill="#1877F2" d="M24 12.07C24 5.41 18.63 0 12 0S0 5.41 0 12.07C0 18.1 4.39 23.1 10.13 24v-8.44H7.08v-3.49h3.04V9.41c0-3.02 1.8-4.7 4.54-4.7 1.31 0 2.68.24 2.68.24v2.97h-1.51c-1.49 0-1.95.93-1.95 1.88v2.27h3.32l-.53 3.49h-2.79V24C19.61 23.1 24 18.1 24 12.07z"/></svg>
-                Facebook
-              </button>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                <button className="btn btn-ghost" style={{padding:13,fontSize:13,borderRadius:12}} onClick={() => { setUser({name:"Alex Morgan",email:"alex@example.com",initials:"AM"}); setDemo(true); toast2("Welcome via Apple! Running in demo"); }}>
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.7 9.05 7.4c1.4.07 2.38.81 3.18.84.96-.19 1.95-.93 3.24-.99 1.38-.07 2.61.49 3.41 1.52-3.41 2.08-2.51 6.53.77 7.8-.54 1.47-1.26 2.84-2.6 3.71zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
+                  Apple
+                </button>
+                <button className="btn btn-ghost" style={{padding:13,fontSize:13,borderRadius:12}} onClick={() => { setUser({name:"Alex Morgan",email:"alex@example.com",initials:"AM"}); setDemo(true); toast2("Welcome via Facebook! Running in demo"); }}>
+                  <svg width="17" height="17" viewBox="0 0 24 24"><path fill="#1877F2" d="M24 12.07C24 5.41 18.63 0 12 0S0 5.41 0 12.07C0 18.1 4.39 23.1 10.13 24v-8.44H7.08v-3.49h3.04V9.41c0-3.02 1.8-4.7 4.54-4.7 1.31 0 2.68.24 2.68.24v2.97h-1.51c-1.49 0-1.95.93-1.95 1.88v2.27h3.32l-.53 3.49h-2.79V24C19.61 23.1 24 18.1 24 12.07z"/></svg>
+                  Facebook
+                </button>
+              </div>
             </div>
-          </div>
 
-          <div style={{display:"flex",alignItems:"center",gap:10,margin:"14px 0",color:"var(--text3)",fontSize:11,fontWeight:600}}>
-            <div style={{flex:1,height:1,background:"var(--border)"}}/>or<div style={{flex:1,height:1,background:"var(--border)"}}/>
-          </div>
+            <div style={{display:"flex",alignItems:"center",gap:10,margin:"14px 0",color:"var(--text3)",fontSize:11,fontWeight:600}}>
+              <div style={{flex:1,height:1,background:"var(--border)"}} />
+              or
+              <div style={{flex:1,height:1,background:"var(--border)"}} />
+            </div>
 
-          {/* LOGIN FORM */}
-          {authTab==="login"&&<>
-            <input className="inp" placeholder="Email address" type="email" autoComplete="email" style={{marginBottom:10}} value={email} onChange={e=>{setEmail(e.target.value);setLoginErr("");}}/>
-            <input className="inp" placeholder="Password" type="password" autoComplete="current-password" style={{marginBottom:16}} value={pw} onChange={e=>{setPw(e.target.value);setLoginErr("");}} onKeyDown={e=>e.key==="Enter"&&doEmail()}/>
-            <button className="btn btn-primary btn-lg" style={{width:"100%",borderRadius:12,marginBottom:12}} onClick={doEmail} disabled={loading}>{loading?"Signing in…":"Sign In"}</button>
-            
-
-          {/* REGISTRATION FORM */}
-          {authTab==="register"&&<>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-              <div>
-                <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Full Name *</div>
-                <input className="inp" placeholder="Alex Morgan" type="text" autoComplete="name" value={regName} onChange={e=>{setRegName(e.target.value);setLoginErr("");}}/>
-              </div>
-              <div>
-                <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Email *</div>
-                <input className="inp" placeholder="you@example.com" type="email" autoComplete="email" value={regEmail} onChange={e=>{setRegEmail(e.target.value);setLoginErr("");}}/>
-              </div>
-            </div>
-            <div style={{marginBottom:8}}>
-              <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Date of Birth * (must be 18+)</div>
-              <input className="inp" type="date" value={regDob} max={new Date(Date.now()-18*365.25*24*3600*1000).toISOString().slice(0,10)} onChange={e=>{setRegDob(e.target.value);setLoginErr("");}}/>
-            </div>
-            <div style={{marginBottom:8}}>
-              <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Country *</div>
-              <select className="inp" style={{cursor:"pointer"}} value={regCountry} onChange={e=>{setRegCountry(e.target.value);setLoginErr("");}}>
-                <option value="">Select country…</option>
-                {[
-                  {f:"🇦🇫",n:"Afghanistan"},{f:"🇦🇱",n:"Albania"},{f:"🇩🇿",n:"Algeria"},{f:"🇦🇩",n:"Andorra"},{f:"🇦🇴",n:"Angola"},
-                  {f:"🇦🇬",n:"Antigua and Barbuda"},{f:"🇦🇷",n:"Argentina"},{f:"🇦🇲",n:"Armenia"},{f:"🇦🇺",n:"Australia"},{f:"🇦🇹",n:"Austria"},
-                  {f:"🇦🇿",n:"Azerbaijan"},{f:"🇧🇸",n:"Bahamas"},{f:"🇧🇭",n:"Bahrain"},{f:"🇧🇩",n:"Bangladesh"},{f:"🇧🇧",n:"Barbados"},
-                  {f:"🇧🇾",n:"Belarus"},{f:"🇧🇪",n:"Belgium"},{f:"🇧🇿",n:"Belize"},{f:"🇧🇯",n:"Benin"},{f:"🇧🇹",n:"Bhutan"},
-                  {f:"🇧🇴",n:"Bolivia"},{f:"🇧🇦",n:"Bosnia and Herzegovina"},{f:"🇧🇼",n:"Botswana"},{f:"🇧🇷",n:"Brazil"},{f:"🇧🇳",n:"Brunei"},
-                  {f:"🇧🇬",n:"Bulgaria"},{f:"🇧🇫",n:"Burkina Faso"},{f:"🇧🇮",n:"Burundi"},{f:"🇨🇻",n:"Cabo Verde"},{f:"🇰🇭",n:"Cambodia"},
-                  {f:"🇨🇲",n:"Cameroon"},{f:"🇨🇦",n:"Canada"},{f:"🇨🇫",n:"Central African Republic"},{f:"🇹🇩",n:"Chad"},{f:"🇨🇱",n:"Chile"},
-                  {f:"🇨🇳",n:"China"},{f:"🇨🇴",n:"Colombia"},{f:"🇰🇲",n:"Comoros"},{f:"🇨🇩",n:"Congo (DRC)"},{f:"🇨🇬",n:"Congo (Republic)"},
-                  {f:"🇨🇷",n:"Costa Rica"},{f:"🇭🇷",n:"Croatia"},{f:"🇨🇺",n:"Cuba"},{f:"🇨🇾",n:"Cyprus"},{f:"🇨🇿",n:"Czech Republic"},
-                  {f:"🇩🇰",n:"Denmark"},{f:"🇩🇯",n:"Djibouti"},{f:"🇩🇲",n:"Dominica"},{f:"🇩🇴",n:"Dominican Republic"},{f:"🇪🇨",n:"Ecuador"},
-                  {f:"🇪🇬",n:"Egypt"},{f:"🇸🇻",n:"El Salvador"},{f:"🇬🇶",n:"Equatorial Guinea"},{f:"🇪🇷",n:"Eritrea"},{f:"🇪🇪",n:"Estonia"},
-                  {f:"🇸🇿",n:"Eswatini"},{f:"🇪🇹",n:"Ethiopia"},{f:"🇫🇯",n:"Fiji"},{f:"🇫🇮",n:"Finland"},{f:"🇫🇷",n:"France"},
-                  {f:"🇬🇦",n:"Gabon"},{f:"🇬🇲",n:"Gambia"},{f:"🇬🇪",n:"Georgia"},{f:"🇩🇪",n:"Germany"},{f:"🇬🇭",n:"Ghana"},
-                  {f:"🇬🇷",n:"Greece"},{f:"🇬🇩",n:"Grenada"},{f:"🇬🇹",n:"Guatemala"},{f:"🇬🇳",n:"Guinea"},{f:"🇬🇼",n:"Guinea-Bissau"},
-                  {f:"🇬🇾",n:"Guyana"},{f:"🇭🇹",n:"Haiti"},{f:"🇭🇳",n:"Honduras"},{f:"🇭🇺",n:"Hungary"},{f:"🇮🇸",n:"Iceland"},
-                  {f:"🇮🇳",n:"India"},{f:"🇮🇩",n:"Indonesia"},{f:"🇮🇷",n:"Iran"},{f:"🇮🇶",n:"Iraq"},{f:"🇮🇪",n:"Ireland"},
-                  {f:"🇮🇱",n:"Israel"},{f:"🇮🇹",n:"Italy"},{f:"🇯🇲",n:"Jamaica"},{f:"🇯🇵",n:"Japan"},{f:"🇯🇴",n:"Jordan"},
-                  {f:"🇰🇿",n:"Kazakhstan"},{f:"🇰🇪",n:"Kenya"},{f:"🇰🇮",n:"Kiribati"},{f:"🇰🇵",n:"Korea (North)"},{f:"🇰🇷",n:"Korea (South)"},
-                  {f:"🇽🇰",n:"Kosovo"},{f:"🇰🇼",n:"Kuwait"},{f:"🇰🇬",n:"Kyrgyzstan"},{f:"🇱🇦",n:"Laos"},{f:"🇱🇻",n:"Latvia"},
-                  {f:"🇱🇧",n:"Lebanon"},{f:"🇱🇸",n:"Lesotho"},{f:"🇱🇷",n:"Liberia"},{f:"🇱🇾",n:"Libya"},{f:"🇱🇮",n:"Liechtenstein"},
-                  {f:"🇱🇹",n:"Lithuania"},{f:"🇱🇺",n:"Luxembourg"},{f:"🇲🇬",n:"Madagascar"},{f:"🇲🇼",n:"Malawi"},{f:"🇲🇾",n:"Malaysia"},
-                  {f:"🇲🇻",n:"Maldives"},{f:"🇲🇱",n:"Mali"},{f:"🇲🇹",n:"Malta"},{f:"🇲🇭",n:"Marshall Islands"},{f:"🇲🇷",n:"Mauritania"},
-                  {f:"🇲🇺",n:"Mauritius"},{f:"🇲🇽",n:"Mexico"},{f:"🇫🇲",n:"Micronesia"},{f:"🇲🇩",n:"Moldova"},{f:"🇲🇨",n:"Monaco"},
-                  {f:"🇲🇳",n:"Mongolia"},{f:"🇲🇪",n:"Montenegro"},{f:"🇲🇦",n:"Morocco"},{f:"🇲🇿",n:"Mozambique"},{f:"🇲🇲",n:"Myanmar"},
-                  {f:"🇳🇦",n:"Namibia"},{f:"🇳🇷",n:"Nauru"},{f:"🇳🇵",n:"Nepal"},{f:"🇳🇱",n:"Netherlands"},{f:"🇳🇿",n:"New Zealand"},
-                  {f:"🇳🇮",n:"Nicaragua"},{f:"🇳🇪",n:"Niger"},{f:"🇳🇬",n:"Nigeria"},{f:"🇲🇰",n:"North Macedonia"},{f:"🇳🇴",n:"Norway"},
-                  {f:"🇴🇲",n:"Oman"},{f:"🇵🇰",n:"Pakistan"},{f:"🇵🇼",n:"Palau"},{f:"🇵🇸",n:"Palestine"},{f:"🇵🇦",n:"Panama"},
-                  {f:"🇵🇬",n:"Papua New Guinea"},{f:"🇵🇾",n:"Paraguay"},{f:"🇵🇪",n:"Peru"},{f:"🇵🇭",n:"Philippines"},{f:"🇵🇱",n:"Poland"},
-                  {f:"🇵🇹",n:"Portugal"},{f:"🇶🇦",n:"Qatar"},{f:"🇷🇴",n:"Romania"},{f:"🇷🇺",n:"Russia"},{f:"🇷🇼",n:"Rwanda"},
-                  {f:"🇰🇳",n:"Saint Kitts and Nevis"},{f:"🇱🇨",n:"Saint Lucia"},{f:"🇻🇨",n:"Saint Vincent"},{f:"🇼🇸",n:"Samoa"},{f:"🇸🇲",n:"San Marino"},
-                  {f:"🇸🇹",n:"Sao Tome and Principe"},{f:"🇸🇦",n:"Saudi Arabia"},{f:"🇸🇳",n:"Senegal"},{f:"🇷🇸",n:"Serbia"},{f:"🇸🇨",n:"Seychelles"},
-                  {f:"🇸🇱",n:"Sierra Leone"},{f:"🇸🇬",n:"Singapore"},{f:"🇸🇰",n:"Slovakia"},{f:"🇸🇮",n:"Slovenia"},{f:"🇸🇧",n:"Solomon Islands"},
-                  {f:"🇸🇴",n:"Somalia"},{f:"🇿🇦",n:"South Africa"},{f:"🇸🇸",n:"South Sudan"},{f:"🇪🇸",n:"Spain"},{f:"🇱🇰",n:"Sri Lanka"},
-                  {f:"🇸🇩",n:"Sudan"},{f:"🇸🇷",n:"Suriname"},{f:"🇸🇪",n:"Sweden"},{f:"🇨🇭",n:"Switzerland"},{f:"🇸🇾",n:"Syria"},
-                  {f:"🇹🇼",n:"Taiwan"},{f:"🇹🇯",n:"Tajikistan"},{f:"🇹🇿",n:"Tanzania"},{f:"🇹🇭",n:"Thailand"},{f:"🇹🇱",n:"Timor-Leste"},
-                  {f:"🇹🇬",n:"Togo"},{f:"🇹🇴",n:"Tonga"},{f:"🇹🇹",n:"Trinidad and Tobago"},{f:"🇹🇳",n:"Tunisia"},{f:"🇹🇷",n:"Turkey"},
-                  {f:"🇹🇲",n:"Turkmenistan"},{f:"🇹🇻",n:"Tuvalu"},{f:"🇺🇬",n:"Uganda"},{f:"🇺🇦",n:"Ukraine"},{f:"🇦🇪",n:"United Arab Emirates"},
-                  {f:"🇬🇧",n:"United Kingdom"},{f:"🇺🇸",n:"United States"},{f:"🇺🇾",n:"Uruguay"},{f:"🇺🇿",n:"Uzbekistan"},{f:"🇻🇺",n:"Vanuatu"},
-                  {f:"🇻🇦",n:"Vatican City"},{f:"🇻🇪",n:"Venezuela"},{f:"🇻🇳",n:"Vietnam"},{f:"🇾🇪",n:"Yemen"},{f:"🇿🇲",n:"Zambia"},{f:"🇿🇼",n:"Zimbabwe"},
-                ].map(c=><option key={c.n} value={c.n}>{c.f} {c.n}</option>)}
-              </select>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-              <div>
-                <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Password *</div>
-                <input className="inp" placeholder="Min. 8 characters" type="password" autoComplete="new-password" value={regPw} onChange={e=>{setRegPw(e.target.value);setLoginErr("");}}/>
-              </div>
-              <div>
-                <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Confirm Password *</div>
-                <input className="inp" placeholder="Repeat password" type="password" autoComplete="new-password" value={regPw2} onChange={e=>{setRegPw2(e.target.value);setLoginErr("");}} onKeyDown={e=>e.key==="Enter"&&doRegister()}/>
-              </div>
-            </div>
-            {/* Password strength indicator */}
-            {regPw&&(
-              <div style={{marginBottom:12}}>
-                <div style={{display:"flex",gap:4,marginBottom:4}}>
-                  {[1,2,3,4].map(i=>(
-                    <div key={i} style={{flex:1,height:3,borderRadius:2,background:regPw.length>=(i*2+4)?(i<=1?"var(--red)":i===2?"var(--yellow)":i===3?"#06B6D4":"var(--green)"):"var(--border)"}}/>
-                  ))}
+            {authTab === "login" ? (
+              <>
+                <input className="inp" placeholder="Email address" type="email" autoComplete="email" style={{marginBottom:10}} value={email} onChange={(e) => { setEmail(e.target.value); setLoginErr(""); }} />
+                <input className="inp" placeholder="Password" type="password" autoComplete="current-password" style={{marginBottom:16}} value={pw} onChange={(e) => { setPw(e.target.value); setLoginErr(""); }} onKeyDown={(e) => e.key === "Enter" && doEmail()} />
+                <button className="btn btn-primary btn-lg" style={{width:"100%",borderRadius:12,marginBottom:12}} onClick={doEmail} disabled={loading}>{loading ? "Signing inâ€¦" : "Sign In"}</button>
+              </>
+            ) : (
+              <>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                  <div>
+                    <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Full Name *</div>
+                    <input className="inp" placeholder="Alex Morgan" type="text" autoComplete="name" value={regName} onChange={(e) => { setRegName(e.target.value); setLoginErr(""); }} />
+                  </div>
+                  <div>
+                    <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Email *</div>
+                    <input className="inp" placeholder="you@example.com" type="email" autoComplete="email" value={regEmail} onChange={(e) => { setRegEmail(e.target.value); setLoginErr(""); }} />
+                  </div>
                 </div>
-                <div style={{fontSize:10,color:"var(--text3)"}}>{regPw.length<6?"Too short":regPw.length<8?"Weak":regPw.length<12?"Fair":regPw.length<16?"Good":"Strong"}</div>
-              </div>
+                <div style={{marginBottom:8}}>
+                  <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Date of Birth * (must be 18+)</div>
+                  <input className="inp" type="date" value={regDob} max={new Date(Date.now()-18*365.25*24*3600*1000).toISOString().slice(0,10)} onChange={(e) => { setRegDob(e.target.value); setLoginErr(""); }} />
+                </div>
+                <div style={{marginBottom:8}}>
+                  <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Country *</div>
+                  <select className="inp" style={{cursor:"pointer"}} value={regCountry} onChange={(e) => { setRegCountry(e.target.value); setLoginErr(""); }}>
+                    <option value="">Select countryâ€¦</option>
+                    {[{f:"ðŸ‡ºðŸ‡¸",n:"United States"},{f:"ðŸ‡¬ðŸ‡§",n:"United Kingdom"},{f:"ðŸ‡¨ðŸ‡¦",n:"Canada"},{f:"ðŸ‡¦ðŸ‡º",n:"Australia"},{f:"ðŸ‡©ðŸ‡ª",n:"Germany"},{f:"ðŸ‡«ðŸ‡·",n:"France"},{f:"ðŸ‡³ðŸ‡¬",n:"Nigeria"},{f:"ðŸ‡®ðŸ‡³",n:"India"}].map((country) => (
+                      <option key={country.n} value={country.n}>{country.f} {country.n}</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                  <div>
+                    <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Password *</div>
+                    <input className="inp" placeholder="Min. 8 characters" type="password" autoComplete="new-password" value={regPw} onChange={(e) => { setRegPw(e.target.value); setLoginErr(""); }} />
+                  </div>
+                  <div>
+                    <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Confirm Password *</div>
+                    <input className="inp" placeholder="Repeat password" type="password" autoComplete="new-password" value={regPw2} onChange={(e) => { setRegPw2(e.target.value); setLoginErr(""); }} onKeyDown={(e) => e.key === "Enter" && doRegister()} />
+                  </div>
+                </div>
+                {regPw && (
+                  <div style={{marginBottom:12}}>
+                    <div style={{display:"flex",gap:4,marginBottom:4}}>
+                      {[1,2,3,4].map((step) => (
+                        <div key={step} style={{flex:1,height:3,borderRadius:2,background:regPw.length >= step * 2 + 4 ? (step <= 1 ? "var(--red)" : step === 2 ? "var(--yellow)" : step === 3 ? "#06B6D4" : "var(--green)") : "var(--border)"}} />
+                      ))}
+                    </div>
+                    <div style={{fontSize:10,color:"var(--text3)"}}>{regPw.length < 6 ? "Too short" : regPw.length < 8 ? "Weak" : regPw.length < 12 ? "Fair" : regPw.length < 16 ? "Good" : "Strong"}</div>
+                  </div>
+                )}
+                <label style={{display:"flex",alignItems:"flex-start",gap:10,marginBottom:showTerms ? 8 : 16,cursor:"pointer"}}>
+                  <div onClick={() => setRegAgree(!regAgree)} style={{width:18,height:18,borderRadius:5,border:`2px solid ${regAgree ? "var(--indigo2)" : "var(--border2)"}`,background:regAgree ? "var(--indigo)" : "transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1,transition:"all .15s"}}>
+                    {regAgree && <svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4l3 3 5-6" stroke="white" strokeWidth="1.5" strokeLinecap="round"/></svg>}
+                  </div>
+                  <span style={{fontSize:12,color:"var(--text3)",lineHeight:1.5}}>
+                    I agree to the <span style={{color:"var(--indigo2)",cursor:"pointer",fontWeight:700,textDecoration:"underline"}} onClick={(e) => { e.stopPropagation(); setShowTerms((prev) => prev === "terms" ? "" : "terms"); }}>Terms of Service</span> & <span style={{color:"var(--indigo2)",cursor:"pointer",fontWeight:700,textDecoration:"underline"}} onClick={(e) => { e.stopPropagation(); setShowTerms((prev) => prev === "privacy" ? "" : "privacy"); }}>Privacy Policy</span>
+                  </span>
+                </label>
+                {showTerms && (
+                  <div style={{background:"rgba(99,102,241,.06)",border:"1px solid rgba(99,102,241,.2)",borderRadius:14,marginBottom:14,overflow:"hidden"}}>
+                    <div style={{padding:"14px 16px",maxHeight:260,overflowY:"auto",fontSize:12,color:"var(--text2)",lineHeight:1.75}}>
+                      <div style={{fontWeight:800,color:"var(--text)",marginBottom:10,fontSize:13}}>Terms of Service</div>
+                      <p style={{marginBottom:10}}>Wave Invest is a crypto investment platform. By registering you agree to these Terms.</p>
+                      <div style={{fontWeight:800,color:"var(--text)",marginBottom:10,fontSize:13}}>Privacy Policy</div>
+                      <p style={{marginBottom:10}}>We collect your profile details and use them to operate your account and secure your transactions.</p>
+                    </div>
+                    <div style={{padding:"10px 16px",borderTop:"1px solid rgba(99,102,241,.2)",display:"flex",gap:8}}>
+                      <button onClick={() => setShowTerms("")} className="btn btn-ghost btn-sm" style={{borderRadius:100}}>Close</button>
+                    </div>
+                  </div>
+                )}
+                <button className="btn btn-primary btn-lg" style={{width:"100%",borderRadius:12}} onClick={doRegister} disabled={loading}>{loading ? "Creating accountâ€¦" : "Create Account"}</button>
+              </>
             )}
-            {/* Terms checkbox */}
-            <label style={{display:"flex",alignItems:"flex-start",gap:10,marginBottom:showTerms?8:16,cursor:"pointer"}}>
-              <div onClick={()=>setRegAgree(!regAgree)} style={{width:18,height:18,borderRadius:5,border:`2px solid ${regAgree?"var(--indigo2)":"var(--border2)"}`,background:regAgree?"var(--indigo)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1,transition:"all .15s"}}>
-                {regAgree&&<svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4l3 3 5-6" stroke="white" strokeWidth="1.5" strokeLinecap="round"/></svg>}
-              </div>
-              <span style={{fontSize:12,color:"var(--text3)",lineHeight:1.5}}>
-                I agree to the{" "}
-                <span style={{color:"var(--indigo2)",cursor:"pointer",fontWeight:700,textDecoration:"underline"}}
-                  onClick={e=>{e.stopPropagation();setShowTerms(p=>p==="terms"?"":"terms");}}>
-                  Terms of Service
-                </span>
-                {" "}&amp;{" "}
-                <span style={{color:"var(--indigo2)",cursor:"pointer",fontWeight:700,textDecoration:"underline"}}
-                  onClick={e=>{e.stopPropagation();setShowTerms(p=>p==="privacy"?"":"privacy");}}>
-                  Privacy Policy
-                </span>
-              </span>
-            </label>
 
-            {/* Terms / Privacy panel — opens inline inside the register tab */}
-            {showTerms&&(
-              <div style={{background:"rgba(99,102,241,.06)",border:"1px solid rgba(99,102,241,.2)",borderRadius:14,marginBottom:14,overflow:"hidden"}}>
-                {/* Single combined Terms & Privacy tab */}
-                <div style={{padding:"14px 16px",maxHeight:260,overflowY:"auto",fontSize:12,color:"var(--text2)",lineHeight:1.75}}>
-                  <div style={{fontWeight:800,color:"var(--text)",marginBottom:10,fontSize:13}}>Terms of Service</div>
-                  <div style={{fontWeight:700,color:"var(--text)",marginBottom:4}}>1. Who We Are</div>
-                  <p style={{marginBottom:10}}>Wave Invest is a crypto investment platform. By registering you agree to these Terms.</p>
-                  <div style={{fontWeight:700,color:"var(--text)",marginBottom:4}}>2. Eligibility</div>
-                  <p style={{marginBottom:10}}>You must be 18 or older. By registering you confirm this and that all information you provide is accurate.</p>
-                  <div style={{fontWeight:700,color:"var(--text)",marginBottom:4}}>3. Risk Disclosure</div>
-                  <p style={{marginBottom:10}}>Cryptocurrency is highly volatile. Wave provides no financial advice. Invest only what you can afford to lose.</p>
-                  <div style={{fontWeight:700,color:"var(--text)",marginBottom:4}}>4. Fees</div>
-                  <p style={{marginBottom:10}}>0.1% on trades, 0.5% on withdrawals. All fees shown before confirmation.</p>
-                  <div style={{fontWeight:700,color:"var(--text)",marginBottom:4}}>5. Prohibited Use</div>
-                  <p style={{marginBottom:14}}>No money laundering, fraud, or market manipulation. Violations result in termination and may be reported.</p>
-                  <div style={{fontWeight:800,color:"var(--text)",marginBottom:10,fontSize:13}}>Privacy Policy</div>
-                  <div style={{fontWeight:700,color:"var(--text)",marginBottom:4}}>1. What We Collect</div>
-                  <p style={{marginBottom:10}}>Name, email, date of birth, country, password hash (never plain text), and transaction history.</p>
-                  <div style={{fontWeight:700,color:"var(--text)",marginBottom:4}}>2. How We Use It</div>
-                  <p style={{marginBottom:10}}>To operate your account, comply with KYC/AML, process trades, and send security alerts. We never sell your data.</p>
-                  <div style={{fontWeight:700,color:"var(--text)",marginBottom:4}}>3. Security</div>
-                  <p style={{marginBottom:10}}>Passwords are bcrypt-hashed. Auth uses short-lived JWTs (15 min) + rotating refresh tokens (7 days). All traffic is HTTPS/TLS 1.3.</p>
-                  <div style={{fontWeight:700,color:"var(--text)",marginBottom:4}}>4. Your Rights</div>
-                  <p style={{marginBottom:10}}>Access, correct, or delete your data anytime. Email: privacy@waveinvest.io</p>
-                  <div style={{fontWeight:700,color:"var(--text)",marginBottom:4}}>5. Contact</div>
-                  <p>support@waveinvest.io · privacy@waveinvest.io</p>
-                </div>
-                <div style={{padding:"10px 16px",borderTop:"1px solid rgba(99,102,241,.2)",display:"flex",gap:8}}>
-                  <button onClick={()=>setShowTerms("")} className="btn btn-ghost btn-sm" style={{borderRadius:100}}>Close</button>
-                </div>
-              </div>
-            )}
-            <button className="btn btn-primary btn-lg" style={{width:"100%",borderRadius:12}} onClick={doRegister} disabled={loading}>{loading?"Creating account…":"Create Account"}</button>
-          </>}
-
-          <p style={{textAlign:"center",color:"var(--text3)",fontSize:11,marginTop:14}}>
-            Protected by 256-bit SSL encryption 🔒
-          </p>
+            <p style={{textAlign:"center",color:"var(--text3)",fontSize:11,marginTop:14}}>
+              Protected by 256-bit SSL encryption ðŸ”’
+            </p>
+          </div>
         </div>
+
+        {toast && (
+          <div style={{position:"fixed",bottom:24,right:16,left:16,maxWidth:380,margin:"0 auto",padding:"13px 18px",borderRadius:100,background:toast.ok===false ? "rgba(239,68,68,.25)" : "rgba(16,185,129,.25)",border:`1px solid ${toast.ok===false ? "rgba(239,68,68,.5)" : "rgba(16,185,129,.5)"}`,color:"#fff",fontSize:13,fontWeight:700,zIndex:999,display:"flex",alignItems:"center",gap:9,backdropFilter:"blur(15px)",WebkitBackdropFilter:"blur(15px)"}}>
+            <span>{toast.icon}</span>
+            {toast.msg}
+          </div>
+        )}
       </div>
-      {toast&&<div style={{position:"fixed",bottom:24,right:16,left:16,maxWidth:380,margin:"0 auto",padding:"13px 18px",borderRadius:100,background:toast.ok===false?"rgba(239,68,68,.25)":"rgba(16,185,129,.25)",border:`1px solid ${toast.ok===false?"rgba(239,68,68,.5)":"rgba(16,185,129,.5)"}`,color:"#fff",fontSize:13,fontWeight:700,zIndex:999,display:"flex",alignItems:"center",gap:9,backdropFilter:"blur(15px)",WebkitBackdropFilter:"blur(15px)"}}><span>{toast.icon}</span>{toast.msg}</div>}
-    </div>
-  );
+    );
+  }
 
-  /* ═══════════ APP ═══════════ */
+
+  /* â•â•â•â•â•â•â•â•â•â•â• APP â•â•â•â•â•â•â•â•â•â•â• */
   return(
     <div className={`app ${appSettings.theme==="Light"?"theme-light":""}`}>
       {/* Modals */}
@@ -856,12 +825,12 @@ export default function App(){
               :<span style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontWeight:800,fontSize:24,color:"white"}}>{user?.initials}</span>
             }
             <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,.4)",display:"flex",alignItems:"center",justifyContent:"center",opacity:0,transition:"opacity .15s"}} onMouseEnter={e=>(e.currentTarget.style.opacity="1")} onMouseLeave={e=>(e.currentTarget.style.opacity="0")}>
-              <span style={{fontSize:22}}>📷</span>
+              <span style={{fontSize:22}}>ðŸ“·</span>
             </div>
           </div>
           <div>
             <div style={{fontSize:13,color:"var(--text2)",fontWeight:500,marginBottom:4}}>Click avatar to change photo</div>
-            <div style={{fontSize:11,color:"var(--text3)"}}>JPG, PNG or GIF · Max 5MB</div>
+            <div style={{fontSize:11,color:"var(--text3)"}}>JPG, PNG or GIF Â· Max 5MB</div>
           </div>
           <input ref={avatarInput} type="file" accept="image/*" style={{display:"none"}} onChange={onAvatarPick}/>
         </div>
@@ -875,7 +844,7 @@ export default function App(){
           <div style={{fontSize:11,color:"var(--text3)",marginTop:5}}>Email cannot be changed here</div>
         </div>
         <button className="btn btn-primary" style={{width:"100%",justifyContent:"center"}} onClick={doSaveProfile} disabled={loading}>
-          {loading?"Saving…":"Save Changes"}
+          {loading?"Savingâ€¦":"Save Changes"}
         </button>
       </Modal>
 
@@ -884,31 +853,31 @@ export default function App(){
         <div className="tlab">Phone Number</div>
         <input className="inp" placeholder="+1 (555) 000-0000" type="tel" style={{marginBottom:20}} value={phoneInput} onChange={e=>setPhoneInput(e.target.value)}/>
         <button className="btn btn-primary" style={{width:"100%",justifyContent:"center"}} onClick={doAddPhone} disabled={loading}>
-          {loading?"Sending…":"Send Verification Code"}
+          {loading?"Sendingâ€¦":"Send Verification Code"}
         </button>
       </Modal>
 
       <Modal open={idOpen} onClose={()=>setIdOpen(false)} title="Upload Government ID">
         <div style={{fontSize:13,color:"var(--text3)",marginBottom:16}}>Upload a clear photo of your passport, national ID or driver's license.</div>
         <div onClick={()=>idInput.current?.click()} style={{border:"2px dashed var(--border2)",borderRadius:12,padding:"32px 20px",textAlign:"center",cursor:"pointer",marginBottom:20,transition:"border-color .15s"}} onMouseEnter={e=>(e.currentTarget.style.borderColor="var(--indigo2)")} onMouseLeave={e=>(e.currentTarget.style.borderColor="var(--border2)")}>
-          <div style={{fontSize:32,marginBottom:8}}>🪪</div>
-          {idFile?<div style={{color:"var(--green)",fontWeight:600,fontSize:13}}>✓ {idFile.name}</div>:<div style={{color:"var(--text3)",fontSize:13}}>Click to upload · JPG, PNG or PDF · Max 10MB</div>}
+          <div style={{fontSize:32,marginBottom:8}}>ðŸªª</div>
+          {idFile?<div style={{color:"var(--green)",fontWeight:600,fontSize:13}}>âœ“ {idFile.name}</div>:<div style={{color:"var(--text3)",fontSize:13}}>Click to upload Â· JPG, PNG or PDF Â· Max 10MB</div>}
         </div>
         <input ref={idInput} type="file" accept="image/*,.pdf" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(f)setIdFile(f);}}/>
         <button className="btn btn-primary" style={{width:"100%",justifyContent:"center"}} onClick={doSubmitID} disabled={loading}>
-          {loading?"Uploading…":"Submit for Review"}
+          {loading?"Uploadingâ€¦":"Submit for Review"}
         </button>
       </Modal>
 
       <Modal open={addrOpen} onClose={()=>setAddrOpen(false)} title="Upload Address Proof">
         <div style={{fontSize:13,color:"var(--text3)",marginBottom:16}}>Upload a utility bill, bank statement or council tax letter dated within the last 3 months.</div>
         <div onClick={()=>addrInput.current?.click()} style={{border:"2px dashed var(--border2)",borderRadius:12,padding:"32px 20px",textAlign:"center",cursor:"pointer",marginBottom:20,transition:"border-color .15s"}} onMouseEnter={e=>(e.currentTarget.style.borderColor="var(--indigo2)")} onMouseLeave={e=>(e.currentTarget.style.borderColor="var(--border2)")}>
-          <div style={{fontSize:32,marginBottom:8}}>🏠</div>
-          {addrFile?<div style={{color:"var(--green)",fontWeight:600,fontSize:13}}>✓ {addrFile.name}</div>:<div style={{color:"var(--text3)",fontSize:13}}>Click to upload · JPG, PNG or PDF · Max 10MB</div>}
+          <div style={{fontSize:32,marginBottom:8}}>ðŸ </div>
+          {addrFile?<div style={{color:"var(--green)",fontWeight:600,fontSize:13}}>âœ“ {addrFile.name}</div>:<div style={{color:"var(--text3)",fontSize:13}}>Click to upload Â· JPG, PNG or PDF Â· Max 10MB</div>}
         </div>
         <input ref={addrInput} type="file" accept="image/*,.pdf" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(f)setAddrFile(f);}}/>
         <button className="btn btn-primary" style={{width:"100%",justifyContent:"center"}} onClick={doSubmitAddr} disabled={loading}>
-          {loading?"Uploading…":"Submit for Review"}
+          {loading?"Uploadingâ€¦":"Submit for Review"}
         </button>
       </Modal>
 
@@ -920,15 +889,15 @@ export default function App(){
         <div className="tlab">Confirm New Password</div>
         <input className="inp" type="password" placeholder="Repeat new password" style={{marginBottom:20}} value={pwConfirm} onChange={e=>setPwConfirm(e.target.value)}/>
         <button className="btn btn-primary" style={{width:"100%",justifyContent:"center"}} onClick={doChangePassword} disabled={loading}>
-          {loading?"Updating…":"Update Password"}
+          {loading?"Updatingâ€¦":"Update Password"}
         </button>
       </Modal>
 
-      <Modal open={deleteOpen} onClose={()=>setDeleteOpen(false)} title="⚠ Close Account">
+      <Modal open={deleteOpen} onClose={()=>setDeleteOpen(false)} title="âš  Close Account">
         <div style={{color:"var(--red)",fontSize:13,marginBottom:16,lineHeight:1.6}}>This is permanent and cannot be undone. All your data, holdings and history will be erased.</div>
         <div className="tlab">Type DELETE to confirm</div>
         <input className="inp" placeholder="DELETE" style={{marginBottom:20}} value={deleteConfirm} onChange={e=>setDeleteConfirm(e.target.value)}/>
-        <button className="btn btn-danger" style={{width:"100%",justifyContent:"center"}} disabled={deleteConfirm!=="DELETE"} onClick={()=>{toast2("Account deletion requested. Our team will contact you.","⚠",false);setDeleteOpen(false);setDeleteConfirm("");}}>
+        <button className="btn btn-danger" style={{width:"100%",justifyContent:"center"}} disabled={deleteConfirm!=="DELETE"} onClick={()=>{toast2("Account deletion requested. Our team will contact you.","âš ",false);setDeleteOpen(false);setDeleteConfirm("");}}>
           Delete My Account
         </button>
       </Modal>
@@ -952,7 +921,7 @@ export default function App(){
         ))}
         <div className="ssec" style={{marginTop:8}}>Account</div>
         <div className={`sitem ${page==="settings"?"active":""}`} onClick={()=>nav("settings")}>
-          <span className="sicon">⚙</span>Settings
+          <span className="sicon">âš™</span>Settings
         </div>
         <div className={`sitem ${page==="notifications"?"active":""}`} onClick={()=>nav("notifications")} style={{position:"relative"}}>
           <span className="sicon">
@@ -991,7 +960,7 @@ export default function App(){
           page==="dashboard"?(
             <div style={{padding:"18px 0 8px"}}>
               <div style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontWeight:800,fontSize:20,color:"var(--text)"}}>
-                Good {new Date().getHours()<12?t("morning"):new Date().getHours()<17?t("afternoon"):t("evening")}, {user.name.split(" ")[0]} 👋
+                Good {new Date().getHours()<12?t("morning"):new Date().getHours()<17?t("afternoon"):t("evening")}, {user.name.split(" ")[0]} ðŸ‘‹
               </div>
               <div style={{fontSize:12,color:"var(--text3)",marginTop:4,fontWeight:500}}>
                 {new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}
@@ -1007,7 +976,7 @@ export default function App(){
           <div>
             <div className="ttl">
               {page==="dashboard"
-                ? `Good ${new Date().getHours()<12?t("morning"):new Date().getHours()<17?t("afternoon"):t("evening")}, ${user.name.split(" ")[0]} 👋`
+                ? `Good ${new Date().getHours()<12?t("morning"):new Date().getHours()<17?t("afternoon"):t("evening")}, ${user.name.split(" ")[0]} ðŸ‘‹`
                 : (LANG[appSettings.language]?.[page]||LABELS[page])
               }
             </div>
@@ -1018,7 +987,7 @@ export default function App(){
           </div>
         </div>
 
-        {/* ══ DASHBOARD ══ */}
+        {/* â•â• DASHBOARD â•â• */}
         {page==="dashboard"&&<>
           <div className="stats" style={{marginTop:mob?12:0}}>
             {[
@@ -1031,7 +1000,7 @@ export default function App(){
                 <div className="stat-glow" style={{background:s.glow}}/>
                 <div className="stat-label">{s.l}</div>
                 <div className="stat-value">{s.v}</div>
-                <div className="stat-sub" style={{color:s.pos===true?"var(--green)":s.pos===false?"var(--red)":"var(--text3)"}}>{s.pos===true&&"▲ "}{s.s}</div>
+                <div className="stat-sub" style={{color:s.pos===true?"var(--green)":s.pos===false?"var(--red)":"var(--text3)"}}>{s.pos===true&&"â–² "}{s.s}</div>
               </div>
             ))}
           </div>
@@ -1043,7 +1012,7 @@ export default function App(){
                   <div style={{fontSize:12,color:"var(--text3)",fontWeight:500,marginBottom:4}}>{COINS[selCoin]?.name} / USD</div>
                   <div className="pbig">${lp.toLocaleString()}</div>
                   <div className="pchg" style={{color:(prices[selCoin]?.change24h||0)>=0?"var(--green)":"var(--red)"}}>
-                    {priceDir[selCoin]?"▲":"▼"} {Math.abs(prices[selCoin]?.change24h||0).toFixed(2)}% <span style={{color:"var(--text3)",fontSize:11}}>24h</span>
+                    {priceDir[selCoin]?"â–²":"â–¼"} {Math.abs(prices[selCoin]?.change24h||0).toFixed(2)}% <span style={{color:"var(--text3)",fontSize:11}}>24h</span>
                   </div>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:8,alignItems:"flex-end"}}>
@@ -1093,7 +1062,7 @@ export default function App(){
 
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"nowrap",gap:8}}>
             <div className="stitle" style={{marginBottom:0,flexShrink:0}}>My Holdings</div>
-            <button className="btn btn-ghost btn-sm" style={{borderRadius:100,padding:"7px 14px",fontSize:11,fontWeight:700,whiteSpace:"nowrap",flexShrink:0,border:"1px solid var(--border2)"}} onClick={()=>nav("portfolio")}>View all →</button>
+            <button className="btn btn-ghost btn-sm" style={{borderRadius:100,padding:"7px 14px",fontSize:11,fontWeight:700,whiteSpace:"nowrap",flexShrink:0,border:"1px solid var(--border2)"}} onClick={()=>nav("portfolio")}>View all â†’</button>
           </div>
           <div className="hgrid">
             {port.holdings.filter(h=>h.amount>0).map(h=>{
@@ -1101,7 +1070,7 @@ export default function App(){
               return(
                 <div key={h.symbol} className="hi" onClick={()=>{setTcoin(h.symbol);setSelCoin(h.symbol);nav("trade");}}>
                   <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:`linear-gradient(90deg,${m?.color},transparent)`,borderRadius:"18px 18px 0 0"}}/>
-                  <div className="hitop"><CoinIcon symbol={h.symbol} size={32}/><div><div className="hsym">{h.symbol}</div><div className="hnm">{m?.name}</div></div><div style={{marginLeft:"auto",flexShrink:0}}><span className={isPos?"badge badge-green":"badge badge-red"} style={{fontSize:9,padding:"2px 7px"}}>{isPos?"▲":"▼"} {Math.abs(h.change24h||0).toFixed(2)}%</span></div></div>
+                  <div className="hitop"><CoinIcon symbol={h.symbol} size={32}/><div><div className="hsym">{h.symbol}</div><div className="hnm">{m?.name}</div></div><div style={{marginLeft:"auto",flexShrink:0}}><span className={isPos?"badge badge-green":"badge badge-red"} style={{fontSize:9,padding:"2px 7px"}}>{isPos?"â–²":"â–¼"} {Math.abs(h.change24h||0).toFixed(2)}%</span></div></div>
                   <div className="hamt">{h.amount}</div>
                   <div className="husd">${h.value.toLocaleString("en-US",{minimumFractionDigits:2})}</div>
                   <div className="hbar-bg"><div className="hbar" style={{width:`${pct}%`,background:`linear-gradient(90deg,${m?.color},${m?.color}88)`}}/></div>
@@ -1111,7 +1080,7 @@ export default function App(){
           </div>
         </>}
 
-        {/* ══ TRADE ══ */}
+        {/* â•â• TRADE â•â• */}
         {page==="trade"&&(
           <div className="page-wrap">
           <div className="tgrid">
@@ -1127,12 +1096,12 @@ export default function App(){
               {(ttype==="buy"||ttype==="sell")&&<>
                 <div className="tlab">Asset</div>
                 <select className="sel" value={tcoin} onChange={e=>setTcoin(e.target.value)} style={{marginBottom:12}}>
-                  {Object.entries(COINS).map(([s,m])=><option key={s} value={s}>{s} — {m.name}</option>)}
+                  {Object.entries(COINS).map(([s,m])=><option key={s} value={s}>{s} â€” {m.name}</option>)}
                 </select>
                 <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"var(--surface)",borderRadius:10,marginBottom:14,border:"1px solid var(--border)"}}>
                   <CoinIcon symbol={tcoin} size={28}/>
                   <div><div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{COINS[tcoin]?.name}</div><div style={{fontSize:11,color:"var(--text3)"}}>${(tci?.price||0).toLocaleString()} per {tcoin}</div></div>
-                  <div style={{marginLeft:"auto"}}><span className={(tci?.change24h||0)>=0?"badge badge-green":"badge badge-red"}>{(tci?.change24h||0)>=0?"▲":"▼"} {Math.abs(tci?.change24h||0).toFixed(2)}%</span></div>
+                  <div style={{marginLeft:"auto"}}><span className={(tci?.change24h||0)>=0?"badge badge-green":"badge badge-red"}>{(tci?.change24h||0)>=0?"â–²":"â–¼"} {Math.abs(tci?.change24h||0).toFixed(2)}%</span></div>
                 </div>
                 <div className="tlab">Amount ({tcoin})</div>
                 <div className="tiwrap"><input className="tinp" type="number" placeholder="0.00" inputMode="decimal" autoComplete="off" value={tamt} onChange={e=>setTamt(e.target.value)}/><span className="tsfx">{tcoin}</span></div>
@@ -1145,7 +1114,7 @@ export default function App(){
                   <div className="trow"><span className="trl">{ttype==="buy"?"Total Cost":"You Receive"}</span><span className="trt">${ttot}</span></div>
                 </div>
                 <button className="btn btn-primary btn-lg" style={{width:"100%",background:ttype==="buy"?"linear-gradient(135deg,#10B981,#059669)":"linear-gradient(135deg,#EF4444,#DC2626)",boxShadow:ttype==="buy"?"0 4px 20px rgba(16,185,129,.35)":"0 4px 20px rgba(239,68,68,.35)"}} onClick={doTrade} disabled={loading}>
-                  {loading?"Processing…":`${ttype==="buy"?"Buy":"Sell"} ${tcoin}`}
+                  {loading?"Processingâ€¦":`${ttype==="buy"?"Buy":"Sell"} ${tcoin}`}
                 </button>
                 <div className="tbal">Available cash: <span>{cur(port.cashBalance)}</span></div>
               </>}
@@ -1161,7 +1130,7 @@ export default function App(){
                   <div className="trow"><span className="trl">Fee</span><span className="trv">$0.00</span></div>
                   <div className="trow"><span className="trl">You receive</span><span className="trt">${tamt||"0.00"}</span></div>
                 </div>
-                <button className="btn btn-primary btn-lg" style={{width:"100%"}} onClick={doTrade} disabled={loading}>{loading?"Processing…":"Deposit Funds"}</button>
+                <button className="btn btn-primary btn-lg" style={{width:"100%"}} onClick={doTrade} disabled={loading}>{loading?"Processingâ€¦":"Deposit Funds"}</button>
                 <div className="tbal">Balance: <span>{cur(port.cashBalance)}</span></div>
               </>}
 
@@ -1173,13 +1142,13 @@ export default function App(){
                   <button className="qpill" onClick={()=>setTamt(String(port.cashBalance))}>Max</button>
                 </div>
                 <div className="tlab">Withdraw To</div>
-                <select className="sel" style={{marginBottom:14}}><option>Bank Account ••• 4291</option><option>PayPal</option><option>Crypto Wallet</option></select>
+                <select className="sel" style={{marginBottom:14}}><option>Bank Account â€¢â€¢â€¢ 4291</option><option>PayPal</option><option>Crypto Wallet</option></select>
                 <div className="tsum">
                   <div className="trow"><span className="trl">Amount</span><span className="trv">${tamt||"0.00"}</span></div>
                   <div className="trow"><span className="trl">Fee (0.5%)</span><span className="trv">${tamt?(parseFloat(tamt)*.005).toFixed(2):"0.00"}</span></div>
                   <div className="trow"><span className="trl">You receive</span><span className="trt">${tamt?(parseFloat(tamt)*.995).toFixed(2):"0.00"}</span></div>
                 </div>
-                <button className="btn btn-primary btn-lg" style={{width:"100%",background:"linear-gradient(135deg,#8B5CF6,#6D28D9)",boxShadow:"0 4px 20px rgba(139,92,246,.35)"}} onClick={doTrade} disabled={loading}>{loading?"Processing…":"Withdraw Funds"}</button>
+                <button className="btn btn-primary btn-lg" style={{width:"100%",background:"linear-gradient(135deg,#8B5CF6,#6D28D9)",boxShadow:"0 4px 20px rgba(139,92,246,.35)"}} onClick={doTrade} disabled={loading}>{loading?"Processingâ€¦":"Withdraw Funds"}</button>
                 <div className="tbal">Available: <span>{cur(port.cashBalance)}</span></div>
               </>}
             </div>
@@ -1192,7 +1161,7 @@ export default function App(){
                   <div>
                     <div style={{fontSize:13,color:"var(--text3)",fontWeight:500}}>{COINS[tcoin]?.name} / USD</div>
                     <div className="pbig" style={{fontSize:26}}>${tlp.toLocaleString()}</div>
-                    <div className="pchg" style={{color:(tci?.change24h||0)>=0?"var(--green)":"var(--red)"}}>{(tci?.change24h||0)>=0?"▲":"▼"} {Math.abs(tci?.change24h||0).toFixed(2)}%</div>
+                    <div className="pchg" style={{color:(tci?.change24h||0)>=0?"var(--green)":"var(--red)"}}>{(tci?.change24h||0)>=0?"â–²":"â–¼"} {Math.abs(tci?.change24h||0).toFixed(2)}%</div>
                   </div>
                 </div>
                 {/* Functional time range buttons */}
@@ -1215,7 +1184,7 @@ export default function App(){
                 </AreaChart>
               </ResponsiveContainer>
               <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginTop:20,paddingTop:16,borderTop:"1px solid var(--border)"}}>
-                {Object.entries(COIN_STATS[tcoin]||{cap:"—",vol:"—",supply:"—"}).map(([k,v])=>(
+                {Object.entries(COIN_STATS[tcoin]||{cap:"â€”",vol:"â€”",supply:"â€”"}).map(([k,v])=>(
                   <div key={k} style={{background:"var(--surface)",borderRadius:10,padding:"10px 12px"}}>
                     <div style={{fontSize:10,color:"var(--text3)",fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",marginBottom:4}}>{k==="cap"?"Market Cap":k==="vol"?"24h Volume":"Circulating"}</div>
                     <div style={{fontSize:14,fontWeight:800,color:"var(--text)",fontFamily:"'Plus Jakarta Sans',sans-serif"}}>{v}</div>
@@ -1227,7 +1196,7 @@ export default function App(){
           </div>
         )}
 
-        {/* ══ PORTFOLIO ══ */}
+        {/* â•â• PORTFOLIO â•â• */}
         {page==="portfolio"&&<>
           <div className="stats" style={{marginBottom:mob?14:24}}>
             {[
@@ -1250,7 +1219,7 @@ export default function App(){
                     <div key={sym} className="hi">
                       <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:`linear-gradient(90deg,${m.color},transparent)`,opacity:amt>0?1:.3,borderRadius:"18px 18px 0 0"}}/>
                       <div className="hitop"><CoinIcon symbol={sym} size={32}/><div><div className="hsym">{sym}</div><div className="hnm">{m.name}</div></div><div style={{marginLeft:"auto",fontSize:11,color:"var(--text3)",fontWeight:600}}>{pct}%</div></div>
-                      <div className="hamt" style={{color:amt>0?"var(--text)":"var(--text3)",fontSize:18}}>{amt||"—"}</div>
+                      <div className="hamt" style={{color:amt>0?"var(--text)":"var(--text3)",fontSize:18}}>{amt||"â€”"}</div>
                       <div className="husd">${val.toLocaleString("en-US",{minimumFractionDigits:2})}</div>
                       <div className="hbar-bg"><div className="hbar" style={{width:`${pct}%`,background:`linear-gradient(90deg,${m.color},${m.color}66)`}}/></div>
                     </div>
@@ -1284,7 +1253,7 @@ export default function App(){
           </div>
         </>}
 
-        {/* ══ HISTORY ══ */}
+        {/* â•â• HISTORY â•â• */}
         {page==="history"&&(
           <div className="gcard" style={{padding:0,overflow:"hidden"}}>
             <div style={{padding:mob?"14px 16px 12px":"22px 24px 16px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"10px"}}>
@@ -1303,7 +1272,7 @@ export default function App(){
                       <td>${(tx.price||0).toLocaleString()}</td>
                       <td style={{color:tx.type==="buy"||tx.type==="withdraw"?"var(--red)":"var(--green)",fontWeight:700}}>{tx.type==="buy"||tx.type==="withdraw"?"-":"+"}${(tx.total||0).toLocaleString()}</td>
                       <td>{(tx.created_at||"").slice(0,10)}</td>
-                      <td><span className="badge badge-green">✓ {tx.status}</span></td>
+                      <td><span className="badge badge-green">âœ“ {tx.status}</span></td>
                     </tr>
                   ))}
                 </tbody>
@@ -1329,7 +1298,7 @@ export default function App(){
           </div>
         )}
 
-        {/* ══ SETTINGS ══ */}
+        {/* â•â• SETTINGS â•â• */}
         {page==="settings"&&(
           <div className="com-styler" style={{}}>
             {/* Profile banner */}
@@ -1343,7 +1312,7 @@ export default function App(){
                   <div style={{fontSize:13,color:"var(--text2)",marginTop:2}}>{user.email}</div>
                   {user.phone&&<div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>{user.phone}</div>}
                   <div style={{display:"flex",alignItems:"center",gap:8,marginTop:10,flexWrap:"wrap"}}>
-                    <span className="badge badge-green">✓ Verified</span>
+                    <span className="badge badge-green">âœ“ Verified</span>
                     {kycStatus.phone==="verified"&&<span className="badge badge-green"> Phone</span>}
                     {kycStatus.id==="verified"&&<span className="badge badge-green"> ID</span>}
                   </div>
@@ -1358,7 +1327,7 @@ export default function App(){
             <div className="settings-grid">
               {/* Security */}
               <div className="gcard">
-                <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:4}}>🔒 Security</div>
+                <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:4}}>ðŸ”’ Security</div>
                 <div style={{fontSize:12,color:"var(--text3)",marginBottom:16}}>Manage your account security</div>
                 {([
                   {key:"twoFA",        label:"Two-Factor Auth",     desc:"Require 2FA on every login"},
@@ -1369,7 +1338,7 @@ export default function App(){
                     <Toggle on={appSettings[s.key as keyof AppSettings] as boolean} onToggle={()=>{
                       const newVal=!appSettings[s.key as keyof AppSettings];
                       setAppSettings(p=>({...p,[s.key]:newVal}));
-                      toast2(`${s.label} ${newVal?"enabled":"disabled"}`,"⚙");
+                      toast2(`${s.label} ${newVal?"enabled":"disabled"}`,"âš™");
                     }}/>
                   </div>
                 ))}
@@ -1377,7 +1346,7 @@ export default function App(){
 
               {/* Preferences */}
               <div className="gcard">
-                <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:4}}>⚙ {t("preferences")}</div>
+                <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:4}}>âš™ {t("preferences")}</div>
                 <div style={{fontSize:12,color:"var(--text3)",marginBottom:16}}>Customise your Wave experience</div>
                 {[
                   {label:"Currency",   desc:"Displayed prices",    key:"currency", opts:["USD","EUR","GBP","NGN","BTC"]},
@@ -1390,7 +1359,7 @@ export default function App(){
                       value={appSettings[s.key as keyof AppSettings] as string}
                       onChange={e=>{
                         setAppSettings(p=>({...p,[s.key]:e.target.value}));
-                        toast2(`${s.label} → ${e.target.value}`,"✓");
+                        toast2(`${s.label} â†’ ${e.target.value}`,"âœ“");
                       }}>
                       {s.opts.map(o=><option key={o} value={o}>{o}</option>)}
                     </select>
@@ -1410,9 +1379,9 @@ export default function App(){
                 ].map((v,i)=>(
                   <div key={i} className="setting-row">
                     <div className="setting-label">{v.label}</div>
-                    {v.status==="done"     ?<span className="badge badge-green">✓ Verified</span>
-                    :v.status==="verified" ?<span className="badge badge-green">✓ Verified</span>
-                    :v.status==="review"   ?<span className="badge badge-blue">⏳ In Review</span>
+                    {v.status==="done"     ?<span className="badge badge-green">âœ“ Verified</span>
+                    :v.status==="verified" ?<span className="badge badge-green">âœ“ Verified</span>
+                    :v.status==="review"   ?<span className="badge badge-blue">â³ In Review</span>
                     :<button className="btn btn-action btn-sm" onClick={v.action||undefined}>
                       {v.label.includes("Phone")?"Add Number":"Upload"}
                     </button>}
@@ -1422,27 +1391,27 @@ export default function App(){
 
               {/* Account */}
               <div className="gcard">
-                <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:4}}>👤 {t("account")}</div>
+                <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:4}}>ðŸ‘¤ {t("account")}</div>
                 <div style={{fontSize:12,color:"var(--text3)",marginBottom:16}}>Manage your account and data</div>
                 <div style={{display:"flex",flexDirection:"column",gap:10}}>
                   <button className="btn btn-action" style={{justifyContent:"flex-start"}} onClick={()=>toast2("Statement ready for download",)}>Account Statement</button>
                   <button className="btn btn-action" style={{justifyContent:"flex-start"}} onClick={doLogout}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginRight:6,flexShrink:0}}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>{t("signOut")}</button>
-                  <button className="btn btn-danger" style={{justifyContent:"flex-start"}} onClick={()=>setDeleteOpen(true)}>🗑 Close Account</button>
+                  <button className="btn btn-danger" style={{justifyContent:"flex-start"}} onClick={()=>setDeleteOpen(true)}>ðŸ—‘ Close Account</button>
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* ══ PRIVACY POLICY ══ */}
+        {/* â•â• PRIVACY POLICY â•â• */}
         {page==="privacy"&&(
           <div style={{maxWidth:760}}>
             <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:24}}>
-              <button className="btn btn-ghost btn-sm" onClick={()=>setPage("settings")}>← Back</button>
+              <button className="btn btn-ghost btn-sm" onClick={()=>setPage("settings")}>â† Back</button>
             </div>
             <div className="gcard" style={{lineHeight:1.8}}>
               <div style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontWeight:900,fontSize:28,color:"var(--text)",marginBottom:6}}>Privacy Policy</div>
-              <div style={{fontSize:12,color:"var(--text3)",marginBottom:28}}>Last updated: April 6, 2026 · Effective immediately</div>
+              <div style={{fontSize:12,color:"var(--text3)",marginBottom:28}}>Last updated: April 6, 2026 Â· Effective immediately</div>
 
 
               {[
@@ -1467,48 +1436,48 @@ export default function App(){
               ))}
 
               <div style={{marginTop:32,paddingTop:20,borderTop:"1px solid var(--border)",display:"flex",gap:12,flexWrap:"wrap"}}>
-                <button className="btn btn-primary" onClick={()=>setPage("settings")}>← Back to Settings</button>
+                <button className="btn btn-primary" onClick={()=>setPage("settings")}>â† Back to Settings</button>
                 <button className="btn btn-ghost" onClick={()=>{
                   const blob=new Blob([document.querySelector(".gcard")?.innerText||""],{type:"text/plain"});
                   const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="wave-privacy-policy.txt";a.click();
-                  toast2("Privacy policy downloaded","📄");
-                }}>📄 Download PDF</button>
+                  toast2("Privacy policy downloaded","ðŸ“„");
+                }}>ðŸ“„ Download PDF</button>
               </div>
             </div>
           </div>
         )}
 
-        {/* ══ NOTIFICATIONS ══ */}
+        {/* â•â• NOTIFICATIONS â•â• */}
         {page==="notifications"&&(
           <div style={{maxWidth:600}}>
             <div className="gcard" style={{marginBottom:14}}>
-              <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:4}}>🔔 Notification Preferences</div>
+              <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:4}}>ðŸ”” Notification Preferences</div>
               <div style={{fontSize:12,color:"var(--text3)",marginBottom:16}}>Control what alerts you receive</div>
 
               <div className="setting-row">
                 <div><div className="setting-label">Login Notifications</div><div className="setting-desc">Email alert whenever a new sign-in is detected</div></div>
                 <Toggle on={appSettings.notifications} onToggle={()=>{
                   setAppSettings(p=>({...p,notifications:!p.notifications}));
-                  toast2(`Login notifications ${!appSettings.notifications?"enabled":"disabled"}`,"🔔");
+                  toast2(`Login notifications ${!appSettings.notifications?"enabled":"disabled"}`,"ðŸ””");
                 }}/>
               </div>
               <div className="setting-row">
                 <div><div className="setting-label">Trade Alerts</div><div className="setting-desc">Notify when a buy/sell order is completed</div></div>
-                <Toggle on={true} onToggle={()=>toast2("Trade alerts always on for security","🔒")}/>
+                <Toggle on={true} onToggle={()=>toast2("Trade alerts always on for security","ðŸ”’")}/>
               </div>
               <div className="setting-row" style={{borderBottom:"none"}}>
                 <div><div className="setting-label">Price Alerts</div><div className="setting-desc">Get notified on major price movements</div></div>
-                <Toggle on={false} onToggle={()=>toast2("Price alerts coming soon","📈")}/>
+                <Toggle on={false} onToggle={()=>toast2("Price alerts coming soon","ðŸ“ˆ")}/>
               </div>
             </div>
 
             <div className="gcard">
-              <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:16}}>⚡ Recent Activity</div>
+              <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:16}}>âš¡ Recent Activity</div>
               {txs.slice(0,5).map((tx,i)=>(
                 <div key={i} className="setting-row" style={{borderBottom:i<4?"1px solid var(--border)":"none",paddingTop:12,paddingBottom:12}}>
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
                     <div style={{width:34,height:34,borderRadius:"50%",background:tx.type==="buy"||tx.type==="deposit"?"rgba(16,185,129,.15)":"rgba(239,68,68,.1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>
-                      {tx.type==="buy"?"🟢":tx.type==="sell"?"🔴":tx.type==="deposit"?"Deposit":""}       {toast&&<div style={{position:"fixed",bottom:24,right:16,left:16,maxWidth:380,margin:"0 auto",padding:"13px 18px",borderRadius:100,background:toast.ok===false?"rgba(239,68,68,.9)":"rgba(16,185,129,.9)",color:"#fff",fontSize:13,fontWeight:700,zIndex:999,display:"flex",alignItems:"center",gap:9,backdropFilter:"blur(10px)"}}><span>{toast.icon}</span>{toast.msg}</div>}
+                      {tx.type==="buy"?"ðŸŸ¢":tx.type==="sell"?"ðŸ”´":tx.type==="deposit"?"Deposit":""}       {toast&&<div style={{position:"fixed",bottom:24,right:16,left:16,maxWidth:380,margin:"0 auto",padding:"13px 18px",borderRadius:100,background:toast.ok===false?"rgba(239,68,68,.9)":"rgba(16,185,129,.9)",color:"#fff",fontSize:13,fontWeight:700,zIndex:999,display:"flex",alignItems:"center",gap:9,backdropFilter:"blur(10px)"}}><span>{toast.icon}</span>{toast.msg}</div>}
                     </div>
                     <div>
                       <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{tx.type.charAt(0).toUpperCase()+tx.type.slice(1)} {tx.symbol}</div>
@@ -1552,3 +1521,4 @@ export default function App(){
     </div>
   );
 }
+
