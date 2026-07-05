@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+ï»¿import { useState, useEffect, useCallback, useRef } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 
 /* Ã¢â€â‚¬Ã¢â€â‚¬ Fonts Ã¢â€â‚¬Ã¢â€â‚¬ */
@@ -703,7 +703,7 @@ export default function App(){
                 Continue with Google
               </button>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                <button className="btn btn-ghost" style={{padding:13,fontSize:13,borderRadius:12}} onClick={()=>oauthNotReady("Apple")}>
+                <button className="btn btn-ghost" style={{padding:13,fontSize:13,borderRadius:12}}  onClick={()=>oauthNotReady("Apple")}>
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.7 9.05 7.4c1.4.07 2.38.81 3.18.84.96-.19 1.95-.93 3.24-.99 1.38-.07 2.61.49 3.41 1.52-3.41 2.08-2.51 6.53.77 7.8-.54 1.47-1.26 2.84-2.6 3.71zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
                   Apple
                 </button>
