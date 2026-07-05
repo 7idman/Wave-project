@@ -1466,7 +1466,7 @@ export default function App(){
               <div style={{marginTop:32,paddingTop:20,borderTop:"1px solid var(--border)",display:"flex",gap:12,flexWrap:"wrap"}}>
                 <button className="btn btn-primary" onClick={()=>setPage("settings")}>← Back to Settings</button>
                 <button className="btn btn-ghost" onClick={()=>{
-                  const blob=new Blob([document.querySelector(".gcard")?.innerText||""],{type:"text/plain"});
+                  const blob=new Blob([(document.querySelector(".gcard") as HTMLElement)?.innerText||""],{type:"text/plain"});
                   const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="wave-privacy-policy.txt";a.click();
                   toast2("Privacy policy downloaded","📄");
                 }}>📄 Download PDF</button>
