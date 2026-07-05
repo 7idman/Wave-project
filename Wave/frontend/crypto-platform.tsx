@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 
 /* Ã¢â€â‚¬Ã¢â€â‚¬ Fonts Ã¢â€â‚¬Ã¢â€â‚¬ */
