@@ -582,33 +582,7 @@ export default function App(){
     await loadData();
   }catch(e:any){toast2(e.message,"⚠",false);}
   finally{setLoading(false);}
-};
-    if(ttype==="deposit"){
-      setPort(p=>({...p,cashBalance:parseFloat((p.cashBalance+amt).toFixed(2)),totalValue:parseFloat((p.totalValue+amt).toFixed(2))}));
-      setTxs(p=>[{id:p.length+1,type:"deposit",symbol:"USD",amount:amt,price:1,total:amt,created_at:new Date().toISOString().slice(0,10),status:"completed"},...p]);
-      toast2(`Deposited $${amt.toLocaleString()}`,"");setTamt("");setLoading(false);return;
-    }
-    if(ttype==="withdraw"){
-      if(amt>port.cashBalance){setLoading(false);return toast2("Insufficient balance","⚠",false);}
-      setPort(p=>({...p,cashBalance:parseFloat((p.cashBalance-amt).toFixed(2)),totalValue:parseFloat((p.totalValue-amt).toFixed(2))}));
-      setTxs(p=>[{id:p.length+1,type:"withdraw",symbol:"USD",amount:amt,price:1,total:amt,created_at:new Date().toISOString().slice(0,10),status:"completed"},...p]);
-      toast2(`Withdrawn $${amt.toLocaleString()}`,);setTamt("");setLoading(false);return;
-    }
-    const cp=prices[tcoin];const price=cp?.price||0;const sub=amt*price;const fee=sub*.001;const total=sub+fee;
-    if(ttype==="buy"&&total>port.cashBalance){setLoading(false);return toast2("Insufficient balance","⚠",false);}
-    const eh=port.holdings.find(h=>h.symbol===tcoin);
-    if(ttype==="sell"&&(!eh||eh.amount<amt)){setLoading(false);return toast2("Insufficient holdings","⚠",false);}
-    setPort(p=>{
-      const nc=ttype==="buy"?p.cashBalance-total:p.cashBalance+(sub-fee);
-      let nh=p.holdings.map(h=>h.symbol===tcoin?{...h,amount:parseFloat((ttype==="buy"?h.amount+amt:h.amount-amt).toFixed(6)),value:(ttype==="buy"?h.amount+amt:h.amount-amt)*price}:h);
-      if(ttype==="buy"&&!eh)nh=[...nh,{symbol:tcoin,amount:amt,price,change24h:cp?.change24h||0,value:sub}];
-      const tvp=nh.reduce((s,h)=>s+h.value,0);
-      return{...p,cashBalance:parseFloat(nc.toFixed(2)),holdings:nh,totalPortfolioValue:tvp,totalValue:nc+tvp};
-    });
-    setTxs(prev=>[{id:prev.length+1,type:ttype,symbol:tcoin,amount:amt,price,total:parseFloat(total.toFixed(2)),created_at:new Date().toISOString().slice(0,10),status:"completed"},...prev]);
-    toast2(`${ttype==="buy"?"Bought":"Sold"} ${amt} ${tcoin}`,ttype==="buy"?"🟢":"🔴");
-    setTamt("");setLoading(false);
-  };
+}; 
 
   /* Currency symbol helper */
   const CURRENCY_SYMBOLS:Record<string,string>={USD:"$",EUR:"€",GBP:"£",NGN:"₦",BTC:"₿"};
