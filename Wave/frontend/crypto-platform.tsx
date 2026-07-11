@@ -336,6 +336,7 @@ const _se=document.createElement("style");_se.textContent=css;document.head.appe
 export default function App(){
   const[user,setUser]         =useState<User|null>(null);
   const[authChecking,setAuthChecking]=useState(true);
+  const[accountLoading,setAccountLoading]=useState(false);
   // On first load, if a saved token exists, verify it and restore the session —
   // this is what fixes "refresh logs me out". Runs once when the app mounts.
   useEffect(()=>{
@@ -349,6 +350,7 @@ export default function App(){
       const u=d.user;
       const nm=u.name||"User";
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
+      setAccountLoading(true);
       setUser({name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined});
     }).catch(()=>{
       api.clearTokens(); // token was invalid/expired — clear it so we don't keep retrying
@@ -370,8 +372,10 @@ export default function App(){
   const[showTerms,setShowTerms]=useState<string>(""); // "terms"|"privacy"|"" — inline on login page
   const[prices,setPrices]     =useState<Record<string,Price>>(FB_PRICES);
   const[priceDir,setPriceDir] =useState<Record<string,boolean>>(Object.fromEntries(Object.keys(FB_PRICES).map(s=>[s,(FB_PRICES[s].change24h||0)>=0])));
-  const[port,setPort]         =useState<Portfolio>(FB_PORT);
-  const[txs,setTxs]           =useState<Tx[]>(FB_TXS);
+  // Never display sample account data for a signed-in user. The real portfolio
+  // is loaded before the dashboard is shown.
+  const[port,setPort]         =useState<Portfolio>({cashBalance:0,totalPortfolioValue:0,totalValue:0,holdings:[]});
+  const[txs,setTxs]           =useState<Tx[]>([]);
   const[charts,setCharts]     =useState<Record<string,ChartPt[]>>({});
   const[selCoin,setSelCoin]   =useState("BTC");
   const[chartRange,setChartRange]=useState<Range>("1D");
@@ -492,7 +496,11 @@ export default function App(){
       setTxs(tx.transactions??[]);
     }catch(e:any){console.warn("transactions:",e.message);}
   },[]);
-  useEffect(()=>{if(user)loadData();},[user,loadData]);
+  useEffect(()=>{
+    if(!user) return;
+    setAccountLoading(true);
+    loadData().finally(()=>setAccountLoading(false));
+  },[user,loadData]);
 
   /* Auth */
   const oauthNotReady=(provider:string)=>{
@@ -508,6 +516,7 @@ export default function App(){
       const u=d.user;
       const nm=u.name||email.split("@")[0]||"User";
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
+      setAccountLoading(true);
       setUser({name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined});
       toast2(`Welcome back, ${nm.split(" ")[0]}!`,);
     }catch(err:any){setLoginErr(err.message||"Login failed. Check your email and password.");}
@@ -529,6 +538,7 @@ export default function App(){
       const u=d.user;
       const nm=u.name||regName||"User";
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
+      setAccountLoading(true);
       setUser({name:nm,email:u.email,initials});
       toast2(`Welcome to Wave, ${nm.split(" ")[0]}!`,);
     }catch(err:any){setLoginErr(err.message||"Registration failed.");}
@@ -536,7 +546,7 @@ export default function App(){
   };
   const doLogout=async()=>{
     try{await api.post("/auth/logout",{refreshToken:_refresh});}catch{}
-   api.clearTokens();setUser(null);setPage("dashboard");toast2("Signed out");
+   api.clearTokens();setUser(null);setAccountLoading(false);setPage("dashboard");toast2("Signed out");
   };
 
   /* Save profile */
@@ -662,11 +672,11 @@ export default function App(){
   };
 
   /* ═══════════ LOGIN ═══════════ */
-  if(authChecking) return(
+  if(authChecking||accountLoading) return(
     <div className="app" style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
       <div style={{textAlign:"center"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:10,marginBottom:14}}><WaveLogo size={38}/><span style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontWeight:800,fontSize:28,color:"var(--text)"}}>Wave</span></div>
-        <p style={{color:"var(--text3)",fontSize:14}}>Restoring your session…</p>
+        <p style={{color:"var(--text3)",fontSize:14}}>{authChecking?"Restoring your session…":"Loading your account…"}</p>
       </div>
     </div>
   );
