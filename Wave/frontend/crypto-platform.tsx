@@ -16,6 +16,7 @@ interface Tx          { id:number; type:string; symbol:string; amount:number; pr
 interface User        { name:string; email:string; initials:string; phone?:string; avatarUrl?:string; }
 interface ChartPt     { t:number; v:number; }
 interface AppSettings { twoFA:boolean; notifications:boolean; currency:string; theme:string; language:string; }
+interface PriceAlert { symbol:string; target:number; }
 
 /* ── Language translations ── */
 const LANG:Record<string,Record<string,string>>={
@@ -70,8 +71,6 @@ const RANGE_VOL:Record<Range,number>={
 
 /* ── Fallback data ── */
 const FB_PRICES:Record<string,Price>={BTC:{price:67420.50,change24h:2.34},ETH:{price:3521.80,change24h:-1.12},SOL:{price:178.40,change24h:5.67},ADA:{price:0.612,change24h:-0.45},LINK:{price:18.92,change24h:3.21}};
-const FB_PORT:Portfolio={cashBalance:12450,totalPortfolioValue:18621,totalValue:31071,holdings:[{symbol:"BTC",amount:0.12,price:67420.50,change24h:2.34,value:8090},{symbol:"ETH",amount:1.5,price:3521.80,change24h:-1.12,value:5282},{symbol:"SOL",amount:20,price:178.40,change24h:5.67,value:3568}]};
-const FB_TXS:Tx[]=[{id:1,type:"buy",symbol:"BTC",amount:0.05,price:65200,total:3263,created_at:"2025-03-28",status:"completed"},{id:2,type:"sell",symbol:"ETH",amount:0.8,price:3400,total:2697,created_at:"2025-03-25",status:"completed"},{id:3,type:"buy",symbol:"SOL",amount:10,price:165,total:1651,created_at:"2025-03-20",status:"completed"},{id:4,type:"buy",symbol:"ETH",amount:0.5,price:3510,total:1756,created_at:"2025-03-15",status:"completed"}];
 
 const genChart=(base:number,n:number,vol:number):ChartPt[]=>
   Array.from({length:n},(_,i)=>{base*=1+(Math.random()-.49)*vol;return{t:i,v:parseFloat(base.toFixed(2))};});
@@ -372,6 +371,14 @@ export default function App(){
   const[showTerms,setShowTerms]=useState<string>(""); // "terms"|"privacy"|"" — inline on login page
   const[prices,setPrices]     =useState<Record<string,Price>>(FB_PRICES);
   const[priceDir,setPriceDir] =useState<Record<string,boolean>>(Object.fromEntries(Object.keys(FB_PRICES).map(s=>[s,(FB_PRICES[s].change24h||0)>=0])));
+  const[watchlist,setWatchlist]=useState<string[]>(()=>{
+    try{return JSON.parse(localStorage.getItem("wave_watchlist")||"[]").filter((s:string)=>COINS[s]);}catch{return [];}
+  });
+  const[showWatchlist,setShowWatchlist]=useState(false);
+  const[priceAlerts,setPriceAlerts]=useState<PriceAlert[]>(()=>{
+    try{return JSON.parse(localStorage.getItem("wave_price_alerts")||"[]").filter((a:PriceAlert)=>COINS[a.symbol]&&Number.isFinite(a.target));}catch{return [];}
+  });
+  const[alertInput,setAlertInput]=useState("");
   // Never display sample account data for a signed-in user. The real portfolio
   // is loaded before the dashboard is shown.
   const[port,setPort]         =useState<Portfolio>({cashBalance:0,totalPortfolioValue:0,totalValue:0,holdings:[]});
@@ -398,6 +405,8 @@ export default function App(){
   });
   // Persist preferences whenever they change
   useEffect(()=>{try{localStorage.setItem("wave_prefs",JSON.stringify(appSettings));}catch{}},[appSettings]);
+  useEffect(()=>{try{localStorage.setItem("wave_watchlist",JSON.stringify(watchlist));}catch{}},[watchlist]);
+  useEffect(()=>{try{localStorage.setItem("wave_price_alerts",JSON.stringify(priceAlerts));}catch{}},[priceAlerts]);
 
   // Modal state
   const[editOpen,setEditOpen]     =useState(false);
@@ -468,6 +477,26 @@ export default function App(){
   useEffect(()=>{document.body.style.overflow=sbOpen?"hidden":"";return()=>{document.body.style.overflow="";};},[sbOpen]);
 
   const toast2=(msg:string,icon="✓",ok=true)=>{setToast({msg,icon,ok});setTimeout(()=>setToast(null),3500);};
+  const toggleWatch=(symbol:string)=>setWatchlist(items=>items.includes(symbol)?items.filter(s=>s!==symbol):[...items,symbol]);
+  const setPriceAlert=()=>{
+    const target=Number(alertInput);
+    if(!Number.isFinite(target)||target<=0)return toast2("Enter a valid alert price","⚠",false);
+    setPriceAlerts(items=>[...items.filter(a=>a.symbol!==selCoin),{symbol:selCoin,target}]);
+    setAlertInput("");
+    toast2(`${selCoin} alert set for $${target.toLocaleString()}`,"🔔");
+  };
+  const alertedTargets=useRef<Set<string>>(new Set());
+  useEffect(()=>{
+    priceAlerts.forEach(({symbol,target})=>{
+      const key=`${symbol}:${target}`;
+      const price=prices[symbol]?.price;
+      if(price!==undefined&&price>=target&&!alertedTargets.current.has(key)){
+        alertedTargets.current.add(key);
+        toast2(`${symbol} reached $${target.toLocaleString()}`,"🔔");
+      }
+      if(price!==undefined&&price<target) alertedTargets.current.delete(key);
+    });
+  },[priceAlerts,prices]);
 
   const loadData=useCallback(async()=>{
     // Each call is independent — one failing won't block the others
@@ -500,6 +529,12 @@ export default function App(){
     if(!user) return;
     setAccountLoading(true);
     loadData().finally(()=>setAccountLoading(false));
+  },[user,loadData]);
+  // Keep market prices, balances, and price alerts current while the dashboard is open.
+  useEffect(()=>{
+    if(!user) return;
+    const interval=window.setInterval(()=>{loadData();},30000);
+    return()=>window.clearInterval(interval);
   },[user,loadData]);
 
   /* Auth */
@@ -1097,6 +1132,11 @@ export default function App(){
                   </div>
                 </div>
               </div>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+                <span style={{fontSize:11,color:"var(--text3)",fontWeight:700}}>Price alert</span>
+                <input className="tinp" type="number" inputMode="decimal" placeholder={`Alert ${selCoin} at $`} value={alertInput} onChange={e=>setAlertInput(e.target.value)} style={{padding:"7px 10px",fontSize:11,minWidth:0,flex:1}}/>
+                <button className="btn btn-ghost btn-sm" onClick={setPriceAlert} style={{padding:"7px 12px",fontSize:11}}>Set</button>
+              </div>
               <ResponsiveContainer width="100%" height={mob?140:200}>
                 <AreaChart data={lcd}>
                   <defs>
@@ -1112,17 +1152,22 @@ export default function App(){
             </div>
 
             <div className="gcard" style={{padding:mob?"14px":"20px"}}>
-              <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",marginBottom:14}}>Live Markets</div>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:14}}>
+                <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,letterSpacing:".8px",textTransform:"uppercase"}}>Live Markets</div>
+                <button className="btn btn-ghost btn-sm" onClick={()=>setShowWatchlist(v=>!v)} style={{padding:"5px 9px",fontSize:10}}>{showWatchlist?"All markets":"★ Watchlist"}</button>
+              </div>
               <div className="mlist">
-                {Object.keys(COINS).map(s=>{
+                {(showWatchlist?watchlist:Object.keys(COINS)).map(s=>{
                   const m=COINS[s];const ld=charts[s]||[];const lv=ld[ld.length-1]?.v||prices[s]?.price||0;const pos=(prices[s]?.change24h||0)>=0;
                   return(
                     <div key={s} className="mitem" onClick={()=>{setSelCoin(s);setTcoin(s);}}>
                       <div style={{display:"flex",alignItems:"center",gap:10}}><CoinIcon symbol={s} size={32}/><div><div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{mob?s:m.name}</div><div style={{fontSize:10,color:"var(--text3)",fontWeight:500}}>{s}</div></div></div>
+                      <button aria-label={`${watchlist.includes(s)?"Remove":"Add"} ${s} ${watchlist.includes(s)?"from":"to"} watchlist`} onClick={e=>{e.stopPropagation();toggleWatch(s);}} style={{border:"none",background:"transparent",cursor:"pointer",fontSize:17,padding:"4px",color:watchlist.includes(s)?"#F59E0B":"var(--text3)"}}>{watchlist.includes(s)?"★":"☆"}</button>
                       <div style={{textAlign:"right"}}><div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>${lv.toLocaleString()}</div><div style={{fontSize:10,fontWeight:700,color:pos?"var(--green)":"var(--red)",marginTop:2}}>{pos?"+":""}{(prices[s]?.change24h||0).toFixed(2)}%</div></div>
                     </div>
                   );
                 })}
+                {showWatchlist&&watchlist.length===0&&<div style={{padding:"18px 0",textAlign:"center",fontSize:12,color:"var(--text3)"}}>Star a market to add it to your watchlist.</div>}
               </div>
             </div>
           </div>
