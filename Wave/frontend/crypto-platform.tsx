@@ -1012,7 +1012,6 @@ export default function App(){
           </div>
           <div>
             <div className="slogo" style={{fontSize:21}}>Wave</div>
-            <div style={{fontSize:9,color:"var(--indigo2)",fontWeight:700,letterSpacing:"1.5px",textTransform:"uppercase",marginTop:1}}>Crypto Platform</div>
           </div>
         </div>
         <div className="ssec">Main</div>
