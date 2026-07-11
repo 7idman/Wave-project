@@ -135,23 +135,38 @@ const Modal=({open,onClose,title,children}:{open:boolean;onClose:()=>void;title:
 const css=`
   :root{--bg:#0F1117;--bg2:#161822;--bg3:#1C1E2E;--surface:rgba(255,255,255,.04);--surface2:rgba(255,255,255,.07);--border:rgba(255,255,255,.08);--border2:rgba(255,255,255,.13);--text:#F1F2F8;--text2:#9496A8;--text3:#5C5E72;--indigo:#6366F1;--indigo2:#818CF8;--green:#10B981;--red:#EF4444;--yellow:#F59E0B;--purple:#8B5CF6;--r:18px;--r2:12px;}
   /* ── LIGHT THEME ── */
-  .theme-light{--bg:#F0F2FF;--bg2:#FFFFFF;--bg3:#E8ECFF;--surface:rgba(99,102,241,.06);--surface2:rgba(99,102,241,.1);--border:rgba(99,102,241,.15);--border2:rgba(99,102,241,.25);--text:#0F1117;--text2:#3A3C52;--text3:#6B6D85;--indigo:#5558E8;--indigo2:#4F46E5;}
-  .theme-light .gcard{background:#FFFFFF;box-shadow:0 2px 12px rgba(99,102,241,.08);}
-  .theme-light .stat{background:#FFFFFF;box-shadow:0 2px 12px rgba(99,102,241,.08);}
-  .theme-light .sidebar{background:#FFFFFF;border-right-color:rgba(99,102,241,.12);}
-  .theme-light .mtop,.theme-light .bnav{background:#FFFFFF;border-color:rgba(99,102,241,.12);}
+  .theme-light{--bg:#F5F5F7;--bg2:#FFFFFF;--bg3:#F0F0F2;--surface:rgba(0,0,0,.03);--surface2:rgba(0,0,0,.05);--border:rgba(0,0,0,.06);--border2:rgba(0,0,0,.1);--text:#0A0A0B;--text2:#5C5E68;--text3:#8B8D96;--indigo:#111114;--indigo2:#111114;--r:22px;--r2:16px;}
+  /* Cards: soft white surface, subtle shadow instead of a hard border — matches the airy reference look */
+  .theme-light .gcard{background:#FFFFFF;box-shadow:0 2px 16px rgba(0,0,0,.05);}
+  .theme-light .gcard::before{display:none;}
+  .theme-light .stat{background:#FFFFFF;box-shadow:0 2px 16px rgba(0,0,0,.05);}
+  .theme-light .stat::before{display:none;}
+  .theme-light .sidebar{background:#FFFFFF;border-right-color:rgba(0,0,0,.06);}
+  .theme-light .mtop,.theme-light .bnav{background:#FFFFFF;border-color:rgba(0,0,0,.06);}
   .theme-light .mitem,.theme-light .txc,.theme-light .hi{background:#FFFFFF;}
-  .theme-light .btn-ghost{background:rgba(99,102,241,.08);border-color:rgba(99,102,241,.25);color:#0F1117;}
-  .theme-light .btn-ghost:hover{background:rgba(99,102,241,.15);}
-  .theme-light select option{background:#FFFFFF;color:#0F1117;}
-  .theme-light .chip{border-color:rgba(99,102,241,.25);color:#4F46E5;}
-  .theme-light .chip.active{background:#4F46E5;border-color:#4F46E5;color:#fff;}
-  .theme-light .inp,.theme-light .sel,.theme-light .tinp{background:#F8F9FF;border-color:rgba(99,102,241,.25);color:#0F1117;}
-  .theme-light .sitem{color:#3A3C52;}
-  .theme-light .sitem:hover{background:rgba(99,102,241,.08);color:#0F1117;}
-  .theme-light .sitem.active{background:linear-gradient(135deg,rgba(99,102,241,.18),rgba(139,92,246,.12));color:#4F46E5;}
-  .theme-light .mchip{background:linear-gradient(135deg,rgba(79,70,229,.15),rgba(139,92,246,.12));border-color:rgba(79,70,229,.35);color:#4F46E5;}
-  .theme-light .tchip{background:linear-gradient(135deg,rgba(79,70,229,.12),rgba(139,92,246,.08));border-color:rgba(79,70,229,.25);color:#4F46E5;}
+  .theme-light .hi::before{display:none;}
+  /* Primary accent is black, not indigo — matches the reference's black "+" button and dark text emphasis */
+  .theme-light .btn-primary{background:#111114;box-shadow:0 4px 16px rgba(0,0,0,.18);}
+  .theme-light .btn-primary:hover{box-shadow:0 8px 24px rgba(0,0,0,.25);}
+  .theme-light .btn-ghost{background:rgba(0,0,0,.04);border-color:rgba(0,0,0,.08);color:#0A0A0B;}
+  .theme-light .btn-ghost:hover{background:rgba(0,0,0,.07);}
+  .theme-light select option{background:#FFFFFF;color:#0A0A0B;}
+  .theme-light .chip{border-color:rgba(0,0,0,.1);color:#5C5E68;}
+  .theme-light .chip.active{background:#111114;border-color:#111114;color:#fff;}
+  .theme-light .inp,.theme-light .sel,.theme-light .tinp{background:#F7F7F8;border-color:rgba(0,0,0,.08);color:#0A0A0B;}
+  .theme-light .sitem{color:#5C5E68;}
+  .theme-light .sitem:hover{background:rgba(0,0,0,.04);color:#0A0A0B;}
+  /* Active sidebar/nav item: soft indigo-tinted background but keep it subtle — brand touch without overpowering the black/white base */
+  .theme-light .sitem.active{background:rgba(99,102,241,.08);color:#4F46E5;}
+  .theme-light .mchip{background:#111114;border-color:#111114;color:#fff;}
+  .theme-light .tchip{background:rgba(99,102,241,.08);border-color:rgba(99,102,241,.2);color:#4F46E5;}
+  /* Slightly more breathing room on desktop only — mobile grid spacing left untouched to avoid layout shifts */
+  @media(min-width:641px){
+    .theme-light .stats{gap:18px;}
+    .theme-light .crow{gap:20px;}
+    .theme-light .hgrid{gap:18px;}
+    .theme-light .gcard{padding:28px;}
+  }
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
   html{-webkit-text-size-adjust:100%;}
   html,body{background:var(--bg);overflow-x:hidden;}
@@ -209,7 +224,11 @@ const css=`
   .logbtn:hover{color:var(--red);}
   .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:299;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);}
   .bnav{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--bg2);border-top:1px solid var(--border);z-index:200;padding-bottom:env(safe-area-inset-bottom,20px);box-shadow:0 -4px 24px rgba(0,0,0,.3);}
-  .bnavr{display:flex;width:100%;}
+  .bnavr{display:flex;width:100%;align-items:center;}
+  /* Floating center action button — opens Trade page directly, reuses existing nav() function */
+  .bnav-fab{width:54px;height:54px;border-radius:50%;background:#111114;display:flex;align-items:center;justify-content:center;color:#fff;font-size:26px;font-weight:300;cursor:pointer;box-shadow:0 8px 20px rgba(0,0,0,.35);margin-top:-26px;flex-shrink:0;-webkit-tap-highlight-color:transparent;transition:transform .15s;}
+  .bnav-fab:active{transform:scale(.92);}
+  .theme-light .bnav-fab{box-shadow:0 8px 20px rgba(0,0,0,.22);}
   .bni{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:12px 4px 10px;cursor:pointer;color:var(--text3);font-size:9px;font-weight:600;border-top:2px solid transparent;-webkit-tap-highlight-color:transparent;transition:all .15s;min-width:0;}
   .bni.active{color:var(--indigo2);border-top-color:var(--indigo2);}
   .bni-icon{font-size:22px;line-height:1;}
@@ -1511,7 +1530,13 @@ export default function App(){
       {/* Bottom nav */}
       <div className="bnav">
         <div className="bnavr">
-          {NAV.map(n=>(
+          {NAV.slice(0,2).map(n=>(
+            <div key={n.id} className={`bni ${page===n.id?"active":""}`} onClick={()=>nav(n.id)}>
+              <span className="bni-icon">{n.icon}</span><span>{n.short}</span>
+            </div>
+          ))}
+          <div className="bnav-fab" onClick={()=>nav("trade")} role="button" aria-label="Quick trade">+</div>
+          {NAV.slice(2).map(n=>(
             <div key={n.id} className={`bni ${page===n.id?"active":""}`} onClick={()=>nav(n.id)}>
               <span className="bni-icon">{n.icon}</span><span>{n.short}</span>
             </div>
