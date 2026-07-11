@@ -28,10 +28,11 @@ const LANG:Record<string,Record<string,string>>={
 /* ── API ── */
 // Uses Vite proxy (/api → http://localhost:4000/api) — no CORS issues
 const API_BASE =  import.meta.env.VITE_API_URL || "/api";
-let _access:string|null = null, _refresh:string|null = null;
+let _access:string|null = localStorage.getItem("wave_access")  || null;
+let _refresh:string|null = localStorage.getItem("wave_refresh") || null;
 const api = {
-  setTokens(a:string,r:string){ _access=a; _refresh=r; },
-  clearTokens(){ _access=null; _refresh=null; },
+  setTokens(a:string,r:string){ _access=a; _refresh=r; localStorage.setItem("wave_access",a); localStorage.setItem("wave_refresh",r); },
+  clearTokens(){ _access=null; _refresh=null; localStorage.removeItem("wave_access"); localStorage.removeItem("wave_refresh"); },
   async request(path:string, opts:RequestInit={}):Promise<any>{
     const h:Record<string,string>={"Content-Type":"application/json",...(opts.headers as Record<string,string>||{})};
     if(_access) h["Authorization"]=`Bearer ${_access}`;
@@ -334,6 +335,19 @@ const _se=document.createElement("style");_se.textContent=css;document.head.appe
 /* ════════════════ APP ════════════════ */
 export default function App(){
   const[user,setUser]         =useState<User|null>(null);
+  // On first load, if a saved token exists, verify it and restore the session —
+  // this is what fixes "refresh logs me out". Runs once when the app mounts.
+  useEffect(()=>{
+    if(!_access){ return; }
+    api.get("/auth/me").then(d=>{
+      const u=d.user;
+      const nm=u.name||"User";
+      const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
+      setUser({name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined});
+    }).catch(()=>{
+      api.clearTokens(); // token was invalid/expired — clear it so we don't keep retrying
+    });
+  },[]);
   const[page,setPage]         =useState("dashboard");
   const[authTab,setAuthTab]   =useState<"login"|"register">("login");
   // Registration form fields
