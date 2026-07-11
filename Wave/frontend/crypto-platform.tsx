@@ -335,18 +335,27 @@ const _se=document.createElement("style");_se.textContent=css;document.head.appe
 /* ════════════════ APP ════════════════ */
 export default function App(){
   const[user,setUser]         =useState<User|null>(null);
+  const[authChecking,setAuthChecking]=useState(true);
   // On first load, if a saved token exists, verify it and restore the session —
   // this is what fixes "refresh logs me out". Runs once when the app mounts.
   useEffect(()=>{
-    if(!_access){ return; }
+    let cancelled=false;
+    if(!_access){
+      setAuthChecking(false);
+      return;
+    }
     api.get("/auth/me").then(d=>{
+      if(cancelled) return;
       const u=d.user;
       const nm=u.name||"User";
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
       setUser({name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined});
     }).catch(()=>{
       api.clearTokens(); // token was invalid/expired — clear it so we don't keep retrying
+    }).finally(()=>{
+      if(!cancelled) setAuthChecking(false);
     });
+    return()=>{cancelled=true;};
   },[]);
   const[page,setPage]         =useState("dashboard");
   const[authTab,setAuthTab]   =useState<"login"|"register">("login");
@@ -653,6 +662,14 @@ export default function App(){
   };
 
   /* ═══════════ LOGIN ═══════════ */
+  if(authChecking) return(
+    <div className="app" style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{textAlign:"center"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:10,marginBottom:14}}><WaveLogo size={38}/><span style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontWeight:800,fontSize:28,color:"var(--text)"}}>Wave</span></div>
+        <p style={{color:"var(--text3)",fontSize:14}}>Restoring your session…</p>
+      </div>
+    </div>
+  );
   if(!user) return(
     <div className="app" style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:20,position:"relative",overflow:"hidden"}}>
       <div style={{position:"fixed",top:-150,left:-100,width:500,height:500,borderRadius:"50%",background:"radial-gradient(circle,rgba(99,102,241,.15),transparent 70%)",pointerEvents:"none"}}/>
