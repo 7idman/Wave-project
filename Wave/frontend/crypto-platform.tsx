@@ -1237,11 +1237,12 @@ export default function App(){
         {/* Desktop topbar */}
         <div className="topbar">
           <div style={{display:"flex",alignItems:"center",gap:14}}>
-         {sbCollapsed&&(
-           <div className="sb-open" onClick={()=>setSbCollapsed(false)} title="Open sidebar" role="button" aria-label="Open sidebar">
-           <svg width="18" height="14" viewBox="0 0 22 16" fill="none"><rect y="0" width="22" height="2.5" rx="1.25" fill="currentColor"/><rect y="6.75" width="16" height="2.5" rx="1.25" fill="currentColor"/><rect y="13.5" width="22" height="2.5" rx="1.25" fill="currentColor"/></svg>
-           </div>
-          )}
+            {sbCollapsed&&(
+             <div className="sb-open" onClick={()=>setSbCollapsed(false)} title="Open sidebar" role="button" aria-label="Open sidebar">
+               <svg width="18" height="14" viewBox="0 0 22 16" fill="none"><rect y="0" width="22" height="2.5" rx="1.25" fill="currentColor"/><rect y="6.75" width="16" height="2.5" rx="1.25" fill="currentColor"/><rect y="13.5" width="22" height="2.5" rx="1.25" fill="currentColor"/></svg>
+             </div>
+            )}
+          </div>
           <div>
             <div className="ttl">
               {page==="dashboard"
