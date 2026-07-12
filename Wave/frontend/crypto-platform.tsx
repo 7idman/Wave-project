@@ -16,7 +16,8 @@ interface Tx          { id:number; type:string; symbol:string; amount:number; pr
 interface User        { name:string; email:string; initials:string; phone?:string; avatarUrl?:string; }
 interface ChartPt     { t:number; v:number; }
 interface AppSettings { twoFA:boolean; notifications:boolean; currency:string; theme:string; language:string; }
-interface PriceAlert { symbol:string; target:number; }
+interface SiteUpdate  { id:number|string; title:string; body:string; created_at:string; }
+interface LoginEvent  { id:number|string; device:string; ip?:string; login_at:string; logout_at?:string|null; current?:boolean; }
 
 /* ── Language translations ── */
 const LANG:Record<string,Record<string,string>>={
@@ -209,6 +210,14 @@ const css=`
   .sidebar{width:240px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:24px 0;position:fixed;left:0;top:0;bottom:0;z-index:300;transition:transform .25s cubic-bezier(.4,0,.2,1);overflow-y:auto;scrollbar-width:none;}
   .sidebar::-webkit-scrollbar{display:none;}
   .shead{display:flex;align-items:center;gap:12px;padding:22px 22px 20px;border-bottom:1px solid var(--border);margin-bottom:8px;}
+  .sb-close{margin-left:auto;width:30px;height:30px;border-radius:9px;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);flex-shrink:0;transition:all .15s;-webkit-tap-highlight-color:transparent;}
+  .sb-close:hover{color:var(--text);border-color:var(--indigo2);}
+  .sb-open{position:fixed;top:24px;left:24px;z-index:250;width:42px;height:42px;border-radius:12px;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);box-shadow:0 6px 20px rgba(0,0,0,.18);transition:all .15s;-webkit-tap-highlight-color:transparent;}
+  .sb-open:hover{color:var(--text);border-color:var(--indigo2);}
+  @media(min-width:641px){
+    .sidebar.collapsed{transform:translateX(-100%);}
+    .main.sb-collapsed{margin-left:0;}
+  }
   .slogo{font-family:'Plus Jakarta Sans',sans-serif;font-weight:900;font-size:21px;background:linear-gradient(135deg,#818CF8,#6366F1);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:-.3px;}
   .ssec{font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);padding:0 22px 8px;margin-top:8px;}
   .sitem{display:flex;align-items:center;gap:11px;padding:11px 22px;color:var(--text2);font-size:13px;font-weight:500;cursor:pointer;transition:all .15s;-webkit-tap-highlight-color:transparent;margin:1px 10px;border-radius:10px;}
@@ -352,6 +361,13 @@ export default function App(){
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
       setAccountLoading(true);
       setUser({name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined});
+      // Backend doesn't return `country` on /auth/me yet — once it does, this applies the
+      // right default currency one time only, and never again once the user (or this logic)
+      // has set a currency, so it can never silently overwrite a manual choice.
+      if(u.country&&!localStorage.getItem("wave_currency_auto")){
+        setAppSettings(p=>({...p,currency:currencyForCountry(u.country)}));
+        localStorage.setItem("wave_currency_auto","1");
+      }
     }).catch(()=>{
       api.clearTokens(); // token was invalid/expired — clear it so we don't keep retrying
     }).finally(()=>{
@@ -379,10 +395,6 @@ export default function App(){
     try{return JSON.parse(localStorage.getItem("wave_watchlist")||"[]").filter((s:string)=>COINS[s]);}catch{return [];}
   });
   const[showWatchlist,setShowWatchlist]=useState(false);
-  const[priceAlerts,setPriceAlerts]=useState<PriceAlert[]>(()=>{
-    try{return JSON.parse(localStorage.getItem("wave_price_alerts")||"[]").filter((a:PriceAlert)=>COINS[a.symbol]&&Number.isFinite(a.target));}catch{return [];}
-  });
-  const[alertInput,setAlertInput]=useState("");
   // Never display sample account data for a signed-in user. The real portfolio
   // is loaded before the dashboard is shown.
   const[port,setPort]         =useState<Portfolio>({cashBalance:0,totalPortfolioValue:0,totalValue:0,holdings:[]});
@@ -398,8 +410,19 @@ export default function App(){
   const[toast,setToast]       =useState<{msg:string;icon:string;ok?:boolean}|null>(null);
   const[email,setEmail]       =useState("");
   const[pw,setPw]             =useState("");
-  const[sbOpen,setSbOpen]     =useState(false);
+  const[sbOpen,setSbOpen]     =useState(false);      // mobile: sidebar slid in/out
+  const[sbCollapsed,setSbCollapsed]=useState(false);  // desktop: sidebar hidden/shown
+  const[profileOpen,setProfileOpen]=useState(false);  // profile-circle dropdown (topbar)
+  const profileRef=useRef<HTMLDivElement>(null);
+  useEffect(()=>{
+    const h=(e:MouseEvent)=>{ if(profileRef.current&&!profileRef.current.contains(e.target as Node)) setProfileOpen(false); };
+    document.addEventListener("mousedown",h);
+    return()=>document.removeEventListener("mousedown",h);
+  },[]);
   const[loginErr,setLoginErr] =useState("");
+  const[siteUpdates,setSiteUpdates]=useState<SiteUpdate[]>([]);
+  const[loginHistory,setLoginHistory]=useState<LoginEvent[]>([]);
+  const[notifLoading,setNotifLoading]=useState(false);
   const[appSettings,setAppSettings]=useState<AppSettings>(()=>{
     try{
       const saved=localStorage.getItem("wave_prefs");
@@ -410,7 +433,6 @@ export default function App(){
   // Persist preferences whenever they change
   useEffect(()=>{try{localStorage.setItem("wave_prefs",JSON.stringify(appSettings));}catch{}},[appSettings]);
   useEffect(()=>{try{localStorage.setItem("wave_watchlist",JSON.stringify(watchlist));}catch{}},[watchlist]);
-  useEffect(()=>{try{localStorage.setItem("wave_price_alerts",JSON.stringify(priceAlerts));}catch{}},[priceAlerts]);
 
   // Modal state
   const[editOpen,setEditOpen]     =useState(false);
@@ -482,25 +504,6 @@ export default function App(){
 
   const toast2=(msg:string,icon="✓",ok=true)=>{setToast({msg,icon,ok});setTimeout(()=>setToast(null),3500);};
   const toggleWatch=(symbol:string)=>setWatchlist(items=>items.includes(symbol)?items.filter(s=>s!==symbol):[...items,symbol]);
-  const setPriceAlert=()=>{
-    const target=Number(alertInput);
-    if(!Number.isFinite(target)||target<=0)return toast2("Enter a valid alert price","⚠",false);
-    setPriceAlerts(items=>[...items.filter(a=>a.symbol!==selCoin),{symbol:selCoin,target}]);
-    setAlertInput("");
-    toast2(`${selCoin} alert set for $${target.toLocaleString()}`,"🔔");
-  };
-  const alertedTargets=useRef<Set<string>>(new Set());
-  useEffect(()=>{
-    priceAlerts.forEach(({symbol,target})=>{
-      const key=`${symbol}:${target}`;
-      const price=prices[symbol]?.price;
-      if(price!==undefined&&price>=target&&!alertedTargets.current.has(key)){
-        alertedTargets.current.add(key);
-        toast2(`${symbol} reached $${target.toLocaleString()}`,"🔔");
-      }
-      if(price!==undefined&&price<target) alertedTargets.current.delete(key);
-    });
-  },[priceAlerts,prices]);
 
   const loadData=useCallback(async()=>{
     // Each call is independent — one failing won't block the others
@@ -540,6 +543,15 @@ export default function App(){
     const interval=window.setInterval(()=>{loadData();},30000);
     return()=>window.clearInterval(interval);
   },[user,loadData]);
+
+  useEffect(()=>{
+    if(!user||page!=="notifications") return;
+    setNotifLoading(true);
+    Promise.allSettled([
+      api.get("/notifications/updates").then(d=>setSiteUpdates(d.updates??[])).catch(e=>console.warn("site updates:",e.message)),
+      api.get("/auth/sessions").then(d=>setLoginHistory(d.sessions??[])).catch(e=>console.warn("login history:",e.message)),
+    ]).finally(()=>setNotifLoading(false));
+  },[page,user]);
 
   const chargeCashBalance=async(label:string,amount:number)=>{
     if(!Number.isFinite(amount)||amount<=0){
@@ -585,6 +597,10 @@ export default function App(){
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
       setAccountLoading(true);
       setUser({name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined});
+      if(u.country&&!localStorage.getItem("wave_currency_auto")){
+        setAppSettings(p=>({...p,currency:currencyForCountry(u.country)}));
+        localStorage.setItem("wave_currency_auto","1");
+      }
       toast2(`Welcome back, ${nm.split(" ")[0]}!`,);
     }catch(err:any){setLoginErr(err.message||"Login failed. Check your email and password.");}
     finally{setLoading(false);}
@@ -607,6 +623,8 @@ export default function App(){
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
       setAccountLoading(true);
       setUser({name:nm,email:u.email,initials});
+      setAppSettings(p=>({...p,currency:currencyForCountry(regCountry)}));
+      localStorage.setItem("wave_currency_auto","1");
       toast2(`Welcome to Wave, ${nm.split(" ")[0]}!`,);
     }catch(err:any){setLoginErr(err.message||"Registration failed.");}
     finally{setLoading(false);}
@@ -703,6 +721,18 @@ export default function App(){
   finally{setLoading(false);}
 }; 
 
+  /* Country → default currency. Only covers currencies Wave actually supports (see CURRENCY_SYMBOLS);
+     everything else falls back to USD. Applied once at signup — never overwrites a currency the
+     user already picked, so returning users' manual choice is never silently reset on login. */
+  const EUR_COUNTRIES=new Set(["Austria","Belgium","Croatia","Cyprus","Estonia","Finland","France","Germany","Greece","Ireland","Italy","Latvia","Lithuania","Luxembourg","Malta","Netherlands","Portugal","Slovakia","Slovenia","Spain","Monaco","San Marino","Vatican City","Andorra"]);
+  const currencyForCountry=(country?:string):string=>{
+    if(!country) return "USD";
+    if(country==="Nigeria") return "NGN";
+    if(country==="United Kingdom") return "GBP";
+    if(EUR_COUNTRIES.has(country)) return "EUR";
+    return "USD";
+  };
+
   /* Currency symbol helper */
   const CURRENCY_SYMBOLS:Record<string,string>={USD:"$",EUR:"€",GBP:"£",NGN:"₦",BTC:"₿"};
   const CURRENCY_RATES:Record<string,number>={USD:1,EUR:0.92,GBP:0.79,NGN:1580,BTC:0.0000148};
@@ -740,6 +770,30 @@ export default function App(){
     user?.avatarUrl
       ?<img src={user.avatarUrl} style={{width:size,height:size,borderRadius:"50%",objectFit:"cover"}}/>
       :<div className="av" style={{width:size,height:size,fontSize}}>{user?.initials}</div>
+  );
+
+  /* Profile circle + dropdown — sits beside the balance chip in both topbars */
+  const ProfileMenu=({size=34,fontSize=13}:{size?:number;fontSize?:number})=>(
+    <div ref={profileRef} style={{position:"relative"}}>
+      <div onClick={()=>setProfileOpen(o=>!o)} style={{cursor:"pointer",borderRadius:"50%",border:"2px solid var(--border2)",lineHeight:0,transition:"border-color .15s"}} title={user?.name} role="button" aria-label="Profile menu">
+        <AvatarDisplay size={size} fontSize={fontSize}/>
+      </div>
+      {profileOpen&&(
+        <div style={{position:"absolute",top:"calc(100% + 10px)",right:0,minWidth:190,background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:14,padding:6,boxShadow:"0 16px 40px rgba(0,0,0,.35)",zIndex:400}}>
+          <div style={{padding:"8px 10px",marginBottom:2}}>
+            <div style={{fontSize:12,fontWeight:700,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{user?.name}</div>
+            <div style={{fontSize:10,color:"var(--text3)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{user?.email}</div>
+          </div>
+          <div className="sitem" style={{margin:"1px 0",borderRadius:10}} onClick={()=>{nav("settings");setProfileOpen(false);}}>
+            <span className="sicon">⚙</span>Profile &amp; Settings
+          </div>
+          <div className="sitem" style={{margin:"1px 0",borderRadius:10,color:"var(--red)"}} onClick={()=>{setProfileOpen(false);doLogout();}}>
+            <span className="sicon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>
+            Log Out
+          </div>
+        </div>
+      )}
+    </div>
   );
 
   const kycLabel=(status:string)=>{
@@ -1047,13 +1101,16 @@ export default function App(){
       </Modal>
 
       {/* Sidebar */}
-      <div className={`sidebar ${sbOpen?"open":""}`}>
+      <div className={`sidebar ${sbOpen?"open":""} ${sbCollapsed?"collapsed":""}`}>
         <div className="shead" style={{paddingBottom:22}}>
           <div style={{background:"linear-gradient(135deg,rgba(99,102,241,.25),rgba(139,92,246,.18))",borderRadius:11,padding:"7px 8px",border:"1px solid rgba(99,102,241,.3)",boxShadow:"0 0 16px rgba(99,102,241,.25)",flexShrink:0}}>
             <WaveLogo size={22}/>
           </div>
           <div>
             <div className="slogo" style={{fontSize:21}}>Wave</div>
+          </div>
+          <div className="sb-close" onClick={()=>{setSbOpen(false);setSbCollapsed(true);}} title="Close sidebar" role="button" aria-label="Close sidebar">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </div>
         </div>
         <div className="ssec">Main</div>
@@ -1091,8 +1148,18 @@ export default function App(){
         </div>
       </div>
 
+      {/* Overlay — closes the sidebar on mobile when tapped outside it */}
+      <div className={`overlay ${sbOpen?"open":""}`} onClick={()=>setSbOpen(false)}/>
+
+      {/* Floating button to reopen the sidebar once collapsed on desktop */}
+      {!mob&&sbCollapsed&&(
+        <div className="sb-open" onClick={()=>setSbCollapsed(false)} title="Open sidebar" role="button" aria-label="Open sidebar">
+          <svg width="20" height="15" viewBox="0 0 22 16" fill="none"><rect y="0" width="22" height="2.5" rx="1.25" fill="currentColor"/><rect y="6.75" width="16" height="2.5" rx="1.25" fill="currentColor"/><rect y="13.5" width="22" height="2.5" rx="1.25" fill="currentColor"/></svg>
+        </div>
+      )}
+
       {/* Main */}
-      <div className="main">
+      <div className={`main ${sbCollapsed?"sb-collapsed":""}`}>
         {/* Mobile topbar */}
         <div className="mtop">
           <div className="mlogo-row">
@@ -1101,7 +1168,10 @@ export default function App(){
             </div>
             <WaveLogo size={24}/><div className="mlogo">Wave</div>
           </div>
-          <div className="mchip">{cur(port.cashBalance)}</div>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div className="mchip">{cur(port.cashBalance)}</div>
+            <ProfileMenu size={30} fontSize={12}/>
+          </div>
         </div>
 
         {/* Mobile: greeting on dashboard, spacing only on other pages */}
@@ -1131,8 +1201,9 @@ export default function App(){
             </div>
             <div className="tdate">{new Date().toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div>
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
             <div className="tchip"> {cur(port.cashBalance)}</div>
+            <ProfileMenu/>
           </div>
         </div>
 
@@ -1178,11 +1249,6 @@ export default function App(){
                     ))}
                   </div>
                 </div>
-              </div>
-              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
-                <span style={{fontSize:11,color:"var(--text3)",fontWeight:700}}>Price alert</span>
-                <input className="tinp" type="number" inputMode="decimal" placeholder={`Alert ${selCoin} at $`} value={alertInput} onChange={e=>setAlertInput(e.target.value)} style={{padding:"7px 10px",fontSize:11,minWidth:0,flex:1}}/>
-                <button className="btn btn-ghost btn-sm" onClick={setPriceAlert} style={{padding:"7px 12px",fontSize:11}}>Set</button>
               </div>
               <ResponsiveContainer width="100%" height={mob?140:200}>
                 <AreaChart data={lcd}>
@@ -1541,6 +1607,7 @@ export default function App(){
                       value={appSettings[s.key as keyof AppSettings] as string}
                       onChange={e=>{
                         setAppSettings(p=>({...p,[s.key]:e.target.value}));
+                        if(s.key==="currency") localStorage.setItem("wave_currency_auto","1");
                         toast2(`${s.label} → ${e.target.value}`,"✓");
                       }}>
                       {s.opts.map(o=><option key={o} value={o}>{o}</option>)}
@@ -1653,13 +1720,48 @@ export default function App(){
               </div>
             </div>
 
+            <div className="gcard" style={{marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:16}}>📢 Site Updates</div>
+              {notifLoading?<div style={{fontSize:12,color:"var(--text3)"}}>Loading…</div>
+              :siteUpdates.length===0?<div style={{fontSize:12,color:"var(--text3)"}}>No updates yet — you'll see new Wave features and announcements here.</div>
+              :siteUpdates.map((u,i)=>(
+                <div key={u.id} className="setting-row" style={{alignItems:"flex-start",borderBottom:i<siteUpdates.length-1?"1px solid var(--border)":"none",display:"block",paddingTop:12,paddingBottom:12}}>
+                  <div style={{fontSize:13,fontWeight:700,color:"var(--text)",marginBottom:2}}>{u.title}</div>
+                  <div style={{fontSize:12,color:"var(--text2)",lineHeight:1.5,marginBottom:4}}>{u.body}</div>
+                  <div style={{fontSize:11,color:"var(--text3)"}}>{new Date(u.created_at).toLocaleString()}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="gcard" style={{marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:16}}>🖥 Login Activity</div>
+              {notifLoading?<div style={{fontSize:12,color:"var(--text3)"}}>Loading…</div>
+              :loginHistory.length===0?<div style={{fontSize:12,color:"var(--text3)"}}>No login history yet — sign-ins across your devices will appear here.</div>
+              :loginHistory.map((s,i)=>(
+                <div key={s.id} className="setting-row" style={{borderBottom:i<loginHistory.length-1?"1px solid var(--border)":"none",paddingTop:12,paddingBottom:12}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{width:34,height:34,borderRadius:"50%",background:"rgba(99,102,241,.12)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>
+                      {/\bmobile\b/i.test(s.device)?"📱":"💻"}
+                    </div>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{s.device}{s.current&&<span className="badge badge-green" style={{marginLeft:8,fontSize:9}}>This device</span>}</div>
+                      <div style={{fontSize:11,color:"var(--text3)"}}>Signed in {new Date(s.login_at).toLocaleString()}</div>
+                    </div>
+                  </div>
+                  <div style={{fontSize:11,color:"var(--text3)",fontWeight:600,textAlign:"right"}}>
+                    {s.logout_at?`Signed out ${new Date(s.logout_at).toLocaleString()}`:<span style={{color:"var(--green)"}}>● Active</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+
             <div className="gcard">
               <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:16}}>⚡ Recent Activity</div>
               {txs.slice(0,5).map((tx,i)=>(
                 <div key={i} className="setting-row" style={{borderBottom:i<4?"1px solid var(--border)":"none",paddingTop:12,paddingBottom:12}}>
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
                     <div style={{width:34,height:34,borderRadius:"50%",background:tx.type==="buy"||tx.type==="deposit"?"rgba(16,185,129,.15)":"rgba(239,68,68,.1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>
-                      {tx.type==="buy"?"🟢":tx.type==="sell"?"🔴":tx.type==="deposit"?"Deposit":""}       {toast&&<div style={{position:"fixed",bottom:24,right:16,left:16,maxWidth:380,margin:"0 auto",padding:"13px 18px",borderRadius:100,background:toast.ok===false?"rgba(239,68,68,.9)":"rgba(16,185,129,.9)",color:"#fff",fontSize:13,fontWeight:700,zIndex:999,display:"flex",alignItems:"center",gap:9,backdropFilter:"blur(10px)"}}><span>{toast.icon}</span>{toast.msg}</div>}
+                      {tx.type==="buy"?"🟢":tx.type==="sell"?"🔴":tx.type==="deposit"?"Deposit":""}
                     </div>
                     <div>
                       <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{tx.type.charAt(0).toUpperCase()+tx.type.slice(1)} {tx.symbol}</div>
