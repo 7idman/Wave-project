@@ -128,6 +128,20 @@ async function initSchema() {
       change_24h REAL NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`,
+    `CREATE TABLE IF NOT EXISTS sessions (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      device     TEXT    NOT NULL,
+      ip         TEXT,
+      login_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+      logout_at  TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS site_updates (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      title      TEXT NOT NULL,
+      body       TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
   ];
 
   for (const sql of tables) {
@@ -143,6 +157,7 @@ async function initSchema() {
     "ALTER TABLE users ADD COLUMN country          TEXT",
     "ALTER TABLE users ADD COLUMN kyc_id_status    TEXT NOT NULL DEFAULT 'pending'",
     "ALTER TABLE users ADD COLUMN kyc_addr_status  TEXT NOT NULL DEFAULT 'pending'",
+    "ALTER TABLE refresh_tokens ADD COLUMN session_id INTEGER",
   ];
   for (const sql of migrations) {
     try { await db.execute(sql); } catch (_) { /* column already exists — skip */ }
@@ -164,6 +179,15 @@ async function initSchema() {
         [sym, price, change]
       );
     }
+  }
+
+  // ── Seed site updates ──────────────────────────────────────────────────────
+  const updateCount = await queryOne("SELECT COUNT(*) as c FROM site_updates");
+  if (!updateCount || Number(updateCount.c) === 0) {
+    await execute(
+      "INSERT INTO site_updates (title, body) VALUES (?, ?)",
+      ["Welcome to Wave", "Your paper-trading account starts with $10,000 in demo cash. Explore the dashboard, place a few trades, and check back here for new features as they ship."]
+    );
   }
 
   console.log("✅ Database ready");

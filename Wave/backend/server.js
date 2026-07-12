@@ -23,9 +23,19 @@ const priceRoutes     = require("./routes/prices");
 const tradeRoutes     = require("./routes/trades");
 const portfolioRoutes = require("./routes/portfolio");
 const txRoutes        = require("./routes/transactions");
+const notificationRoutes = require("./routes/notifications");
 
 const app  = express();
 const PORT = process.env.PORT || 4000;
+
+// Bug fix: Railway (and most hosts) put your app behind a reverse proxy, so
+// the real client IP arrives in an X-Forwarded-For header rather than as the
+// raw socket address. Without this, express-rate-limit's authLimiter either
+// throttles everyone as if they share one IP, or — on express-rate-limit v7+
+// — throws an "ERR_ERL_UNEXPECTED_X_FORWARDED_FOR" validation error outright.
+// It also means req.ip (now used for session device history) always resolved
+// to the proxy's address instead of the visitor's.
+app.set("trust proxy", 1);
 
 // ── Rate limiter ──────────────────────────────────────────────────────────────
 // Concept: limits each IP to 10 login/register attempts per 15 minutes.
@@ -90,6 +100,7 @@ app.use("/api/prices",        priceRoutes);
 app.use("/api/trades",        authenticate, tradeRoutes);
 app.use("/api/portfolio",     authenticate, portfolioRoutes);
 app.use("/api/transactions",  authenticate, txRoutes);
+app.use("/api/notifications", authenticate, notificationRoutes);
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/health", (_, res) => res.json({ status: "ok", time: new Date().toISOString() }));

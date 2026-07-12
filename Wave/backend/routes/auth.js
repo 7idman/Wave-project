@@ -7,6 +7,7 @@
  * GET  /api/auth/google            — Start Google OAuth
  * GET  /api/auth/google/callback   — Google OAuth callback
  * GET  /api/auth/me                — Get current user
+ * GET  /api/auth/sessions          — List login/device history for current user
  * PATCH /api/auth/profile          — Update name / phone / avatar
  * PATCH /api/auth/password         — Change password
  */
@@ -16,7 +17,7 @@ const bcrypt   = require("bcryptjs");
 const passport = require("passport");
 const GoogleStrategy = require("passport-google-oauth20").Strategy;
 const jwt      = require("jsonwebtoken");
-const { queryOne, execute } = require("../db");
+const { queryOne, queryAll, execute } = require("../db");
 const { signAccessToken, signRefreshToken, JWT_SECRET, authenticate } = require("../middleware/auth");
 
 // ── Safe user shape returned to frontend ────────────────────────────────────
@@ -34,6 +35,42 @@ const safeUser = (u) => ({
   kycAddrStatus: u.kyc_addr_status|| "pending",
   createdAt:     u.created_at,
 });
+
+/**
+ * Turns a User-Agent header into something readable like "Desktop · Chrome on macOS".
+ * Best-effort only — unrecognized UAs fall back to "Unknown browser"/"Unknown OS"
+ * rather than throwing, since this is display-only and must never block login.
+ */
+function parseDevice(ua = "") {
+  ua = ua || "";
+  const isMobile = /Mobile|Android|iPhone|iPad/i.test(ua);
+
+  let os = "Unknown OS";
+  if (/Windows/i.test(ua))            os = "Windows";
+  else if (/Mac OS X/i.test(ua))      os = "macOS";
+  else if (/Android/i.test(ua))       os = "Android";
+  else if (/iPhone|iPad|iOS/i.test(ua)) os = "iOS";
+  else if (/Linux/i.test(ua))         os = "Linux";
+
+  let browser = "Unknown browser";
+  if (/Edg\//i.test(ua))                                   browser = "Edge";
+  else if (/Chrome\//i.test(ua) && !/Edg\//i.test(ua))      browser = "Chrome";
+  else if (/Firefox\//i.test(ua))                           browser = "Firefox";
+  else if (/Safari\//i.test(ua) && !/Chrome\//i.test(ua))   browser = "Safari";
+
+  return `${isMobile ? "Mobile" : "Desktop"} · ${browser} on ${os}`;
+}
+
+/** Creates a session row for this login and returns its id */
+async function createSession(userId, req) {
+  const device = parseDevice(req.headers["user-agent"]);
+  const ip     = req.ip;
+  const r = await execute(
+    "INSERT INTO sessions (user_id, device, ip) VALUES (?, ?, ?)",
+    [userId, device, ip]
+  );
+  return r.lastInsertRowid;
+}
 
 // ── Google OAuth Strategy ────────────────────────────────────────────────────
 passport.use(new GoogleStrategy(
@@ -81,9 +118,15 @@ passport.deserializeUser(async (id, done) => {
 // ── Register ─────────────────────────────────────────────────────────────────
 router.post("/register", async (req, res) => {
   try {
-    const { email, name, password, date_of_birth, country } = req.body;
+    let { email, name, password, date_of_birth, country } = req.body;
     if (!email || !name || !password)
       return res.status(400).json({ error: "email, name and password are required" });
+
+    // Bug fix: emails weren't normalized, so "User@x.com" and "user@x.com"
+    // could register as two different accounts (SQLite TEXT comparison is
+    // case-sensitive by default), and a returning user typing a different
+    // case than they signed up with would fail to log in.
+    email = email.trim().toLowerCase();
 
     // Age check — must be 18+
     if (date_of_birth) {
@@ -101,8 +144,9 @@ router.post("/register", async (req, res) => {
     );
     const user = await queryOne("SELECT * FROM users WHERE id = ?", [r.lastInsertRowid]);
 
-    const accessToken  = signAccessToken(user.id);
-    const refreshToken = await signRefreshToken(user.id);
+    const sessionId     = await createSession(user.id, req);
+    const accessToken   = signAccessToken(user.id, sessionId);
+    const refreshToken  = await signRefreshToken(user.id, sessionId);
     res.status(201).json({ accessToken, refreshToken, user: safeUser(user) });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -112,9 +156,11 @@ router.post("/register", async (req, res) => {
 // ── Login ─────────────────────────────────────────────────────────────────────
 router.post("/login", async (req, res) => {
   try {
-    const { email, password } = req.body;
+    let { email, password } = req.body;
     if (!email || !password)
       return res.status(400).json({ error: "email and password are required" });
+
+    email = email.trim().toLowerCase(); // same normalization as register — see note above
 
     const user = await queryOne("SELECT * FROM users WHERE email = ?", [email]);
     if (!user || !user.password_hash)
@@ -123,8 +169,9 @@ router.post("/login", async (req, res) => {
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return res.status(401).json({ error: "Invalid credentials" });
 
-    const accessToken  = signAccessToken(user.id);
-    const refreshToken = await signRefreshToken(user.id);
+    const sessionId    = await createSession(user.id, req);
+    const accessToken  = signAccessToken(user.id, sessionId);
+    const refreshToken = await signRefreshToken(user.id, sessionId);
     res.json({ accessToken, refreshToken, user: safeUser(user) });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -139,7 +186,12 @@ router.post("/refresh", async (req, res) => {
     const payload = jwt.verify(refreshToken, JWT_SECRET);
     const stored  = await queryOne("SELECT * FROM refresh_tokens WHERE token = ?", [refreshToken]);
     if (!stored) return res.status(401).json({ error: "Token revoked" });
-    const accessToken = signAccessToken(payload.sub);
+    // Bug fix: this used to mint a new access token with no session id, so
+    // ~15 minutes after any login (the access token's lifetime), the "current
+    // device" match on GET /sessions would silently go stale. Carrying
+    // stored.session_id forward keeps every reissued access token tied to
+    // the same login for as long as the refresh token is valid.
+    const accessToken = signAccessToken(payload.sub, stored.session_id ?? null);
     res.json({ accessToken });
   } catch {
     res.status(401).json({ error: "Invalid refresh token" });
@@ -150,6 +202,10 @@ router.post("/refresh", async (req, res) => {
 router.post("/logout", async (req, res) => {
   const { refreshToken } = req.body;
   if (refreshToken) {
+    const stored = await queryOne("SELECT session_id FROM refresh_tokens WHERE token = ?", [refreshToken]);
+    if (stored?.session_id) {
+      await execute("UPDATE sessions SET logout_at = datetime('now') WHERE id = ?", [stored.session_id]);
+    }
     await execute("DELETE FROM refresh_tokens WHERE token = ?", [refreshToken]);
   }
   res.json({ message: "Logged out" });
@@ -162,9 +218,10 @@ router.get("/google",
 router.get("/google/callback",
   passport.authenticate("google", { failureRedirect: "/login" }),
   async (req, res) => {
-    const accessToken  = signAccessToken(req.user.id);
-    const refreshToken = await signRefreshToken(req.user.id);
-    const clientURL    = process.env.CLIENT_URL || "http://localhost:5173";
+    const sessionId     = await createSession(req.user.id, req);
+    const accessToken   = signAccessToken(req.user.id, sessionId);
+    const refreshToken  = await signRefreshToken(req.user.id, sessionId);
+    const clientURL     = process.env.CLIENT_URL || "http://localhost:5173";
     res.redirect(`${clientURL}/auth/callback?access=${accessToken}&refresh=${refreshToken}`);
   }
 );
@@ -172,6 +229,26 @@ router.get("/google/callback",
 // ── Me ────────────────────────────────────────────────────────────────────────
 router.get("/me", authenticate, async (req, res) => {
   res.json({ user: safeUser(req.user) });
+});
+
+// ── Sessions (login/device history) ─────────────────────────────────────────
+router.get("/sessions", authenticate, async (req, res) => {
+  try {
+    const rows = await queryAll(
+      "SELECT id, device, ip, login_at, logout_at FROM sessions WHERE user_id = ? ORDER BY login_at DESC LIMIT 20",
+      [req.user.id]
+    );
+    const sessions = rows.map(s => ({
+      id:        s.id,
+      device:    s.device,
+      login_at:  s.login_at,
+      logout_at: s.logout_at || null,
+      current:   req.sessionId != null && Number(req.sessionId) === Number(s.id),
+    }));
+    res.json({ sessions });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── Update profile ─────────────────────────────────────────────────────────────
