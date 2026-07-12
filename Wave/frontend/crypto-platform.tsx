@@ -691,6 +691,12 @@ export default function App(){
   const ttot=(parseFloat(tsub)+parseFloat(tfee)).toFixed(2);
   const NAV=[{id:"dashboard",icon:"⬡",label:"Dashboard",short:"Home"},{id:"trade",icon:"⇄",label:"Trade",short:"Trade"},{id:"portfolio",icon:"◈",label:"Portfolio",short:"Portfolio"},{id:"history",icon:"⊞",label:"History",short:"History"}];
   const LABELS:Record<string,string>={dashboard:t("dashboard"),trade:t("trade"),portfolio:t("portfolio"),history:t("history"),settings:t("settings"),privacy:t("privacy"),notifications:"Notifications"};
+  const SERVICE_NAV=[
+    {id:"invest",icon:"◇",label:"Investment Plans"},
+    {id:"copy",icon:"↗",label:"Signal Copier"},
+    {id:"managed",icon:"◈",label:"Account Management"},
+  ];
+  const pageTitle:Record<string,string>={invest:"Investment Plans",copy:"Signal Copier",managed:"Account Management"};
   const nav=(id:string)=>{setPage(id);setSbOpen(false);};
   const pieData=port.holdings.filter(h=>h.amount>0).map(h=>({name:h.symbol,value:h.value,color:COINS[h.symbol]?.color||"#ccc"}));
 
@@ -1020,6 +1026,12 @@ export default function App(){
             <span className="sicon">{n.icon}</span>{n.label}
           </div>
         ))}
+        <div className="ssec" style={{marginTop:18}}>Wealth Services</div>
+        {SERVICE_NAV.map(n=>(
+          <div key={n.id} className={`sitem ${page===n.id?"active":""}`} onClick={()=>nav(n.id)}>
+            <span className="sicon">{n.icon}</span>{n.label}
+          </div>
+        ))}
         <div className="ssec" style={{marginTop:8}}>Account</div>
         <div className={`sitem ${page==="settings"?"active":""}`} onClick={()=>nav("settings")}>
           <span className="sicon">⚙</span>Settings
@@ -1078,7 +1090,7 @@ export default function App(){
             <div className="ttl">
               {page==="dashboard"
                 ? `Good ${new Date().getHours()<12?t("morning"):new Date().getHours()<17?t("afternoon"):t("evening")}, ${user.name.split(" ")[0]} 👋`
-                : (LANG[appSettings.language]?.[page]||LABELS[page])
+                : (LANG[appSettings.language]?.[page]||LABELS[page]||pageTitle[page])
               }
             </div>
             <div className="tdate">{new Date().toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div>
@@ -1308,6 +1320,24 @@ export default function App(){
         )}
 
         {/* ══ PORTFOLIO ══ */}
+        {(page==="invest"||page==="copy"||page==="managed")&&(
+          <div className="page-wrap">
+            {page==="invest"&&<>
+              <div style={{padding:mob?22:34,borderRadius:24,marginBottom:20,background:"linear-gradient(120deg,#172554,#4c1d95 55%,#111827)",border:"1px solid rgba(129,140,248,.4)"}}>
+                <div style={{fontSize:11,fontWeight:800,color:"#c4b5fd",letterSpacing:1.5,textTransform:"uppercase",marginBottom:10}}>Wave Wealth</div>
+                <div style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:mob?27:36,fontWeight:900,lineHeight:1.15}}>Build a portfolio designed for your future.</div>
+                <p style={{color:"#ddd6fe",fontSize:14,lineHeight:1.6,maxWidth:600,marginTop:12}}>Choose a structured plan, invest on your schedule, and keep every opportunity in one clear portfolio.</p>
+                <button className="btn btn-primary" style={{marginTop:18}} onClick={()=>toast2("Investment consultation request sent.")}>Start investing</button>
+              </div>
+              <div className="gcard" style={{padding:0,overflow:"hidden",marginBottom:20}}><div style={{padding:"14px 18px",display:"flex",justifyContent:"space-between",borderBottom:"1px solid var(--border)",fontWeight:800,fontSize:13}}><span>Live market pulse</span><span style={{color:"var(--green)",fontSize:11}}>● Live pricing</span></div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(145px,1fr))"}}>{Object.keys(COINS).map(s=>{const p=prices[s],up=(p?.change24h||0)>=0;return <a key={s} href={`https://www.tradingview.com/symbols/${s}USD/`} target="_blank" rel="noreferrer" style={{padding:"14px 18px",borderRight:"1px solid var(--border)",textDecoration:"none",color:"inherit"}}><b style={{fontSize:12}}>{s}/USD</b><div style={{fontSize:16,fontWeight:800,margin:"6px 0"}}>${(p?.price||0).toLocaleString()}</div><span style={{fontSize:11,fontWeight:700,color:up?"var(--green)":"var(--red)"}}>{up?"+":""}{(p?.change24h||0).toFixed(2)}% · TradingView ↗</span></a>})}</div></div>
+              <div className="stitle">Featured investment plans</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(230px,1fr))",gap:16,marginBottom:24}}>{[["Foundation","$250","Conservative","Diversified income, bonds & global ETFs.","#22c55e"],["Momentum","$1,000","Balanced","Growth-focused stocks, crypto & alternatives.","#818cf8"],["Legacy","$10,000","Growth","Bespoke multi-asset strategy with advisor access.","#f59e0b"]].map(x=><div key={x[0]} className="gcard" style={{borderTop:`3px solid ${x[4]}`}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><b style={{fontSize:18}}>{x[0]}</b><span style={{fontSize:11,color:x[4]}}>{x[2]}</span></div><p style={{fontSize:13,color:"var(--text2)",lineHeight:1.6}}>{x[3]}</p><div style={{fontSize:13,fontWeight:700,margin:"18px 0"}}>Minimum {x[1]}</div><button className="btn btn-primary" style={{width:"100%"}} onClick={()=>toast2(`${x[0]} plan application started.`)}>Choose plan</button></div>)}</div>
+              <div className="stitle">Investment categories</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(155px,1fr))",gap:10}}>{["Stocks","ETFs","Mutual Funds","Bonds & Commodities","Options International","Precious Metals","Crypto","DeFi","NFTs","Real Estate","Oil & Gas","Renewable Energy","Web3","Medical Cannabis","Loans & Grants","Financial Planning","Retirement Planning"].map((x,i)=><button key={x} onClick={()=>toast2(`${x} added to your investment interests.`)} style={{textAlign:"left",padding:15,borderRadius:14,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text)",cursor:"pointer",fontSize:12,fontWeight:700}}><span style={{color:["#818cf8","#22c55e","#f59e0b"][i%3],marginRight:7}}>●</span>{x}</button>)}</div>
+            </>}
+            {page==="copy"&&<><div className="gcard" style={{padding:28,marginBottom:18,background:"linear-gradient(135deg,var(--bg2),rgba(99,102,241,.16))"}}><div style={{fontSize:11,color:"var(--indigo2)",fontWeight:800,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Wave Signal Copier</div><div className="stitle" style={{fontSize:28,marginBottom:8}}>Copy strategies. Stay in control.</div><p style={{color:"var(--text2)",fontSize:13}}>Mirror selected signals with clear risk limits and full trade visibility.</p><button className="btn btn-primary" style={{marginTop:18}} onClick={()=>toast2("Signal copier request received. MT5 broker connection will be available when configured.")}>Connect strategy</button></div><div className="stats" style={{marginBottom:18}}>{[["Copier balance","$24,850.00"],["Realized profit","+$3,420.60"],["Win rate","68.4%"],["Risk level","Moderate"]].map((x,i)=><div className="stat" key={x[0]}><div className="stat-label">{x[0]}</div><div className="stat-value" style={{fontSize:21,color:i===1?"var(--green)":"var(--text)"}}>{x[1]}</div></div>)}</div><div className="gcard" style={{padding:0,overflow:"hidden"}}><div style={{padding:"18px 22px",fontWeight:800}}>Copied trades & profits</div><div className="txwrap"><table className="txt"><thead><tr><th>Strategy</th><th>Instrument</th><th>Direction</th><th>Opened</th><th>Profit</th><th>Status</th></tr></thead><tbody>{[["Apex Momentum","BTCUSD","Buy","Today, 09:42","+$482.10","Open"],["Atlas FX","EURUSD","Sell","Yesterday, 14:10","+$236.40","Closed"],["Apex Momentum","XAUUSD","Buy","Jul 10, 11:25","+$611.80","Closed"]].map((r,i)=><tr key={i}>{r.map((c,j)=><td key={j} style={{color:j===4?"var(--green)":undefined,fontWeight:j===4?800:undefined}}>{c}</td>)}</tr>)}</tbody></table></div></div></>}
+            {page==="managed"&&<><div style={{display:"grid",gridTemplateColumns:tab?"1fr":"1.2fr .8fr",gap:18}}><div className="gcard" style={{padding:30,background:"linear-gradient(135deg,#10212b,#13243e)"}}><div style={{fontSize:11,color:"#67e8f9",fontWeight:800,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>Private account management</div><div style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:30,fontWeight:900,lineHeight:1.2}}>Your ambitions, professionally managed.</div><p style={{color:"#bfdbfe",fontSize:14,lineHeight:1.6,marginTop:12}}>A tailored allocation across traditional, alternative and digital assets.</p><button className="btn btn-primary" style={{marginTop:20}} onClick={()=>toast2("Consultation request sent.")}>Request a consultation</button></div><div className="gcard"><div className="stitle">Account snapshot</div>{[["Managed value","$128,450.00"],["This month","+$4,821.28"],["Allocation","9 asset classes"],["Next review","July 24"]].map(x=><div key={x[0]} style={{display:"flex",justifyContent:"space-between",padding:"12px 0",borderBottom:"1px solid var(--border)",fontSize:13}}><span style={{color:"var(--text3)"}}>{x[0]}</span><b style={{color:x[0]==="This month"?"var(--green)":"var(--text)"}}>{x[1]}</b></div>)}</div></div><div className="stitle" style={{marginTop:24}}>Managed portfolio allocation</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:12}}>{[["Global Equities","36%","#818cf8"],["Fixed Income","22%","#22c55e"],["Real Assets","18%","#f59e0b"],["Digital Assets","14%","#a78bfa"],["Cash & Alternatives","10%","#38bdf8"]].map(x=><div className="gcard" key={x[0]}><div style={{fontSize:12,color:"var(--text3)"}}>{x[0]}</div><div style={{fontSize:24,fontWeight:900,margin:"9px 0"}}>{x[1]}</div><div style={{height:5,borderRadius:5,background:"var(--surface)"}}><div style={{height:"100%",width:x[1],background:x[2],borderRadius:5}}/></div></div>)}</div><div className="gcard" style={{marginTop:18}}><div className="stitle">VIP & Inner Circle</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))",gap:14}}>{[["VIP Monthly","$149 / month"],["VIP Lifetime","$1,499 once"],["Inner Circle","By invitation"]].map(x=><div key={x[0]} style={{border:"1px solid var(--border)",borderRadius:14,padding:16}}><b>{x[0]}</b><div style={{fontSize:18,fontWeight:900,margin:"10px 0"}}>{x[1]}</div><p style={{fontSize:12,color:"var(--text2)"}}>Premium signals, market briefings and priority support.</p><button className="btn btn-ghost btn-sm" style={{marginTop:12}} onClick={()=>toast2(`${x[0]} interest registered.`)}>Register interest</button></div>)}</div></div></>}
+          </div>
+        )}
+
         {page==="portfolio"&&<>
           <div className="stats" style={{marginBottom:mob?14:24}}>
             {[
