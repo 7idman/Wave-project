@@ -422,6 +422,45 @@ export default function App(){
   const[sbCollapsed,setSbCollapsed]=useState(false);  // desktop: sidebar hidden/shown
   const[profileOpen,setProfileOpen]=useState(false);  // profile-circle dropdown (topbar)
   const profileRef=useRef<HTMLDivElement>(null);
+  const sidebarRef=useRef<HTMLDivElement>(null);
+  const sidebarTouchRef=useRef<{y:number;scrollTop:number}|null>(null);
+  const onSidebarKeyDown=(e:any)=>{
+    if(!sidebarRef.current) return;
+    if(e.key==="ArrowDown"){
+      e.preventDefault();
+      sidebarRef.current.scrollTop += 48;
+    }
+    if(e.key==="ArrowUp"){
+      e.preventDefault();
+      sidebarRef.current.scrollTop -= 48;
+    }
+    if(e.key==="PageDown"){
+      e.preventDefault();
+      sidebarRef.current.scrollTop += sidebarRef.current.clientHeight;
+    }
+    if(e.key==="PageUp"){
+      e.preventDefault();
+      sidebarRef.current.scrollTop -= sidebarRef.current.clientHeight;
+    }
+    if(e.key==="Home"){
+      e.preventDefault();
+      sidebarRef.current.scrollTop = 0;
+    }
+    if(e.key==="End"){
+      e.preventDefault();
+      sidebarRef.current.scrollTop = sidebarRef.current.scrollHeight;
+    }
+  };
+  const onSidebarTouchStart=(e:any)=>{
+    if(!sidebarRef.current) return;
+    sidebarTouchRef.current={y:e.touches[0].clientY,scrollTop:sidebarRef.current.scrollTop};
+  };
+  const onSidebarTouchMove=(e:any)=>{
+    if(!sidebarRef.current || !sidebarTouchRef.current) return;
+    const delta=e.touches[0].clientY - sidebarTouchRef.current.y;
+    sidebarRef.current.scrollTop = sidebarTouchRef.current.scrollTop - delta;
+  };
+  const onSidebarTouchEnd=()=>{ sidebarTouchRef.current=null; };
   useEffect(()=>{
     const h=(e:MouseEvent)=>{ if(profileRef.current&&!profileRef.current.contains(e.target as Node)) setProfileOpen(false); };
     document.addEventListener("mousedown",h);
@@ -1112,7 +1151,7 @@ export default function App(){
       </Modal>
 
       {/* Sidebar */}
-      <div className={`sidebar ${sbOpen?"open":""} ${sbCollapsed?"collapsed":""}`}>
+      <div ref={sidebarRef} tabIndex={0} role="navigation" aria-label="Sidebar navigation" className={`sidebar ${sbOpen?"open":""} ${sbCollapsed?"collapsed":""}`} onKeyDown={onSidebarKeyDown} onTouchStart={onSidebarTouchStart} onTouchMove={onSidebarTouchMove} onTouchEnd={onSidebarTouchEnd}>
         <div className="shead" style={{paddingBottom:22}}>
           <div style={{background:"linear-gradient(135deg,rgba(99,102,241,.25),rgba(139,92,246,.18))",borderRadius:11,padding:"7px 8px",border:"1px solid rgba(99,102,241,.3)",boxShadow:"0 0 16px rgba(99,102,241,.25)",flexShrink:0}}>
             <WaveLogo size={22}/>
