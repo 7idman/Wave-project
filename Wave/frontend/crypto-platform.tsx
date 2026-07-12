@@ -221,7 +221,7 @@ const css=`
   .shead{display:flex;align-items:center;gap:12px;padding:22px;border-bottom:1px solid var(--border);margin-bottom:8px; margin-top:-25px;}
   .sb-close{margin-left:auto;width:30px;height:30px;border-radius:9px;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);flex-shrink:0;transition:all .15s;-webkit-tap-highlight-color:transparent;}
   .sb-close:hover{color:var(--text);border-color:var(--indigo2);}
-  .sb-open{position:fixed;top:24px;left:24px;z-index:250;width:42px;height:42px;border-radius:12px;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);box-shadow:0 6px 20px rgba(0,0,0,.18);transition:all .15s;-webkit-tap-highlight-color:transparent;}
+  .sb-open{flex-shrink:0;width:38px;height:38px;border-radius:11px;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);transition:all .15s;-webkit-tap-highlight-color:transparent;}
   .sb-open:hover{color:var(--text);border-color:var(--indigo2);}
   @media(min-width:641px){
     .sidebar.collapsed{transform:translateX(-100%);}
@@ -1201,13 +1201,7 @@ export default function App(){
       {/* Overlay — closes the sidebar on mobile when tapped outside it */}
       <div className={`overlay ${sbOpen?"open":""}`} onClick={()=>setSbOpen(false)}/>
 
-      {/* Floating button to reopen the sidebar once collapsed on desktop */}
-      {!mob&&sbCollapsed&&(
-        <div className="sb-open" onClick={()=>setSbCollapsed(false)} title="Open sidebar" role="button" aria-label="Open sidebar">
-          <svg width="20" height="15" viewBox="0 0 22 16" fill="none"><rect y="0" width="22" height="2.5" rx="1.25" fill="currentColor"/><rect y="6.75" width="16" height="2.5" rx="1.25" fill="currentColor"/><rect y="13.5" width="22" height="2.5" rx="1.25" fill="currentColor"/></svg>
-        </div>
-      )}
-
+     
       {/* Main */}
       <div className={`main ${sbCollapsed?"sb-collapsed":""}`}>
         {/* Mobile topbar */}
@@ -1242,6 +1236,12 @@ export default function App(){
 
         {/* Desktop topbar */}
         <div className="topbar">
+          <div style={{display:"flex",alignItems:"center",gap:14}}>
+         {sbCollapsed&&(
+           <div className="sb-open" onClick={()=>setSbCollapsed(false)} title="Open sidebar" role="button" aria-label="Open sidebar">
+           <svg width="18" height="14" viewBox="0 0 22 16" fill="none"><rect y="0" width="22" height="2.5" rx="1.25" fill="currentColor"/><rect y="6.75" width="16" height="2.5" rx="1.25" fill="currentColor"/><rect y="13.5" width="22" height="2.5" rx="1.25" fill="currentColor"/></svg>
+           </div>
+          )}
           <div>
             <div className="ttl">
               {page==="dashboard"
