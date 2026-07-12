@@ -225,7 +225,7 @@ const css=`
   .sb-open:hover{color:var(--text);border-color:var(--indigo2);}
   @media(min-width:641px){
     .sidebar.collapsed{transform:translateX(-100%);}
-    .main.sb-collapsed{margin-left:0;}
+    .main.sb-collapsed{margin-left:auto;margin-right:auto;}
   }
   .slogo{font-family:'Plus Jakarta Sans',sans-serif;font-weight:900;font-size:21px;background:linear-gradient(135deg,#818CF8,#6366F1);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:-.3px;}
   .ssec{font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);padding:0 22px 8px;margin-top:8px;}
