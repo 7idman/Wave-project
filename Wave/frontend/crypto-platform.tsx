@@ -218,7 +218,7 @@ const css=`
   .sidebar:hover::-webkit-scrollbar{width:6px;height:6px;}
   .sidebar:hover::-webkit-scrollbar-track{background:transparent;}
   .sidebar:hover::-webkit-scrollbar-thumb{background:rgba(99,102,241,.55);border-radius:999px;}
-  .shead{display:flex;align-items:center;gap:12px;padding:22px;border-bottom:1px solid var(--border);margin-bottom:2px;}
+  .shead{display:flex;align-items:center;gap:12px;padding:22px;border-bottom:1px solid var(--border);margin-bottom:8px;}
   .sb-close{margin-left:auto;width:30px;height:30px;border-radius:9px;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);flex-shrink:0;transition:all .15s;-webkit-tap-highlight-color:transparent;}
   .sb-close:hover{color:var(--text);border-color:var(--indigo2);}
   .sb-open{position:fixed;top:24px;left:24px;z-index:250;width:42px;height:42px;border-radius:12px;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);box-shadow:0 6px 20px rgba(0,0,0,.18);transition:all .15s;-webkit-tap-highlight-color:transparent;}
