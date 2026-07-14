@@ -119,6 +119,7 @@ app.use((err, req, res, next) => {
 async function start() {
   try {
     await initSchema();
+    await clearExpiredRefreshTokens();
     priceRoutes.fetchLivePrices().catch(console.warn);
     app.listen(PORT, () => {
       console.log(`🚀 Wave API running on http://localhost:${PORT}`);

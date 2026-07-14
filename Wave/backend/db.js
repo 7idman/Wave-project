@@ -193,4 +193,10 @@ async function initSchema() {
   console.log("✅ Database ready");
 }
 
-module.exports = { execute, queryOne, queryAll, batch, initSchema };
+/** Deletes all expired refresh tokens from the database. */
+async function clearExpiredRefreshTokens() {
+  await execute("DELETE FROM refresh_tokens WHERE expires_at < datetime('now')");
+  console.log("Cleaned up expired refresh tokens");
+}
+
+module.exports = { execute, queryOne, queryAll, batch, initSchema, clearExpiredRefreshTokens };
