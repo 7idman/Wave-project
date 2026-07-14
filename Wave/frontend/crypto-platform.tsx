@@ -1234,29 +1234,28 @@ export default function App(){
           )
         )}
 
+        
         {/* Desktop topbar */}
-        <div className="topbar">
-  <div>
-    <div className="ttl">
-      {page==="dashboard"
-        ? `Good ${new Date().getHours()<12?t("morning"):new Date().getHours()<17?t("afternoon"):t("evening")}, ${user.name.split(" ")[0]} 👋`
-        : (LANG[appSettings.language]?.[page]||LABELS[page]||pageTitle[page])
-      }
+<div className="topbar">
+  <div style={{display:"flex",alignItems:"center",gap:14}}>
+    <div className="sb-open" style={{visibility:sbCollapsed?"visible":"hidden"}} onClick={()=>setSbCollapsed(false)} title="Open sidebar" role="button" aria-label="Open sidebar">
+      <svg width="18" height="14" viewBox="0 0 22 16" fill="none"><rect y="0" width="22" height="2.5" rx="1.25" fill="currentColor"/><rect y="6.75" width="16" height="2.5" rx="1.25" fill="currentColor"/><rect y="13.5" width="22" height="2.5" rx="1.25" fill="currentColor"/></svg>
     </div>
-    <div className="tdate">{new Date().toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div>
+    <div>
+      <div className="ttl">
+        {page==="dashboard"
+          ? `Good ${new Date().getHours()<12?t("morning"):new Date().getHours()<17?t("afternoon"):t("evening")}, ${user.name.split(" ")[0]} 👋`
+          : (LANG[appSettings.language]?.[page]||LABELS[page]||pageTitle[page])
+        }
+      </div>
+      <div className="tdate">{new Date().toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div>
+    </div>
   </div>
   <div style={{display:"flex",alignItems:"center",gap:12}}>
-    {sbCollapsed&&(
-      <div className="sb-open" onClick={()=>setSbCollapsed(false)} title="Open sidebar" role="button" aria-label="Open sidebar">
-        <svg width="18" height="14" viewBox="0 0 22 16" fill="none"><rect y="0" width="22" height="2.5" rx="1.25" fill="currentColor"/><rect y="6.75" width="16" height="2.5" rx="1.25" fill="currentColor"/><rect y="13.5" width="22" height="2.5" rx="1.25" fill="currentColor"/></svg>
-      </div>
-    )}
     <div className="tchip"> {cur(port.cashBalance)}</div>
     <ProfileMenu/>
   </div>
-        </div>
-
-        {/* ══ DASHBOARD ══ */}
+</div>        {/* ══ DASHBOARD ══ */}
         {page==="dashboard"&&<>
           <div className="stats" style={{marginTop:mob?12:0}}>
             {[
