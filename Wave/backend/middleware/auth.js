@@ -47,6 +47,13 @@ const authenticate = async (req, res, next) => {
     const payload = jwt.verify(header.slice(7), JWT_SECRET);
     const user    = await queryOne("SELECT * FROM users WHERE id = ?", [payload.sub]);
     if (!user) return res.status(401).json({ error: "User not found" });
+    if (payload.sid != null) {
+      const activeSession = await queryOne(
+        "SELECT id FROM sessions WHERE id = ? AND user_id = ? AND logout_at IS NULL",
+        [payload.sid, user.id]
+      );
+      if (!activeSession) return res.status(401).json({ error: "Session has ended" });
+    }
     req.user      = user;
     req.sessionId = payload.sid ?? null;
     next();

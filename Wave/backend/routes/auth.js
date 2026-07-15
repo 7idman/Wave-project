@@ -92,7 +92,7 @@ passport.use(new GoogleStrategy(
           user = await queryOne("SELECT * FROM users WHERE id = ?", [user.id]);
         } else {
           const r = await execute(
-            "INSERT INTO users (google_id, email, name) VALUES (?, ?, ?)",
+            "INSERT INTO users (google_id, email, name, cash_balance) VALUES (?, ?, ?, 0)",
             [profile.id, email, name]
           );
           user = await queryOne("SELECT * FROM users WHERE id = ?", [r.lastInsertRowid]);
@@ -139,7 +139,7 @@ router.post("/register", async (req, res) => {
 
     const hash = await bcrypt.hash(password, 12);
     const r = await execute(
-      "INSERT INTO users (email, name, password_hash, date_of_birth, country) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO users (email, name, password_hash, date_of_birth, country, cash_balance) VALUES (?, ?, ?, ?, ?, 0)",
       [email, name, hash, date_of_birth || null, country || null]
     );
     const user = await queryOne("SELECT * FROM users WHERE id = ?", [r.lastInsertRowid]);
@@ -186,6 +186,10 @@ router.post("/refresh", async (req, res) => {
     const payload = jwt.verify(refreshToken, JWT_SECRET);
     const stored  = await queryOne("SELECT * FROM refresh_tokens WHERE token = ?", [refreshToken]);
     if (!stored) return res.status(401).json({ error: "Token revoked" });
+    if (stored.session_id != null) {
+      const activeSession = await queryOne("SELECT id FROM sessions WHERE id = ? AND user_id = ? AND logout_at IS NULL", [stored.session_id, payload.sub]);
+      if (!activeSession) return res.status(401).json({ error: "Session has ended" });
+    }
     // Bug fix: this used to mint a new access token with no session id, so
     // ~15 minutes after any login (the access token's lifetime), the "current
     // device" match on GET /sessions would silently go stale. Carrying
@@ -235,17 +239,34 @@ router.get("/me", authenticate, async (req, res) => {
 router.get("/sessions", authenticate, async (req, res) => {
   try {
     const rows = await queryAll(
-      "SELECT id, device, ip, login_at, logout_at FROM sessions WHERE user_id = ? ORDER BY login_at DESC LIMIT 20",
+      "SELECT id, device, ip, login_at FROM sessions WHERE user_id = ? AND logout_at IS NULL ORDER BY login_at DESC LIMIT 20",
       [req.user.id]
     );
     const sessions = rows.map(s => ({
       id:        s.id,
       device:    s.device,
       login_at:  s.login_at,
-      logout_at: s.logout_at || null,
       current:   req.sessionId != null && Number(req.sessionId) === Number(s.id),
     }));
     res.json({ sessions });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/sessions/:id/logout", authenticate, async (req, res) => {
+  try {
+    const sessionId = Number(req.params.id);
+    if (!Number.isInteger(sessionId) || sessionId < 1)
+      return res.status(400).json({ error: "Invalid session id" });
+
+    const result = await execute(
+      "UPDATE sessions SET logout_at = datetime('now') WHERE id = ? AND user_id = ? AND logout_at IS NULL",
+      [sessionId, req.user.id]
+    );
+    if (!result.rowsAffected) return res.status(404).json({ error: "Active device not found" });
+    await execute("DELETE FROM refresh_tokens WHERE session_id = ?", [sessionId]);
+    res.json({ message: "Device signed out" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

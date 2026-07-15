@@ -18,6 +18,7 @@ interface ChartPt     { t:number; v:number; }
 interface AppSettings { twoFA:boolean; notifications:boolean; currency:string; theme:string; language:string; }
 interface SiteUpdate  { id:number|string; title:string; body:string; created_at:string; }
 interface LoginEvent  { id:number|string; device:string; ip?:string; login_at:string; logout_at?:string|null; current?:boolean; }
+interface Activity    { id:number|string; type:string; label:string; amount:number; created_at:string; }
 
 /* ── Language translations ── */
 const LANG:Record<string,Record<string,string>>={
@@ -169,11 +170,9 @@ const css=`
     .theme-light .gcard{padding:28px;}
   }
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-  html{-webkit-text-size-adjust:100%;scrollbar-width:none;}
+  html{-webkit-text-size-adjust:100%;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent;scrollbar-gutter:stable;}
   html,body{background:var(--bg);overflow-x:hidden;}
-  html::-webkit-scrollbar{width:0;height:0;}
-  html:hover{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent;}
-  html:hover::-webkit-scrollbar{width:4px;height:4px;}
+  html::-webkit-scrollbar{width:6px;height:6px;}
   html:hover::-webkit-scrollbar-track{background:transparent;}
   html:hover::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:2px;}
   .app{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased;}
@@ -212,13 +211,11 @@ const css=`
   .chip{padding:6px 14px;border-radius:100px;font-size:11px;font-weight:700;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text2);transition:all .15s;-webkit-tap-highlight-color:transparent;white-space:nowrap;}
   .chip.active{background:var(--indigo);border-color:var(--indigo);color:#fff;box-shadow:0 4px 14px rgba(99,102,241,.3);}
   .chip:hover:not(.active){border-color:var(--border2);color:var(--text);}
-  .sidebar{width:250px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:24px 0;position:fixed;left:0;top:0;bottom:0;z-index:300;transition:transform .25s cubic-bezier(.4,0,.2,1);overflow-y:auto;scrollbar-width:none;scrollbar-color:transparent transparent;}
-  .sidebar::-webkit-scrollbar{width:0;height:0;}
-  .sidebar:hover{scrollbar-width:thin;scrollbar-color:rgba(183, 198, 199, 0.96) transparent;}
-  .sidebar:hover::-webkit-scrollbar{width:6px;height:6px;}
+  .sidebar{width:272px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:18px 10px;position:fixed;left:0;top:0;bottom:0;z-index:300;transition:transform .25s cubic-bezier(.4,0,.2,1);overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(99,102,241,.55) transparent;scrollbar-gutter:stable;}
+  .sidebar::-webkit-scrollbar{width:6px;height:6px;}
   .sidebar:hover::-webkit-scrollbar-track{background:transparent;}
   .sidebar:hover::-webkit-scrollbar-thumb{background:rgba(99,102,241,.55);border-radius:999px;}
-  .shead{display:flex;align-items:center;gap:12px;padding:22px;border-bottom:1px solid var(--border);margin-bottom:8px; margin-top:-25px;}
+  .shead{display:flex;align-items:center;gap:12px;padding:10px 12px 18px;border-bottom:1px solid var(--border);margin:0 2px 18px;}
   .sb-close{margin-left:auto;width:30px;height:30px;border-radius:9px;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);flex-shrink:0;transition:all .15s;-webkit-tap-highlight-color:transparent;}
   .sb-close:hover{color:var(--text);border-color:var(--indigo2);}
   .sb-open{flex-shrink:0;width:38px;height:38px;border-radius:11px;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);transition:all .15s;-webkit-tap-highlight-color:transparent;}
@@ -228,12 +225,12 @@ const css=`
     .main.sb-collapsed{margin-left:auto;margin-right:auto;}
   }
   .slogo{font-family:'Plus Jakarta Sans',sans-serif;font-weight:900;font-size:21px;background:linear-gradient(135deg,#818CF8,#6366F1);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:-.3px;}
-  .ssec{font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);padding:0 22px 8px;margin-top:8px;}
-  .sitem{display:flex;align-items:center;gap:11px;padding:11px 22px;color:var(--text2);font-size:13px;font-weight:500;cursor:pointer;transition:all .15s;-webkit-tap-highlight-color:transparent;margin:1px 10px;border-radius:10px;}
+  .ssec{font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);padding:0 12px 9px;margin-top:12px;}
+  .sitem{display:flex;align-items:center;gap:11px;padding:12px 14px;color:var(--text2);font-size:13px;font-weight:500;cursor:pointer;transition:all .15s;-webkit-tap-highlight-color:transparent;margin:2px 2px;border-radius:12px;}
   .sitem:hover{color:var(--text);background:var(--surface2);}
   .sitem.active{color:#fff;background:linear-gradient(135deg,rgba(99,102,241,.25),rgba(139,92,246,.15));}
   .sicon{font-size:17px;width:22px;text-align:center;}
-  .sbot{position:sticky;bottom:0;margin-top:auto;padding:16px 16px 0;border-top:1px solid var(--border);background:linear-gradient(to bottom,rgba(17,20,36,0),var(--bg2) 30%);z-index:2;}
+  .sbot{position:sticky;bottom:0;margin-top:auto;padding:18px 6px 2px;border-top:1px solid var(--border);background:linear-gradient(to bottom,rgba(17,20,36,0),var(--bg2) 30%);z-index:2;}
   .suser{display:flex;align-items:center;gap:10px;padding:12px;border-radius:12px;cursor:pointer;border:1px solid var(--border);transition:all .15s;background:var(--surface);margin-top:0;}
   .suser:hover{border-color:var(--indigo2);background:rgba(99,102,241,.08);}
   .av{border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Plus Jakarta Sans',sans-serif;font-weight:800;flex-shrink:0;background:linear-gradient(135deg,#6366F1,#8B5CF6);color:white;overflow:hidden;}
@@ -266,7 +263,7 @@ const css=`
     .range-pills{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;width:100%;}
     .range-pills .chip{justify-content:center;padding:5px 2px;font-size:10px;}
   }
-  .main{margin-left:240px;flex:1;padding:36px;max-width:1240px;}
+  .main{margin-left:272px;flex:1;padding:40px;max-width:1272px;}
   .topbar{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:32px;}
   .ttl{font-family:'Plus Jakarta Sans',sans-serif;font-weight:800;font-size:26px;color:var(--text);}
   .tdate{font-size:12px;color:var(--text3);margin-top:4px;}
@@ -339,7 +336,7 @@ const css=`
   .ct-err{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:var(--r2);padding:11px 14px;font-size:13px;color:#EF4444;font-weight:600;margin-bottom:14px;}
   .avatar-ring{width:88px;height:88px;border-radius:50%;border:3px solid var(--indigo2);box-shadow:0 0 0 3px rgba(99,102,241,.2);cursor:pointer;position:relative;overflow:hidden;flex-shrink:0;}
   .avatar-ring:hover::after{content:'📷';position:absolute;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;font-size:24px;}
-  @media(max-width:900px){.sidebar{width:200px;}.main{margin-left:200px;padding:26px 22px;}.stats{grid-template-columns:repeat(2,1fr);}.crow{grid-template-columns:1fr;}.hgrid{grid-template-columns:repeat(2,1fr);}.tgrid{grid-template-columns:1fr;}.settings-grid{grid-template-columns:1fr;}.pbig{font-size:26px;}.stat-value{font-size:22px;}}
+  @media(max-width:900px){.sidebar{width:220px;}.main{margin-left:220px;padding:26px 22px;}.stats{grid-template-columns:repeat(2,1fr);}.crow{grid-template-columns:1fr;}.hgrid{grid-template-columns:repeat(2,1fr);}.tgrid{grid-template-columns:1fr;}.settings-grid{grid-template-columns:1fr;}.pbig{font-size:26px;}.stat-value{font-size:22px;}}
   @media(max-width:640px){.sidebar{transform:translateX(-100%);width:260px;}.sidebar.open{transform:translateX(0);}.overlay.open{display:block;}.bnav{display:flex;}.mtop{display:flex;}.main{margin-left:0;padding:0 14px calc(96px + env(safe-area-inset-bottom,16px));}.topbar{display:none;}.stats{grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px;}.crow{grid-template-columns:1fr;gap:12px;margin-bottom:14px;}.hgrid{grid-template-columns:repeat(2,1fr);gap:10px;}.tgrid{grid-template-columns:1fr;}.settings-grid{grid-template-columns:1fr;}.stat{padding:16px;}.stat-value{font-size:20px;}.gcard{padding:16px;}.hi{padding:14px;}.tcrd{padding:16px;}.pbig{font-size:24px;}.hamt{font-size:18px;}.stitle{font-size:16px;}.txwrap table{display:none;}.txcards{display:flex;}}
   @media(max-width:375px){.stat-value{font-size:18px;}.pbig{font-size:21px;}.hamt{font-size:16px;}.stats,.hgrid{gap:8px;}.bni{font-size:8px;padding:8px 2px 7px;}.bni-icon{font-size:17px;}}
   /* Extra bottom padding on non-dashboard pages on mobile */
@@ -469,6 +466,7 @@ export default function App(){
   const[loginErr,setLoginErr] =useState("");
   const[siteUpdates,setSiteUpdates]=useState<SiteUpdate[]>([]);
   const[loginHistory,setLoginHistory]=useState<LoginEvent[]>([]);
+  const[activities,setActivities]=useState<Activity[]>([]);
   const[notifLoading,setNotifLoading]=useState(false);
   const[appSettings,setAppSettings]=useState<AppSettings>(()=>{
     try{
@@ -597,6 +595,7 @@ export default function App(){
     Promise.allSettled([
       api.get("/notifications/updates").then(d=>setSiteUpdates(d.updates??[])).catch(e=>console.warn("site updates:",e.message)),
       api.get("/auth/sessions").then(d=>setLoginHistory(d.sessions??[])).catch(e=>console.warn("login history:",e.message)),
+      api.get("/notifications/activity").then(d=>setActivities(d.activities??[])).catch(e=>console.warn("activity:",e.message)),
     ]).finally(()=>setNotifLoading(false));
   },[page,user]);
 
@@ -607,7 +606,7 @@ export default function App(){
     }
     setLoading(true);
     try{
-      const d=await api.post("/trades",{type:"withdraw",symbol:"USD",amount:Number(amount.toFixed(2))});
+      const d=await api.post("/trades",{type:"investment",amount:Number(amount.toFixed(2)),label});
       await loadData();
       toast2(`${label} activated — $${Number(amount.toFixed(2)).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})} deducted from balance.`,"🟢");
       return d;
@@ -679,6 +678,14 @@ export default function App(){
   const doLogout=async()=>{
     try{await api.post("/auth/logout",{refreshToken:_refresh});}catch{}
    api.clearTokens();setUser(null);setAccountLoading(false);setPage("dashboard");toast2("Signed out");
+  };
+  const signOutDevice=async(session:LoginEvent)=>{
+    if(session.current){ doLogout(); return; }
+    try{
+      await api.post(`/auth/sessions/${session.id}/logout`,{});
+      setLoginHistory(items=>items.filter(item=>item.id!==session.id));
+      toast2(`${session.device} signed out`);
+    }catch(e:any){toast2(e.message||"Unable to sign out this device","âš ",false);}
   };
 
   /* Save profile */
@@ -1794,6 +1801,7 @@ export default function App(){
                     <div>
                       <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{s.device}{s.current&&<span className="badge badge-green" style={{marginLeft:8,fontSize:9}}>This device</span>}</div>
                       <div style={{fontSize:11,color:"var(--text3)"}}>Signed in {new Date(s.login_at).toLocaleString()}</div>
+                      <button className="btn btn-danger btn-sm" style={{marginTop:8}} onClick={()=>signOutDevice(s)}>{s.current?"Sign out":"Sign out device"}</button>
                     </div>
                   </div>
                   <div style={{fontSize:11,color:"var(--text3)",fontWeight:600,textAlign:"right"}}>
@@ -1805,19 +1813,19 @@ export default function App(){
 
             <div className="gcard">
               <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:16}}>⚡ Recent Activity</div>
-              {txs.slice(0,5).map((tx,i)=>(
+              {activities.slice(0,5).map((tx,i)=>(
                 <div key={i} className="setting-row" style={{borderBottom:i<4?"1px solid var(--border)":"none",paddingTop:12,paddingBottom:12}}>
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
                     <div style={{width:34,height:34,borderRadius:"50%",background:tx.type==="buy"||tx.type==="deposit"?"rgba(16,185,129,.15)":"rgba(239,68,68,.1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>
                       {tx.type==="buy"?"🟢":tx.type==="sell"?"🔴":tx.type==="deposit"?"Deposit":""}
                     </div>
                     <div>
-                      <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{tx.type.charAt(0).toUpperCase()+tx.type.slice(1)} {tx.symbol}</div>
-                      <div style={{fontSize:11,color:"var(--text3)"}}>{tx.created_at?.slice(0,10)}</div>
+                      <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{tx.type==="investment"?`${tx.label} activated`:`${tx.type.charAt(0).toUpperCase()+tx.type.slice(1)} ${tx.label}`}</div>
+                      <div style={{fontSize:11,color:"var(--text3)"}}>{new Date(tx.created_at).toLocaleString()}</div>
                     </div>
                   </div>
                   <div style={{fontSize:13,fontWeight:700,color:tx.type==="buy"||tx.type==="withdraw"?"var(--red)":"var(--green)"}}>
-                    {tx.type==="buy"||tx.type==="withdraw"?"-":"+"}${(tx.total||0).toLocaleString()}
+                    {tx.type==="buy"||tx.type==="withdraw"||tx.type==="investment"?"-":"+"}${Number(tx.amount||0).toLocaleString()}
                   </div>
                 </div>
               ))}

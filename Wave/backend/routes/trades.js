@@ -11,15 +11,29 @@ const WITHDRAW_FEE = 0.005; // 0.5% withdrawal
 
 router.post("/", async (req, res) => {
   try {
-    const { type, symbol, amount } = req.body;
+    const { type, symbol, amount, label } = req.body;
     const userId = req.user.id;
 
-    if (!["buy","sell","deposit","withdraw"].includes(type))
-      return res.status(400).json({ error: "type must be buy, sell, deposit, or withdraw" });
+    if (!["buy","sell","deposit","withdraw","investment"].includes(type))
+      return res.status(400).json({ error: "type must be buy, sell, deposit, withdraw, or investment" });
     if (!amount || isNaN(amount) || parseFloat(amount) <= 0)
       return res.status(400).json({ error: "amount must be a positive number" });
 
     const qty = parseFloat(amount);
+
+    // A plan activation reduces available cash, but it is not a withdrawal.
+    // Keep it in a dedicated activity log so its notification is accurate.
+    if (type === "investment") {
+      const result = await execute(
+        "UPDATE users SET cash_balance = cash_balance - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance >= ?",
+        [qty, userId, qty]
+      );
+      if (result.rowsAffected === 0) return res.status(400).json({ error: "Insufficient balance" });
+      const activityLabel = typeof label === "string" && label.trim() ? label.trim().slice(0, 120) : "Investment plan";
+      await execute("INSERT INTO activity_log (user_id, type, label, amount) VALUES (?, ?, ?, ?)", [userId, "investment", activityLabel, qty]);
+      const user = await queryOne("SELECT cash_balance FROM users WHERE id = ?", [userId]);
+      return res.status(201).json({ message: `${activityLabel} activated`, cashBalance: user.cash_balance });
+    }
 
     // ── DEPOSIT ────────────────────────────────────────────────────────────
     // No race condition risk here — adding money can never overdraw an account,

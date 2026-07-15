@@ -91,7 +91,7 @@ async function initSchema() {
       country          TEXT,
       kyc_id_status    TEXT    NOT NULL DEFAULT 'pending',
       kyc_addr_status  TEXT    NOT NULL DEFAULT 'pending',
-      cash_balance     REAL    NOT NULL DEFAULT 10000.00,
+      cash_balance     REAL    NOT NULL DEFAULT 0.00,
       created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
       updated_at       TEXT    NOT NULL DEFAULT (datetime('now'))
     )`,
@@ -142,6 +142,14 @@ async function initSchema() {
       body       TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`,
+    `CREATE TABLE IF NOT EXISTS activity_log (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      type       TEXT    NOT NULL,
+      label      TEXT    NOT NULL,
+      amount     REAL    NOT NULL DEFAULT 0,
+      created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
   ];
 
   for (const sql of tables) {
@@ -186,7 +194,7 @@ async function initSchema() {
   if (!updateCount || Number(updateCount.c) === 0) {
     await execute(
       "INSERT INTO site_updates (title, body) VALUES (?, ?)",
-      ["Welcome to Wave", "Your paper-trading account starts with $10,000 in demo cash. Explore the dashboard, place a few trades, and check back here for new features as they ship."]
+      ["Welcome to Wave", "Your account starts with a zero balance. Add funds when you are ready, then explore the dashboard, place trades, and check back here for new features as they ship."]
     );
   }
 
