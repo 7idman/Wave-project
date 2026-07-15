@@ -15,7 +15,7 @@ const session        = require("express-session");
 const MemoryStore    = require("memorystore")(session);
 const passport       = require("passport");
 const rateLimit      = require("express-rate-limit");
-const { initSchema } = require("./db");
+const { initSchema, execute } = require("./db");
 const { authenticate } = require("./middleware/auth");
 
 const authRoutes      = require("./routes/auth");
@@ -119,6 +119,10 @@ app.use((err, req, res, next) => {
 async function start() {
   try {
     await initSchema();
+    const cleanup = await execute("DELETE FROM refresh_tokens WHERE expires_at < datetime('now')");
+if (cleanup.rowsAffected > 0) {
+  console.log(`🧹 Cleared ${cleanup.rowsAffected} expired refresh token(s)`);
+}
     priceRoutes.fetchLivePrices().catch(console.warn);
     app.listen(PORT, () => {
       console.log(`🚀 Wave API running on http://localhost:${PORT}`);
