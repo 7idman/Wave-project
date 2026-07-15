@@ -178,6 +178,8 @@ const css=`
   html:hover{scrollbar-color:rgba(148,150,168,.42) transparent;}
   html:hover::-webkit-scrollbar-thumb{background:rgba(148,150,168,.42);}
   .app{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased;}
+  .app:not(.theme-light){background:radial-gradient(900px 520px at 92% -12%,rgba(99,102,241,.13),transparent 62%),radial-gradient(700px 420px at 12% 105%,rgba(139,92,246,.08),transparent 65%),var(--bg);}
+  .app:not(.theme-light) .gcard,.app:not(.theme-light) .stat{box-shadow:0 12px 32px rgba(0,0,0,.16);}
   .gcard{position:relative;border-radius:var(--r);background:var(--bg2);padding:24px;}
   .gcard::before{content:'';position:absolute;inset:0;border-radius:var(--r);padding:1px;background:linear-gradient(135deg,rgba(99,102,241,.4),rgba(139,92,246,.2),rgba(255,255,255,.05));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none;}
   .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:none;cursor:pointer;font-family:'Inter',sans-serif;font-weight:600;border-radius:100px;transition:transform .2s cubic-bezier(.2,.8,.2,1),box-shadow .2s ease,background .2s ease,border-color .2s ease,color .2s ease,opacity .2s ease;-webkit-tap-highlight-color:transparent;white-space:nowrap;will-change:transform;}
@@ -280,6 +282,12 @@ const css=`
   .ttl{font-family:'Plus Jakarta Sans',sans-serif;font-weight:800;font-size:26px;color:var(--text);}
   .tdate{font-size:12px;color:var(--text3);margin-top:4px;}
   .tchip{padding:9px 20px;border-radius:100px;background:linear-gradient(135deg,rgba(99,102,241,.15),rgba(139,92,246,.1));border:1px solid rgba(99,102,241,.25);color:var(--indigo2);font-size:12px;font-weight:700;}
+  .balance-chip{cursor:pointer;font-family:inherit;transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease;}
+  .balance-chip:hover{transform:translateY(-2px);border-color:rgba(129,140,248,.7);box-shadow:0 8px 22px rgba(99,102,241,.22);}
+  .balance-chip:active{transform:scale(.97);}
+  .balance-chip:focus-visible{outline:3px solid rgba(129,140,248,.38);outline-offset:3px;}
+  .stat.balance-link{cursor:pointer;transition:transform .2s ease,box-shadow .2s ease;}
+  .stat.balance-link:hover{transform:translateY(-3px);box-shadow:0 16px 38px rgba(0,0,0,.24);}
   .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px;}
   .crow{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:24px;}
   .hgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
@@ -355,6 +363,44 @@ const css=`
   @media(max-width:640px){
     .page-wrap{padding-bottom:20px;}
   }
+  /* Public landing page */
+  .landing{min-height:100vh;overflow:hidden;position:relative;background:#080A10;color:#F7F8FC;}
+  .landing::before{content:'';position:absolute;inset:0;pointer-events:none;opacity:.22;background-image:radial-gradient(rgba(255,255,255,.45) .55px,transparent .55px);background-size:7px 7px;mask-image:linear-gradient(to bottom,#000,transparent 64%);}
+  .landing-orb{position:absolute;border-radius:50%;filter:blur(10px);pointer-events:none;will-change:transform;}
+  .landing-orb.one{width:680px;height:680px;top:-340px;left:calc(50% - 340px);background:radial-gradient(circle,rgba(99,102,241,.31),rgba(99,102,241,0) 67%);animation:orb-float 13s ease-in-out infinite alternate;}
+  .landing-orb.two{width:540px;height:540px;top:480px;right:-240px;background:radial-gradient(circle,rgba(6,182,212,.15),rgba(6,182,212,0) 69%);animation:orb-float 16s ease-in-out -4s infinite alternate-reverse;}
+  .landing-nav,.landing-main,.landing-footer{position:relative;z-index:1;width:min(1180px,calc(100% - 40px));margin:0 auto;}
+  .landing-nav{height:86px;display:flex;align-items:center;justify-content:space-between;}
+  .landing-brand{display:flex;align-items:center;gap:10px;color:#fff;font-family:'Plus Jakarta Sans',sans-serif;font-size:20px;font-weight:800;letter-spacing:-.6px;}
+  .landing-navlinks{display:flex;gap:28px;align-items:center;color:#A7AABC;font-size:13px;font-weight:600;}
+  .landing-navlinks a{color:inherit;text-decoration:none;transition:color .2s ease;}.landing-navlinks a:hover{color:#fff;}
+  .landing-signin{padding:9px 16px!important;font-size:12px!important;}
+  .landing-hero{min-height:650px;display:grid;grid-template-columns:minmax(0,1.08fr) minmax(360px,.72fr);align-items:center;gap:80px;padding:66px 0 92px;}
+  .landing-eyebrow{display:inline-flex;gap:8px;align-items:center;padding:7px 11px;border:1px solid rgba(157,166,255,.2);border-radius:100px;background:rgba(129,140,248,.08);color:#BAC0FF;font-size:11px;font-weight:700;letter-spacing:.02em;margin-bottom:24px;}
+  .landing-eyebrow i{width:6px;height:6px;background:#5EEAD4;border-radius:50%;box-shadow:0 0 12px #5EEAD4;}
+  .landing-title{max-width:700px;font-family:'Plus Jakarta Sans',sans-serif;font-size:clamp(46px,6vw,78px);font-weight:800;line-height:.99;letter-spacing:-.065em;margin:0;}
+  .landing-title span{background:linear-gradient(105deg,#FFFFFF 12%,#A5B4FC 47%,#67E8F9 92%);background-clip:text;-webkit-background-clip:text;color:transparent;}
+  .landing-lede{max-width:555px;margin:25px 0 31px;color:#A7AABC;font-size:17px;line-height:1.65;}
+  .landing-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;}.landing-actions .btn{padding:14px 21px;border-radius:12px;}.landing-actions .btn-ghost{background:rgba(255,255,255,.045);}
+  .landing-trust{display:flex;gap:20px;align-items:center;margin-top:30px;color:#7C8094;font-size:11px;font-weight:600;}.landing-trust span{display:flex;align-items:center;gap:6px;}.landing-trust b{color:#E2E4EF;font-size:13px;}
+  .landing-access{position:relative;}.landing-access::before{content:'';position:absolute;inset:-1px;border-radius:25px;background:linear-gradient(145deg,rgba(165,180,252,.42),rgba(103,232,249,.03) 45%,rgba(139,92,246,.25));filter:blur(.2px);}
+  .landing-access-inner{position:relative;background:linear-gradient(145deg,rgba(23,26,38,.94),rgba(14,16,25,.97));border-radius:24px;padding:10px;box-shadow:0 32px 90px rgba(0,0,0,.42);}
+  .landing-access .gcard{padding:24px!important;background:transparent;box-shadow:none!important;}.landing-access .gcard::before{display:none;}
+  .landing-auth-kicker{font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:#9298B5;font-weight:800;margin-bottom:7px;}.landing-auth-heading{font-family:'Plus Jakarta Sans',sans-serif;font-size:21px;letter-spacing:-.04em;margin-bottom:18px;}
+  .landing-logos{border-top:1px solid rgba(255,255,255,.08);border-bottom:1px solid rgba(255,255,255,.08);display:flex;align-items:center;justify-content:space-between;gap:20px;padding:24px 0;color:#777C91;font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;}
+  .landing-section{padding:124px 0;position:relative;}.landing-section-head{max-width:650px;margin-bottom:48px;}.landing-overline{color:#A5B4FC;text-transform:uppercase;letter-spacing:.13em;font-weight:800;font-size:11px;margin-bottom:13px;}.landing-h2{font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:-.055em;font-size:clamp(34px,4vw,55px);line-height:1.05;margin:0 0 16px;}.landing-section-head p{color:#999EAF;font-size:16px;line-height:1.65;margin:0;}
+  .landing-features{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}.landing-feature{min-height:244px;border:1px solid rgba(255,255,255,.09);background:linear-gradient(145deg,rgba(255,255,255,.055),rgba(255,255,255,.018));border-radius:20px;padding:25px;transition:transform .3s cubic-bezier(.2,.8,.2,1),border-color .3s ease,background .3s ease;}.landing-feature:hover{transform:translateY(-7px);border-color:rgba(165,180,252,.35);background:linear-gradient(145deg,rgba(129,140,248,.12),rgba(255,255,255,.025));}.landing-icon{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;color:#C7D2FE;background:linear-gradient(135deg,rgba(129,140,248,.24),rgba(103,232,249,.1));border:1px solid rgba(165,180,252,.2);font-size:18px;margin-bottom:50px;}.landing-feature h3{font-family:'Plus Jakarta Sans',sans-serif;font-size:17px;margin:0 0 9px;letter-spacing:-.03em;}.landing-feature p{color:#999EAF;font-size:13px;line-height:1.6;margin:0;}
+  .landing-showcase{display:grid;grid-template-columns:1fr .82fr;gap:22px;align-items:stretch;}.landing-terminal{border-radius:26px;padding:28px;min-height:430px;background:linear-gradient(145deg,#181B2A,#0E1018 60%);border:1px solid rgba(255,255,255,.09);box-shadow:0 24px 70px rgba(0,0,0,.3);overflow:hidden;position:relative;}.landing-terminal::after{content:'';position:absolute;inset:auto -12% -56% 12%;height:310px;background:radial-gradient(ellipse,rgba(99,102,241,.34),transparent 69%);}.terminal-top{display:flex;justify-content:space-between;color:#AEB2C4;font-size:12px;font-weight:700;}.terminal-value{font-family:'Plus Jakarta Sans',sans-serif;font-size:45px;letter-spacing:-.06em;margin:45px 0 3px;}.terminal-gain{color:#5EEAD4;font-weight:700;font-size:13px;}.terminal-chart{position:absolute;z-index:1;left:28px;right:28px;bottom:28px;height:170px;border-bottom:1px solid rgba(255,255,255,.09);background:linear-gradient(180deg,transparent 0 24%,rgba(255,255,255,.045) 25% 25.7%,transparent 26% 49%,rgba(255,255,255,.045) 50% 50.7%,transparent 51% 74%,rgba(255,255,255,.045) 75% 75.7%,transparent 76%);}.terminal-chart svg{width:100%;height:100%;overflow:visible;}.landing-sidecard{border-radius:26px;padding:28px;background:linear-gradient(145deg,rgba(99,102,241,.17),rgba(18,20,31,.9) 56%);border:1px solid rgba(165,180,252,.2);display:flex;flex-direction:column;justify-content:space-between;}.landing-sidecard p{font-size:13px;color:#B4B8C8;line-height:1.6;}.side-stat{padding-top:20px;border-top:1px solid rgba(255,255,255,.1);font-family:'Plus Jakarta Sans',sans-serif;font-size:42px;letter-spacing:-.06em;}.side-stat small{display:block;color:#8990A7;font:600 11px 'Inter',sans-serif;letter-spacing:.04em;margin-top:5px;}
+  .landing-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.1);border-radius:20px;overflow:hidden;}.landing-stat{background:#10121A;padding:30px 24px;}.landing-stat strong{display:block;font-family:'Plus Jakarta Sans',sans-serif;font-size:34px;letter-spacing:-.055em;}.landing-stat span{color:#9297AA;font-size:12px;margin-top:7px;display:block;}
+  .landing-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;counter-reset:step;}.landing-step{padding:26px 4px 0;border-top:1px solid rgba(255,255,255,.14);}.landing-step b{color:#A5B4FC;font-size:12px;letter-spacing:.08em;}.landing-step h3{font-family:'Plus Jakarta Sans',sans-serif;font-size:21px;letter-spacing:-.04em;margin:38px 0 10px;}.landing-step p{color:#979CAD;font-size:13px;line-height:1.65;max-width:275px;}
+  .landing-quotes{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}.landing-quote{padding:25px;border-radius:20px;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.028);}.landing-quote p{font-family:'Plus Jakarta Sans',sans-serif;font-size:17px;line-height:1.5;letter-spacing:-.03em;margin:0 0 28px;}.landing-person{display:flex;align-items:center;gap:10px;color:#9499AA;font-size:12px;}.landing-avatar{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#818CF8,#22D3EE);color:#071019;display:grid;place-items:center;font-size:10px;font-weight:900;}.landing-person b{display:block;color:#E5E7EF;font-size:12px;margin-bottom:2px;}
+  .landing-faq{border-top:1px solid rgba(255,255,255,.1);}.landing-faq details{border-bottom:1px solid rgba(255,255,255,.1);padding:20px 0;}.landing-faq summary{cursor:pointer;list-style:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:17px;font-weight:700;display:flex;justify-content:space-between;gap:20px;}.landing-faq summary::-webkit-details-marker{display:none;}.landing-faq summary::after{content:'+';color:#A5B4FC;font-size:22px;font-weight:400;line-height:.7;}.landing-faq details[open] summary::after{content:'–';}.landing-faq p{max-width:700px;color:#999EAF;font-size:14px;line-height:1.65;margin:13px 0 0;}
+  .landing-cta{margin:28px 0 90px;padding:64px clamp(28px,7vw,90px);position:relative;overflow:hidden;border-radius:28px;background:linear-gradient(120deg,#3730A3,#4F46E5 46%,#155E75);border:1px solid rgba(255,255,255,.22);text-align:center;}.landing-cta::after{content:'';position:absolute;width:420px;height:420px;border-radius:50%;right:-120px;top:-260px;background:rgba(255,255,255,.14);filter:blur(15px);}.landing-cta>*{position:relative;z-index:1;}.landing-cta h2{font-family:'Plus Jakarta Sans',sans-serif;font-size:clamp(34px,5vw,58px);line-height:1;letter-spacing:-.06em;margin:0 0 16px;}.landing-cta p{color:#E0E7FF;margin:0 auto 24px;max-width:480px;line-height:1.6;}.landing-cta .btn{background:#fff;color:#17182C;box-shadow:0 10px 28px rgba(9,10,30,.24);border-radius:12px;padding:14px 21px;}
+  .landing-footer{border-top:1px solid rgba(255,255,255,.09);padding:28px 0 42px;display:flex;justify-content:space-between;align-items:center;color:#73788B;font-size:12px;}.landing-footer-links{display:flex;gap:20px;}.landing-footer-links a{color:inherit;text-decoration:none;}.landing-footer-links a:hover{color:#fff;}
+  @keyframes orb-float{from{transform:translate3d(-3%,0,0) scale(.96);}to{transform:translate3d(4%,5%,0) scale(1.06);}}
+  @media (prefers-reduced-motion:no-preference){.landing-hero>*{animation:landing-in .7s cubic-bezier(.2,.8,.2,1) both;}.landing-access{animation-delay:.14s!important;}.landing-section{animation:landing-in .7s cubic-bezier(.2,.8,.2,1) both;animation-timeline:view();animation-range:entry 5% cover 24%;}@keyframes landing-in{from{opacity:0;transform:translateY(18px);}to{opacity:1;transform:none;}}}
+  @media (prefers-reduced-motion:reduce){.landing *{animation:none!important;transition:none!important;scroll-behavior:auto!important;}}
+  @media(max-width:800px){.landing-navlinks{display:none;}.landing-hero{grid-template-columns:1fr;gap:40px;padding:52px 0 72px;}.landing-title{font-size:clamp(42px,12vw,64px);}.landing-access{max-width:500px;}.landing-features,.landing-quotes{grid-template-columns:1fr;}.landing-showcase{grid-template-columns:1fr;}.landing-stats{grid-template-columns:1fr 1fr;}.landing-steps{grid-template-columns:1fr;gap:36px;}.landing-section{padding:84px 0;}.landing-logos{overflow:auto;justify-content:flex-start;white-space:nowrap;}.landing-footer{flex-direction:column;align-items:flex-start;gap:18px;}.landing-nav,.landing-main,.landing-footer{width:min(100% - 28px,1180px);}}
 `;
 const _se=document.createElement("style");_se.textContent=css;document.head.appendChild(_se);
 
@@ -837,6 +883,7 @@ export default function App(){
   const ACCOUNT_MANAGEMENT_FEE=1500;
   const pageTitle:Record<string,string>={invest:"Investment Plans",copy:"Signal Copier",managed:"Account Management"};
   const nav=(id:string)=>{setPage(id);setSbOpen(false);};
+  const goToDeposit=()=>{setTtype("deposit");setTamt("");nav("trade");};
   const pieData=port.holdings.filter(h=>h.amount>0).map(h=>({name:h.symbol,value:h.value,color:COINS[h.symbol]?.color||"#ccc"}));
 
   const AvatarDisplay=({size=40,fontSize=15}:{size?:number;fontSize?:number})=>(
@@ -888,13 +935,27 @@ export default function App(){
     </div>
   );
   if(!user) return(
-    <div className="app" style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:20,position:"relative",overflow:"hidden"}}>
-      <div style={{position:"fixed",top:-150,left:-100,width:500,height:500,borderRadius:"50%",background:"radial-gradient(circle,rgba(99,102,241,.15),transparent 70%)",pointerEvents:"none"}}/>
-      <div style={{position:"fixed",bottom:-100,right:-80,width:400,height:400,borderRadius:"50%",background:"radial-gradient(circle,rgba(139,92,246,.12),transparent 70%)",pointerEvents:"none"}}/>
-      <div style={{position:"relative",zIndex:1,width:"100%",maxWidth:420}}>
-        <div style={{textAlign:"center",marginBottom:28}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:10,marginBottom:12}}><WaveLogo size={38}/><span style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontWeight:800,fontSize:28,color:"var(--text)"}}>Wave</span></div>
-          <p style={{color:"var(--text3)",fontSize:14,fontWeight:500}}>Professional crypto investing platform</p>
+    <div className="app landing">
+      <div className="landing-orb one"/><div className="landing-orb two"/>
+      <nav className="landing-nav">
+        <div className="landing-brand"><WaveLogo size={28}/>Wave</div>
+        <div className="landing-navlinks"><a href="#platform">Platform</a><a href="#how-it-works">How it works</a><a href="#security">Security</a><a href="#faq">FAQ</a></div>
+        <button className="btn btn-ghost landing-signin" onClick={()=>{setAuthTab("login");document.getElementById("access")?.scrollIntoView({behavior:"smooth",block:"center"});}}>Sign in</button>
+      </nav>
+      <main className="landing-main">
+        <section className="landing-hero">
+          <div>
+            <div className="landing-eyebrow"><i/>The modern home for your wealth</div>
+            <h1 className="landing-title">Invest with more <span>clarity.</span></h1>
+            <p className="landing-lede">A composed, intelligent investing experience built to help you move from first deposit to your next financial milestone.</p>
+            <div className="landing-actions"><button className="btn btn-primary" onClick={()=>{setAuthTab("register");document.getElementById("access")?.scrollIntoView({behavior:"smooth",block:"center"});}}>Start investing <span>→</span></button><a className="btn btn-ghost" href="#platform">Explore the platform</a></div>
+            <div className="landing-trust"><span><b>◈</b> Bank-grade security</span><span><b>◎</b> Built for long-term investors</span></div>
+          </div>
+          <div id="access" className="landing-access">
+            <div className="landing-access-inner">
+              <div className="landing-auth-kicker">Secure access</div><div className="landing-auth-heading">Your financial future, in motion.</div>
+      <div style={{position:"relative",zIndex:1,width:"100%"}}>
+        <div style={{display:"none"}}>
         </div>
         <div className="gcard" style={{padding:"28px 24px"}}>
           {/* Tabs */}
@@ -1083,6 +1144,19 @@ export default function App(){
           </p>
         </div>
       </div>
+            </div>
+          </div>
+        </section>
+        <div className="landing-logos"><span>Designed for conviction</span><span>Private by default</span><span>Built for every market</span><span>Always in your control</span></div>
+        <section id="platform" className="landing-section"><div className="landing-section-head"><div className="landing-overline">A calmer way to invest</div><h2 className="landing-h2">Everything you need. Nothing you do not.</h2><p>Wave brings your cash, crypto, and investing decisions into one intentional workspace.</p></div><div className="landing-features">{[['O','A clear financial picture','See your cash, holdings, and portfolio performance in a single, considered view.'],['~','Trade with confidence','Thoughtful execution flows make every decision easy to understand before you commit.'],['*','Strategies that fit you','Choose plans and signals that align with your goals, not somebody else’s noise.']].map(([icon,title,text])=><article className="landing-feature" key={title}><div className="landing-icon">{icon}</div><h3>{title}</h3><p>{text}</p></article>)}</div></section>
+        <section id="security" className="landing-section" style={{paddingTop:20}}><div className="landing-showcase"><div className="landing-terminal"><div className="terminal-top"><span>Portfolio overview</span><span>Today</span></div><div className="terminal-value">$24,850.00</div><div className="terminal-gain">+3.82% this month</div><div className="terminal-chart"><svg viewBox="0 0 600 170" preserveAspectRatio="none"><defs><linearGradient id="wave-chart" x1="0" x2="0" y1="0" y2="1"><stop stopColor="#818CF8" stopOpacity=".34"/><stop offset="1" stopColor="#818CF8" stopOpacity="0"/></linearGradient></defs><path d="M0,140 C42,125 53,135 82,115 S130,130 164,98 S221,110 253,76 S303,96 342,58 S396,75 436,37 S492,66 530,27 S574,39 600,10 L600,170 L0,170Z" fill="url(#wave-chart)"/><path d="M0,140 C42,125 53,135 82,115 S130,130 164,98 S221,110 253,76 S303,96 342,58 S396,75 436,37 S492,66 530,27 S574,39 600,10" fill="none" stroke="#A5B4FC" strokeWidth="3" vectorEffect="non-scaling-stroke"/></svg></div></div><div className="landing-sidecard"><div><div className="landing-overline">Protected at every step</div><h2 className="landing-h2" style={{fontSize:"clamp(30px,3vw,43px)"}}>Your wealth deserves a quieter kind of security.</h2><p>Session-level controls, transparent activity, and built-in safeguards work together without getting in your way.</p></div><div className="side-stat">24/7<small>Account activity monitoring</small></div></div></div></section>
+        <section className="landing-section" style={{paddingTop:42}}><div className="landing-stats">{[['$2.4B+','Assets represented'],['99.99%','Platform uptime'],['150+','Markets available'],['4.9/5','Member experience']].map(([value,label])=><div className="landing-stat" key={label}><strong>{value}</strong><span>{label}</span></div>)}</div></section>
+        <section id="how-it-works" className="landing-section"><div className="landing-section-head"><div className="landing-overline">Designed for momentum</div><h2 className="landing-h2">From first step to better habits.</h2><p>Wave removes the friction between intent and action without oversimplifying the decisions that matter.</p></div><div className="landing-steps">{[['01','Create your secure account','Set up in minutes with the details you need to keep your account protected.'],['02','Fund with intention','Add cash, explore the market, and make every next step visible before you take it.'],['03','Build what is next','Invest directly or put your strategy on autopilot while staying in control.']].map(([number,title,text])=><div className="landing-step" key={number}><b>{number}</b><h3>{title}</h3><p>{text}</p></div>)}</div></section>
+        <section className="landing-section" style={{paddingTop:18}}><div className="landing-section-head"><div className="landing-overline">Member stories</div><h2 className="landing-h2">Made for people who value their time.</h2></div><div className="landing-quotes">{[['It feels less like a trading app and more like a considered financial home.','AM','Avery M.','Product leader'],['The clarity is the difference. I always know where I am and what I am choosing next.','JL','Jordan L.','Independent investor'],['Everything is deliberate, from the activity feed to the way the portfolio moves.','SK','Samira K.','Creative director']].map(([quote,initials,name,role])=><figure className="landing-quote" key={name}><p>&ldquo;{quote}&rdquo;</p><figcaption className="landing-person"><span className="landing-avatar">{initials}</span><span><b>{name}</b>{role}</span></figcaption></figure>)}</div></section>
+        <section id="faq" className="landing-section" style={{paddingTop:40}}><div className="landing-section-head"><div className="landing-overline">Questions, answered</div><h2 className="landing-h2">A straightforward experience deserves straightforward answers.</h2></div><div className="landing-faq">{[['How does Wave keep my account secure?','Wave uses encrypted transport, bcrypt password hashing, short-lived access tokens, and device-level session controls.'],['Can I start with any amount?','Yes. Your account starts with a zero balance, so you can add funds and start on your own terms.'],['Will I see fees before I act?','Always. Trade and withdrawal fees are made clear before confirmation, with activity recorded in your account history.']].map(([q,a])=><details key={q}><summary>{q}</summary><p>{a}</p></details>)}</div></section>
+        <section className="landing-cta"><h2>Let your next move feel inevitable.</h2><p>Join Wave and build a more intentional relationship with your financial future.</p><button className="btn" onClick={()=>{setAuthTab("register");document.getElementById("access")?.scrollIntoView({behavior:"smooth",block:"center"});}}>Create your account <span>-&gt;</span></button></section>
+      </main>
+      <footer className="landing-footer"><div className="landing-brand"><WaveLogo size={22}/>Wave</div><span>Copyright 2026 Wave Invest. Built for what is next.</span><div className="landing-footer-links"><a href="#security">Security</a><a href="#faq">Support</a><a href="#access">Privacy</a></div></footer>
       {toast&&<div style={{position:"fixed",bottom:24,right:16,left:16,maxWidth:380,margin:"0 auto",padding:"13px 18px",borderRadius:100,background:toast.ok===false?"rgba(239,68,68,.25)":"rgba(16,185,129,.25)",border:`1px solid ${toast.ok===false?"rgba(239,68,68,.5)":"rgba(16,185,129,.5)"}`,color:"#fff",fontSize:13,fontWeight:700,zIndex:999,display:"flex",alignItems:"center",gap:9,backdropFilter:"blur(15px)",WebkitBackdropFilter:"blur(15px)"}}><span>{toast.icon}</span>{toast.msg}</div>}
     </div>
   );
@@ -1240,7 +1314,7 @@ export default function App(){
             <WaveLogo size={24}/><div className="mlogo">Wave</div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <div className="mchip">{cur(port.cashBalance)}</div>
+            <button type="button" className="mchip balance-chip" onClick={goToDeposit} title="Add funds">{cur(port.cashBalance)}</button>
             <ProfileMenu size={30} fontSize={12}/>
           </div>
         </div>
@@ -1279,7 +1353,7 @@ export default function App(){
     </div>
   </div>
   <div style={{display:"flex",alignItems:"center",gap:12}}>
-    <div className="tchip"> {cur(port.cashBalance)}</div>
+    <button type="button" className="tchip balance-chip" onClick={goToDeposit} title="Add funds">{cur(port.cashBalance)}</button>
     <ProfileMenu/>
   </div>
 </div>        {/* ══ DASHBOARD ══ */}
@@ -1291,7 +1365,7 @@ export default function App(){
               {l:"Cash Balance",   v:cur(port.cashBalance),                  s:"Available",  pos:null,  glow:"#10B981"},
               {l:"24h P&L",        v:"+$1,248.50",                                                                     s:"+3.82%",     pos:true,  glow:"#8B5CF6"},
             ].map((s,i)=>(
-              <div key={i} className="stat">
+              <div key={i} className={`stat ${s.l==="Total Balance"||s.l==="Cash Balance"?"balance-link":""}`} onClick={s.l==="Total Balance"||s.l==="Cash Balance"?goToDeposit:undefined}>
                 <div className="stat-glow" style={{background:s.glow}}/>
                 <div className="stat-label">{s.l}</div>
                 <div className="stat-value">{s.v}</div>
