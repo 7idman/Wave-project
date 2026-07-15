@@ -170,17 +170,27 @@ const css=`
     .theme-light .gcard{padding:28px;}
   }
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-  html{-webkit-text-size-adjust:100%;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent;scrollbar-gutter:stable;}
+  html{-webkit-text-size-adjust:100%;scrollbar-width:thin;scrollbar-color:transparent transparent;scrollbar-gutter:stable;}
   html,body{background:var(--bg);overflow-x:hidden;}
   html::-webkit-scrollbar{width:6px;height:6px;}
   html:hover::-webkit-scrollbar-track{background:transparent;}
-  html:hover::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:2px;}
+  html::-webkit-scrollbar-thumb{background:transparent;border-radius:999px;}
+  html:hover{scrollbar-color:rgba(148,150,168,.42) transparent;}
+  html:hover::-webkit-scrollbar-thumb{background:rgba(148,150,168,.42);}
   .app{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased;}
   .gcard{position:relative;border-radius:var(--r);background:var(--bg2);padding:24px;}
   .gcard::before{content:'';position:absolute;inset:0;border-radius:var(--r);padding:1px;background:linear-gradient(135deg,rgba(99,102,241,.4),rgba(139,92,246,.2),rgba(255,255,255,.05));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none;}
-  .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:none;cursor:pointer;font-family:'Inter',sans-serif;font-weight:600;border-radius:100px;transition:all .18s;-webkit-tap-highlight-color:transparent;white-space:nowrap;}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:none;cursor:pointer;font-family:'Inter',sans-serif;font-weight:600;border-radius:100px;transition:transform .2s cubic-bezier(.2,.8,.2,1),box-shadow .2s ease,background .2s ease,border-color .2s ease,color .2s ease,opacity .2s ease;-webkit-tap-highlight-color:transparent;white-space:nowrap;will-change:transform;}
+  .btn:hover:not(:disabled){transform:translateY(-2px);}
+  .btn:active:not(:disabled){transform:translateY(0) scale(.96);transition-duration:.08s;}
+  .btn:focus-visible{outline:3px solid rgba(129,140,248,.38);outline-offset:3px;}
+  @keyframes signout-spin{to{transform:rotate(360deg);}}
+  @keyframes signout-enter{from{opacity:0;backdrop-filter:blur(0);}to{opacity:1;backdrop-filter:blur(10px);}}
+  .signout-overlay{position:fixed;inset:0;z-index:1200;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(15,17,23,.54);color:#fff;animation:signout-enter .2s ease both;}
+  .signout-spinner{width:42px;height:42px;border-radius:50%;border:3px solid rgba(255,255,255,.2);border-top-color:#fff;animation:signout-spin .75s linear infinite;}
+  .signout-label{font-size:14px;font-weight:700;letter-spacing:.01em;}
   .btn-primary{background:linear-gradient(135deg,#6366F1,#8B5CF6);color:white;padding:13px 24px;font-size:14px;box-shadow:0 4px 20px rgba(99,102,241,.35);}
-  .btn-primary:hover{box-shadow:0 8px 30px rgba(99,102,241,.5);transform:translateY(-1px);}
+  .btn-primary:hover{box-shadow:0 10px 30px rgba(99,102,241,.5);}
   .btn-primary:disabled{opacity:.5;transform:none;cursor:not-allowed;}
   .btn-ghost{background:var(--surface2);color:var(--text);padding:11px 20px;font-size:13px;border:1px solid var(--border2);}
   .btn-ghost:hover{background:var(--surface);border-color:var(--indigo2);}
@@ -211,10 +221,12 @@ const css=`
   .chip{padding:6px 14px;border-radius:100px;font-size:11px;font-weight:700;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text2);transition:all .15s;-webkit-tap-highlight-color:transparent;white-space:nowrap;}
   .chip.active{background:var(--indigo);border-color:var(--indigo);color:#fff;box-shadow:0 4px 14px rgba(99,102,241,.3);}
   .chip:hover:not(.active){border-color:var(--border2);color:var(--text);}
-  .sidebar{width:272px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:18px 10px;position:fixed;left:0;top:0;bottom:0;z-index:300;transition:transform .25s cubic-bezier(.4,0,.2,1);overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(99,102,241,.55) transparent;scrollbar-gutter:stable;}
+  .sidebar{width:272px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:18px 10px;position:fixed;left:0;top:0;bottom:0;z-index:300;transition:transform .25s cubic-bezier(.4,0,.2,1);overflow-y:auto;scrollbar-width:thin;scrollbar-color:transparent transparent;scrollbar-gutter:stable;}
   .sidebar::-webkit-scrollbar{width:6px;height:6px;}
   .sidebar:hover::-webkit-scrollbar-track{background:transparent;}
-  .sidebar:hover::-webkit-scrollbar-thumb{background:rgba(99,102,241,.55);border-radius:999px;}
+  .sidebar::-webkit-scrollbar-thumb{background:transparent;border-radius:999px;}
+  .sidebar:hover{scrollbar-color:rgba(148,150,168,.5) transparent;}
+  .sidebar:hover::-webkit-scrollbar-thumb{background:rgba(148,150,168,.5);}
   .shead{display:flex;align-items:center;gap:12px;padding:10px 12px 18px;border-bottom:1px solid var(--border);margin:0 2px 18px;}
   .sb-close{margin-left:auto;width:30px;height:30px;border-radius:9px;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);flex-shrink:0;transition:all .15s;-webkit-tap-highlight-color:transparent;}
   .sb-close:hover{color:var(--text);border-color:var(--indigo2);}
@@ -412,6 +424,7 @@ export default function App(){
   const[tcoin,setTcoin]       =useState("BTC");
   const[tamt,setTamt]         =useState("");
   const[loading,setLoading]   =useState(false);
+  const[signingOut,setSigningOut]=useState(false);
   const[toast,setToast]       =useState<{msg:string;icon:string;ok?:boolean}|null>(null);
   const[email,setEmail]       =useState("");
   const[pw,setPw]             =useState("");
@@ -676,8 +689,14 @@ export default function App(){
     finally{setLoading(false);}
   };
   const doLogout=async()=>{
+    if(signingOut) return;
+    setSigningOut(true);
+    const started=Date.now();
     try{await api.post("/auth/logout",{refreshToken:_refresh});}catch{}
-   api.clearTokens();setUser(null);setAccountLoading(false);setPage("dashboard");toast2("Signed out");
+    // Keep the confirmation motion visible briefly, even on a fast connection.
+    const remaining=420-(Date.now()-started);
+    if(remaining>0) await new Promise(resolve=>setTimeout(resolve,remaining));
+    api.clearTokens();setUser(null);setAccountLoading(false);setPage("dashboard");setSigningOut(false);toast2("Signed out");
   };
   const signOutDevice=async(session:LoginEvent)=>{
     if(session.current){ doLogout(); return; }
@@ -1071,6 +1090,7 @@ export default function App(){
   /* ═══════════ APP ═══════════ */
   return(
     <div className={`app ${appSettings.theme==="Light"?"theme-light":""}`}>
+      {signingOut&&<div className="signout-overlay" role="status" aria-live="polite"><div className="signout-spinner"/><div className="signout-label">Signing you out…</div></div>}
       {/* Modals */}
       <Modal open={editOpen} onClose={()=>setEditOpen(false)} title="Edit Profile">
         <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:20}}>
