@@ -385,7 +385,7 @@ const css=`
   .landing-navlinks{display:flex;gap:28px;align-items:center;color:#A7AABC;font-size:13px;font-weight:600;}
   .landing-navlinks a{color:inherit;text-decoration:none;transition:color .2s ease;}.landing-navlinks a:hover{color:#fff;}
   .landing-signin{padding:9px 16px!important;font-size:12px!important;}
-  .landing-hero{min-height:650px;display:grid;grid-template-columns:minmax(0,1.08fr) minmax(360px,.72fr);align-items:center;gap:80px;padding:66px 0 92px;}
+  .landing-hero{min-height:650px;display:grid;grid-template-columns:minmax(0,1.08fr) minmax(360px,.72fr);align-items:center;gap:80px;padding:66px 0 92px;}.landing-hero-copy{align-self:start;padding-top:86px;}
   .landing-eyebrow{display:inline-flex;gap:8px;align-items:center;padding:7px 11px;border:1px solid rgba(157,166,255,.2);border-radius:100px;background:rgba(129,140,248,.08);color:#BAC0FF;font-size:11px;font-weight:700;letter-spacing:.02em;margin-bottom:24px;}
   .landing-eyebrow i{width:6px;height:6px;background:#5EEAD4;border-radius:50%;box-shadow:0 0 12px #5EEAD4;}
   .landing-title{max-width:700px;font-family:'Plus Jakarta Sans',sans-serif;font-size:clamp(46px,6vw,78px);font-weight:800;line-height:.99;letter-spacing:-.065em;margin:0;}
@@ -413,7 +413,7 @@ const css=`
   @keyframes orb-float{from{transform:translate3d(-3%,0,0) scale(.96);}to{transform:translate3d(4%,5%,0) scale(1.06);}}
   @media (prefers-reduced-motion:no-preference){.landing-hero>*{animation:landing-in .7s cubic-bezier(.2,.8,.2,1) both;}.landing-access{animation-delay:.14s!important;}.landing-section{animation:landing-in .7s cubic-bezier(.2,.8,.2,1) both;animation-timeline:view();animation-range:entry 5% cover 24%;}.landing-feature,.landing-principle,.landing-quote{animation:landing-in .65s cubic-bezier(.2,.8,.2,1) both;animation-timeline:view();animation-range:entry 4% cover 22%;}@keyframes landing-in{from{opacity:0;transform:translateY(18px);}to{opacity:1;transform:none;}}}
   @media (prefers-reduced-motion:reduce){.landing *{animation:none!important;transition:none!important;scroll-behavior:auto!important;}}
-  @media(max-width:800px){.landing-navlinks{display:none;}.landing-hero{grid-template-columns:1fr;gap:40px;padding:52px 0 72px;}.landing-title{font-size:clamp(42px,12vw,64px);}.landing-access{max-width:500px;}.landing-features,.landing-quotes,.landing-principles{grid-template-columns:1fr;}.landing-showcase{grid-template-columns:1fr;}.landing-stats{grid-template-columns:1fr 1fr;}.landing-steps{grid-template-columns:1fr;gap:36px;}.landing-section{padding:84px 0;}.landing-logos{overflow:auto;justify-content:flex-start;white-space:nowrap;}.landing-footer{flex-direction:column;align-items:flex-start;gap:18px;}.landing-nav,.landing-main,.landing-footer{width:min(100% - 28px,1180px);}}
+  @media(max-width:800px){.landing-navlinks{display:none;}.landing-hero{grid-template-columns:1fr;gap:40px;padding:52px 0 72px;}.landing-hero-copy{padding-top:0;}.landing-title{font-size:clamp(42px,12vw,64px);}.landing-access{max-width:500px;}.landing-features,.landing-quotes,.landing-principles{grid-template-columns:1fr;}.landing-showcase{grid-template-columns:1fr;}.landing-stats{grid-template-columns:1fr 1fr;}.landing-steps{grid-template-columns:1fr;gap:36px;}.landing-section{padding:84px 0;}.landing-logos{overflow:auto;justify-content:flex-start;white-space:nowrap;}.landing-footer{flex-direction:column;align-items:flex-start;gap:18px;}.landing-nav,.landing-main,.landing-footer{width:min(100% - 28px,1180px);}}
   @media(max-width:500px){.landing-principle{padding:24px;}.landing-checklist{grid-template-columns:1fr;}.landing-trust{align-items:flex-start;flex-direction:column;gap:9px;}.landing-access .gcard.landing-auth-card{padding:22px!important;}}
 
   /* Signed-in product shell: the same composed, premium language as the public site. */
@@ -978,7 +978,7 @@ export default function App(){
       </nav>
       <main className="landing-main">
         <section className="landing-hero">
-          <div>
+          <div className="landing-hero-copy">
             <div className="landing-eyebrow"><i/>The modern home for your wealth</div>
             <h1 className="landing-title">Invest with more <span>clarity.</span></h1>
             <p className="landing-lede">A composed, intelligent investing experience built to help you move from first deposit to your next financial milestone.</p>
