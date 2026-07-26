@@ -74,11 +74,12 @@ const RANGE_VOL:Record<Range,number>={
 /* ── Fallback data ── */
 const FB_PRICES:Record<string,Price>={BTC:{price:67420.50,change24h:2.34},ETH:{price:3521.80,change24h:-1.12},SOL:{price:178.40,change24h:5.67},ADA:{price:0.612,change24h:-0.45},LINK:{price:18.92,change24h:3.21}};
 
-const LANDING_CHARTS={
+type LandingChartPoint={label:string;value:number};
+const LANDING_CHARTS:Record<"1W"|"1M"|"1Y",LandingChartPoint[]>={
   "1W":[{label:"Mon",value:23120},{label:"Tue",value:23280},{label:"Wed",value:23090},{label:"Thu",value:23740},{label:"Fri",value:23980},{label:"Sat",value:23860},{label:"Sun",value:24180}],
   "1M":[{label:"Week 1",value:21580},{label:"Week 1",value:21840},{label:"Week 2",value:21730},{label:"Week 2",value:22260},{label:"Week 3",value:22120},{label:"Week 3",value:22940},{label:"Week 4",value:22820},{label:"Today",value:24850}],
   "1Y":[{label:"Jan",value:16200},{label:"Feb",value:17100},{label:"Mar",value:16840},{label:"Apr",value:18520},{label:"May",value:19430},{label:"Jun",value:18990},{label:"Jul",value:20760},{label:"Aug",value:21520},{label:"Sep",value:21140},{label:"Oct",value:22910},{label:"Nov",value:23880},{label:"Dec",value:24850}],
-} as const;
+};
 type LandingRange=keyof typeof LANDING_CHARTS;
 const LANDING_META:Record<LandingRange,string>={"1W":"+2.14% this week","1M":"+3.82% this month","1Y":"+53.40% this year"};
 
