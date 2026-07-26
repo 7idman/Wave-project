@@ -85,6 +85,7 @@ const COIN_STATS:Record<string,{cap:string;vol:string;supply:string}>={
   ADA:{cap:"$22B",  vol:"$1.1B", supply:"35.2B"},
   LINK:{cap:"$11B", vol:"$720M", supply:"587M"},
 };
+const COIN_DETAILS:Record<string,{about:string;rank:string;ath:string}>={BTC:{about:"The original decentralized digital asset, designed for secure peer-to-peer value transfer.",rank:"#1",ath:"$73,737"},ETH:{about:"A programmable blockchain powering decentralized apps, digital assets, and smart contracts.",rank:"#2",ath:"$4,878"},SOL:{about:"A high-performance blockchain built for fast, low-cost applications and digital markets.",rank:"#5",ath:"$260"},ADA:{about:"A research-led blockchain focused on scalable, secure, and sustainable financial infrastructure.",rank:"#10",ath:"$3.10"},LINK:{about:"A decentralized oracle network that connects smart contracts with real-world data.",rank:"#15",ath:"$52.88"}};
 
 /* ── Coin SVG Icons ── */
 const CoinIcon=({symbol,size=32}:{symbol:string;size?:number})=>{
@@ -401,6 +402,22 @@ const css=`
   @media (prefers-reduced-motion:no-preference){.landing-hero>*{animation:landing-in .7s cubic-bezier(.2,.8,.2,1) both;}.landing-access{animation-delay:.14s!important;}.landing-section{animation:landing-in .7s cubic-bezier(.2,.8,.2,1) both;animation-timeline:view();animation-range:entry 5% cover 24%;}@keyframes landing-in{from{opacity:0;transform:translateY(18px);}to{opacity:1;transform:none;}}}
   @media (prefers-reduced-motion:reduce){.landing *{animation:none!important;transition:none!important;scroll-behavior:auto!important;}}
   @media(max-width:800px){.landing-navlinks{display:none;}.landing-hero{grid-template-columns:1fr;gap:40px;padding:52px 0 72px;}.landing-title{font-size:clamp(42px,12vw,64px);}.landing-access{max-width:500px;}.landing-features,.landing-quotes{grid-template-columns:1fr;}.landing-showcase{grid-template-columns:1fr;}.landing-stats{grid-template-columns:1fr 1fr;}.landing-steps{grid-template-columns:1fr;gap:36px;}.landing-section{padding:84px 0;}.landing-logos{overflow:auto;justify-content:flex-start;white-space:nowrap;}.landing-footer{flex-direction:column;align-items:flex-start;gap:18px;}.landing-nav,.landing-main,.landing-footer{width:min(100% - 28px,1180px);}}
+
+  /* Signed-in product shell: the same composed, premium language as the public site. */
+  .dashboard-shell{background:radial-gradient(900px 500px at 86% -8%,rgba(99,102,241,.16),transparent 58%),radial-gradient(620px 430px at 7% 100%,rgba(6,182,212,.07),transparent 66%),#080A10;isolation:isolate;}
+  .dashboard-shell::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.18;background-image:radial-gradient(rgba(255,255,255,.42) .5px,transparent .6px);background-size:7px 7px;mask-image:linear-gradient(to bottom,#000,transparent 75%);}
+  .dashboard-shell .sidebar{top:16px;bottom:16px;left:16px;width:250px;padding:14px 10px;border:1px solid rgba(255,255,255,.09);border-radius:22px;background:linear-gradient(160deg,rgba(24,27,40,.92),rgba(12,14,22,.96));box-shadow:0 20px 60px rgba(0,0,0,.28);backdrop-filter:blur(18px);}
+  .dashboard-shell .shead{padding:10px 10px 17px!important;margin:0 2px 13px;}.dashboard-shell .slogo{background:linear-gradient(110deg,#fff,#A5B4FC);-webkit-background-clip:text;background-clip:text;}.dashboard-shell .ssec{margin-top:15px;padding-left:12px;color:#71768B;letter-spacing:1.25px;}.dashboard-shell .sitem{border:1px solid transparent;border-radius:11px;padding:11px 12px;}.dashboard-shell .sitem:hover{background:rgba(255,255,255,.055);border-color:rgba(255,255,255,.055);}.dashboard-shell .sitem.active{background:linear-gradient(100deg,rgba(129,140,248,.23),rgba(103,232,249,.08));border-color:rgba(165,180,252,.18);box-shadow:inset 0 1px rgba(255,255,255,.07);}.dashboard-shell .sbot{background:linear-gradient(to bottom,rgba(12,14,22,0),#0c0e16 28%);}.dashboard-shell .suser{border-radius:14px;background:rgba(255,255,255,.045);}
+  .dashboard-shell .main{max-width:1440px;margin-left:282px;padding:48px 54px 60px;}.dashboard-shell .main.sb-collapsed{margin-left:auto;}.dashboard-shell .topbar{margin-bottom:42px;}.dashboard-shell .ttl{font-size:30px;letter-spacing:-.045em;}.dashboard-shell .tdate{color:#7F8497;}.dashboard-shell .tchip{background:rgba(255,255,255,.055);border-color:rgba(255,255,255,.1);color:#E8EAF4;box-shadow:inset 0 1px rgba(255,255,255,.06);}
+  .dashboard-shell .gcard,.dashboard-shell .stat,.dashboard-shell .hi{background:linear-gradient(145deg,rgba(27,30,45,.88),rgba(15,17,27,.94));border:1px solid rgba(255,255,255,.085);box-shadow:0 18px 45px rgba(0,0,0,.18);}.dashboard-shell .gcard::before,.dashboard-shell .stat::before,.dashboard-shell .hi::before{display:none;}.dashboard-shell .stat{padding:25px;}.dashboard-shell .stat:hover,.dashboard-shell .hi:hover{border-color:rgba(165,180,252,.28);box-shadow:0 24px 55px rgba(0,0,0,.28);}.dashboard-shell .stat-label{color:#8E94A8;letter-spacing:1px;}.dashboard-shell .stat-value{font-size:28px;letter-spacing:-.045em;}.dashboard-shell .stitle{letter-spacing:-.035em;}.dashboard-shell .btn-primary{background:linear-gradient(110deg,#818CF8,#6366F1 58%,#4F46E5);box-shadow:0 10px 26px rgba(79,70,229,.28);}.dashboard-shell .btn-primary:hover{box-shadow:0 15px 34px rgba(79,70,229,.42);}.dashboard-shell .btn-ghost{background:rgba(255,255,255,.045);border-color:rgba(255,255,255,.1);}.dashboard-shell .mitem,.dashboard-shell .txc{background:rgba(255,255,255,.035);border-color:rgba(255,255,255,.075);}.dashboard-shell .mitem:hover{background:rgba(129,140,248,.09);border-color:rgba(165,180,252,.22);}.dashboard-shell .ttabs{background:rgba(0,0,0,.18);}.dashboard-shell .inp,.dashboard-shell .sel,.dashboard-shell .tinp{background:rgba(4,6,12,.45);border-color:rgba(255,255,255,.1);}
+  .coin-detail-head{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:26px 28px;}.coin-detail-title{font-family:'Plus Jakarta Sans',sans-serif;font-size:28px;line-height:1;letter-spacing:-.05em;color:var(--text);}.coin-detail-actions{display:flex;gap:9px;flex-wrap:wrap;}.coin-detail-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(280px,.72fr);gap:18px;}.coin-chart-card{min-height:390px;}.coin-detail-price{font-family:'Plus Jakarta Sans',sans-serif;font-weight:800;font-size:34px;line-height:1;letter-spacing:-.055em;color:var(--text);}.coin-position-value{font-family:'Plus Jakarta Sans',sans-serif;font-weight:800;font-size:29px;letter-spacing:-.05em;color:var(--text);}.coin-position-value span{font:700 13px 'Inter',sans-serif;color:var(--text3);letter-spacing:0;margin-left:3px;}.coin-mini-row{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px;margin:14px 0;color:var(--text3);}.coin-mini-row b{font-size:13px;color:var(--text);}.coin-stat-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;}.coin-stat{padding:19px!important;}.coin-stat span{display:block;font-size:10px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:9px;}.coin-stat strong{display:block;font-family:'Plus Jakarta Sans',sans-serif;font-size:18px;letter-spacing:-.04em;color:var(--text);}
+  @media(min-width:641px){.dashboard-shell .sidebar.collapsed{transform:translateX(calc(-100% - 32px));}.dashboard-shell .stats{gap:16px;}.dashboard-shell .crow,.dashboard-shell .tgrid{gap:18px;}.dashboard-shell .hgrid{gap:16px;}}
+  @media(max-width:900px) and (min-width:641px){.dashboard-shell .sidebar{width:210px;}.dashboard-shell .main{margin-left:242px;padding:36px 28px;}}
+  @media(max-width:900px){.coin-stat-grid{grid-template-columns:repeat(3,1fr);}.coin-detail-grid{grid-template-columns:1fr;}}
+  @media(max-width:640px){.dashboard-shell .sidebar{top:8px;bottom:8px;left:8px;width:calc(100% - 52px);max-width:292px;border-radius:20px;}.dashboard-shell .main{margin-left:0;padding:0 14px calc(104px + env(safe-area-inset-bottom,16px));}.dashboard-shell .mtop{background:rgba(8,10,16,.8);backdrop-filter:blur(16px);border-color:rgba(255,255,255,.08);}.dashboard-shell .bnav{background:rgba(13,15,24,.92);backdrop-filter:blur(18px);border-color:rgba(255,255,255,.09);}.dashboard-shell .stat{padding:17px;}.dashboard-shell .stat-value{font-size:21px;}.coin-detail-head{align-items:flex-start;flex-direction:column;padding:20px;}.coin-detail-title{font-size:24px;}.coin-detail-actions{width:100%;}.coin-detail-actions .btn{flex:1;padding-left:12px;padding-right:12px;}.coin-chart-card{min-height:0;}.coin-stat-grid{grid-template-columns:1fr 1fr;gap:10px;}.coin-stat{padding:15px!important;}.coin-detail-price{font-size:29px;}}
+  .dashboard-shell.theme-light{background:linear-gradient(180deg,#F7F7F8,#F1F2F5);}.dashboard-shell.theme-light::before{opacity:.06;}.dashboard-shell.theme-light .sidebar{background:rgba(255,255,255,.92);border-color:rgba(0,0,0,.07);box-shadow:0 20px 60px rgba(20,20,30,.08);}.dashboard-shell.theme-light .sitem.active{background:rgba(79,70,229,.08);border-color:rgba(79,70,229,.12);}.dashboard-shell.theme-light .sbot{background:linear-gradient(to bottom,rgba(255,255,255,0),#fff 28%);}.dashboard-shell.theme-light .gcard,.dashboard-shell.theme-light .stat,.dashboard-shell.theme-light .hi{background:#fff;border-color:rgba(0,0,0,.06);box-shadow:0 14px 38px rgba(0,0,0,.06);}.dashboard-shell.theme-light .mitem,.dashboard-shell.theme-light .txc{background:#fff;border-color:rgba(0,0,0,.07);}.dashboard-shell.theme-light .inp,.dashboard-shell.theme-light .sel,.dashboard-shell.theme-light .tinp{background:#F7F7F8;border-color:rgba(0,0,0,.09);}.dashboard-shell.theme-light .tchip{background:#fff;border-color:rgba(0,0,0,.08);color:#111114;}.dashboard-shell.theme-light .mtop,.dashboard-shell.theme-light .bnav{background:rgba(255,255,255,.9);border-color:rgba(0,0,0,.07);}
+  @media(prefers-reduced-motion:no-preference){.dashboard-shell .main>*{animation:product-in .48s cubic-bezier(.2,.8,.2,1) both;}.dashboard-shell .main>*:nth-child(3){animation-delay:.04s;}.dashboard-shell .main>*:nth-child(4){animation-delay:.08s;}@keyframes product-in{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:none;}}}
+  @media(prefers-reduced-motion:reduce){.dashboard-shell *{animation:none!important;transition:none!important;}}
 `;
 const _se=document.createElement("style");_se.textContent=css;document.head.appendChild(_se);
 
@@ -865,6 +882,7 @@ export default function App(){
 
   /* Derived */
   const lcd=charts[selCoin]||[];const lp=lcd[lcd.length-1]?.v||prices[selCoin]?.price||0;
+  const selectedHolding=port.holdings.find(h=>h.symbol===selCoin);const selectedStats=COIN_STATS[selCoin];const selectedDetails=COIN_DETAILS[selCoin];
   const tcd=tradeCharts[tcoin]||[];const tlp=tcd[tcd.length-1]?.v||prices[tcoin]?.price||0;
   const tci=prices[tcoin];
   const tsub=tamt&&tci?(parseFloat(tamt)*tci.price).toFixed(2):"0.00";
@@ -883,6 +901,7 @@ export default function App(){
   const ACCOUNT_MANAGEMENT_FEE=1500;
   const pageTitle:Record<string,string>={invest:"Investment Plans",copy:"Signal Copier",managed:"Account Management"};
   const nav=(id:string)=>{setPage(id);setSbOpen(false);};
+  const openCoin=(symbol:string)=>{setSelCoin(symbol);setTcoin(symbol);nav("coin");};
   const goToDeposit=()=>{setTtype("deposit");setTamt("");nav("trade");};
   const pieData=port.holdings.filter(h=>h.amount>0).map(h=>({name:h.symbol,value:h.value,color:COINS[h.symbol]?.color||"#ccc"}));
 
@@ -1163,7 +1182,7 @@ export default function App(){
 
   /* ═══════════ APP ═══════════ */
   return(
-    <div className={`app ${appSettings.theme==="Light"?"theme-light":""}`}>
+    <div className={`app dashboard-shell ${appSettings.theme==="Light"?"theme-light":""}`}>
       {signingOut&&<div className="signout-overlay" role="status" aria-live="polite"><div className="signout-spinner"/><div className="signout-label">Signing you out…</div></div>}
       {/* Modals */}
       <Modal open={editOpen} onClose={()=>setEditOpen(false)} title="Edit Profile">
@@ -1422,7 +1441,7 @@ export default function App(){
                 {(showWatchlist?watchlist:Object.keys(COINS)).map(s=>{
                   const m=COINS[s];const ld=charts[s]||[];const lv=ld[ld.length-1]?.v||prices[s]?.price||0;const pos=(prices[s]?.change24h||0)>=0;
                   return(
-                    <div key={s} className="mitem" onClick={()=>{setSelCoin(s);setTcoin(s);}}>
+                    <div key={s} className="mitem" onClick={()=>openCoin(s)}>
                       <div style={{display:"flex",alignItems:"center",gap:10}}><CoinIcon symbol={s} size={32}/><div><div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{mob?s:m.name}</div><div style={{fontSize:10,color:"var(--text3)",fontWeight:500}}>{s}</div></div></div>
                       <button aria-label={`${watchlist.includes(s)?"Remove":"Add"} ${s} ${watchlist.includes(s)?"from":"to"} watchlist`} onClick={e=>{e.stopPropagation();toggleWatch(s);}} style={{border:"none",background:"transparent",cursor:"pointer",fontSize:17,padding:"4px",color:watchlist.includes(s)?"#F59E0B":"var(--text3)"}}>{watchlist.includes(s)?"★":"☆"}</button>
                       <div style={{textAlign:"right"}}><div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>${lv.toLocaleString()}</div><div style={{fontSize:10,fontWeight:700,color:pos?"var(--green)":"var(--red)",marginTop:2}}>{pos?"+":""}{(prices[s]?.change24h||0).toFixed(2)}%</div></div>
@@ -1442,7 +1461,7 @@ export default function App(){
             {port.holdings.filter(h=>h.amount>0).map(h=>{
               const m=COINS[h.symbol];const pct=port.totalPortfolioValue>0?(h.value/port.totalPortfolioValue*100).toFixed(1):"0";const isPos=(h.change24h||0)>=0;
               return(
-                <div key={h.symbol} className="hi" onClick={()=>{setTcoin(h.symbol);setSelCoin(h.symbol);nav("trade");}}>
+                <div key={h.symbol} className="hi" onClick={()=>openCoin(h.symbol)}>
                   <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:`linear-gradient(90deg,${m?.color},transparent)`,borderRadius:"18px 18px 0 0"}}/>
                   <div className="hitop"><CoinIcon symbol={h.symbol} size={32}/><div><div className="hsym">{h.symbol}</div><div className="hnm">{m?.name}</div></div><div style={{marginLeft:"auto",flexShrink:0}}><span className={isPos?"badge badge-green":"badge badge-red"} style={{fontSize:9,padding:"2px 7px"}}>{isPos?"▲":"▼"} {Math.abs(h.change24h||0).toFixed(2)}%</span></div></div>
                   <div className="hamt">{h.amount}</div>
@@ -1455,6 +1474,41 @@ export default function App(){
         </>}
 
         {/* ══ TRADE ══ */}
+        {page==="coin"&&(
+          <div className="page-wrap">
+            <button className="btn btn-ghost btn-sm" onClick={()=>nav("dashboard")} style={{marginBottom:22}}>← Back to dashboard</button>
+            <div className="coin-detail-head gcard">
+              <div style={{display:"flex",alignItems:"center",gap:15,minWidth:0}}>
+                <CoinIcon symbol={selCoin} size={52}/>
+                <div><div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap"}}><h1 className="coin-detail-title">{COINS[selCoin]?.name}</h1><span className="badge badge-gray">{selCoin}</span></div><div style={{fontSize:12,color:"var(--text3)",marginTop:5}}>Live market overview</div></div>
+              </div>
+              <div className="coin-detail-actions"><button className="btn btn-ghost" onClick={()=>toggleWatch(selCoin)}>{watchlist.includes(selCoin)?"★ Watching":"☆ Watch"}</button><button className="btn btn-primary" onClick={()=>{setTtype("buy");nav("trade");}}>Buy {selCoin}</button></div>
+            </div>
+            <div className="coin-detail-grid" style={{marginTop:18}}>
+              <div className="gcard coin-chart-card">
+                <div style={{display:"flex",justifyContent:"space-between",gap:14,alignItems:"flex-start",flexWrap:"wrap",marginBottom:18}}>
+                  <div><div style={{fontSize:11,color:"var(--text3)",fontWeight:700,letterSpacing:".9px",textTransform:"uppercase",marginBottom:7}}>{selCoin} price</div><div className="coin-detail-price">${lp.toLocaleString()}</div><div className="pchg" style={{color:(prices[selCoin]?.change24h||0)>=0?"var(--green)":"var(--red)"}}>{(prices[selCoin]?.change24h||0)>=0?"▲":"▼"} {Math.abs(prices[selCoin]?.change24h||0).toFixed(2)}% <span style={{color:"var(--text3)",fontSize:11}}>today</span></div></div>
+                  <div className="range-pills">{(["1H","1D","1W","1M"] as Range[]).map(r=><button key={r} className={`chip ${chartRange===r?"active":""}`} onClick={()=>setChartRange(r)}>{r}</button>)}</div>
+                </div>
+                <ResponsiveContainer width="100%" height={mob?210:280}><AreaChart data={lcd}><defs><linearGradient id={`coin-detail-${selCoin}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={COINS[selCoin]?.color} stopOpacity={.35}/><stop offset="100%" stopColor={COINS[selCoin]?.color} stopOpacity={0}/></linearGradient></defs><XAxis dataKey="t" hide/><YAxis hide domain={["auto","auto"]}/><Tooltip content={CT}/><Area type="monotone" dataKey="v" stroke={COINS[selCoin]?.color} strokeWidth={2.6} fill={`url(#coin-detail-${selCoin})`} dot={false}/></AreaChart></ResponsiveContainer>
+              </div>
+              <div className="gcard">
+                <div className="stitle">Your position</div>
+                <div className="coin-position-value">{selectedHolding?.amount||0} <span>{selCoin}</span></div>
+                <div style={{fontSize:13,color:"var(--text2)",marginTop:5}}>{cur(selectedHolding?.value||0)} current value</div>
+                <div style={{height:1,background:"var(--border)",margin:"22px 0"}}/>
+                <div className="coin-mini-row"><span>Average market price</span><b>${lp.toLocaleString()}</b></div>
+                <div className="coin-mini-row"><span>24h movement</span><b style={{color:(prices[selCoin]?.change24h||0)>=0?"var(--green)":"var(--red)"}}>{(prices[selCoin]?.change24h||0)>=0?"+":""}{(prices[selCoin]?.change24h||0).toFixed(2)}%</b></div>
+                <button className="btn btn-primary" style={{width:"100%",marginTop:22}} onClick={()=>{setTtype("buy");nav("trade");}}>Trade {selCoin}</button>
+              </div>
+            </div>
+            <div className="coin-stat-grid" style={{marginTop:18}}>
+              {[{label:"Market cap",value:selectedStats?.cap||"—"},{label:"24h volume",value:selectedStats?.vol||"—"},{label:"Circulating supply",value:selectedStats?.supply||"—"},{label:"All-time high",value:selectedDetails?.ath||"—"},{label:"Market rank",value:selectedDetails?.rank||"—"}].map(item=><div className="gcard coin-stat" key={item.label}><span>{item.label}</span><strong>{item.value}</strong></div>)}
+            </div>
+            <div className="gcard" style={{marginTop:18}}><div className="stitle">About {COINS[selCoin]?.name}</div><p style={{maxWidth:720,fontSize:14,lineHeight:1.75,color:"var(--text2)"}}>{selectedDetails?.about}</p></div>
+          </div>
+        )}
+
         {page==="trade"&&(
           <div className="page-wrap">
           <div className="tgrid">
@@ -1613,7 +1667,7 @@ export default function App(){
                   const h=port.holdings.find(x=>x.symbol===sym);const amt=h?.amount||0;const val=h?.value||0;
                   const pct=port.totalPortfolioValue>0?((val/port.totalPortfolioValue)*100).toFixed(1):"0";
                   return(
-                    <div key={sym} className="hi">
+                    <div key={sym} className="hi" onClick={()=>openCoin(sym)}>
                       <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:`linear-gradient(90deg,${m.color},transparent)`,opacity:amt>0?1:.3,borderRadius:"18px 18px 0 0"}}/>
                       <div className="hitop"><CoinIcon symbol={sym} size={32}/><div><div className="hsym">{sym}</div><div className="hnm">{m.name}</div></div><div style={{marginLeft:"auto",fontSize:11,color:"var(--text3)",fontWeight:600}}>{pct}%</div></div>
                       <div className="hamt" style={{color:amt>0?"var(--text)":"var(--text3)",fontSize:18}}>{amt||"—"}</div>
