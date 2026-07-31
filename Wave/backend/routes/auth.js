@@ -141,14 +141,14 @@ router.post("/register", async (req, res) => {
 
     const hash = await bcrypt.hash(password, 12);
     const r = await execute(
-      "INSERT INTO users (email, name, password_hash, date_of_birth, country, cash_balance, role, permissions) VALUES (?, ?, ?, ?, ?, 0, ?, ?)",
-      [email, name, hash, date_of_birth || null, country || null, "user", JSON.stringify({})]
+    "INSERT INTO users (email, name, password_hash, date_of_birth, country, cash_balance, role) VALUES (?, ?, ?, ?, ?, 0, ?)",
+    [email, name, hash, date_of_birth || null, country || null, "user"]
     );
-    if (email === (process.env.OWNER_EMAIL || "ambrosebishop26@gmail.com").toLowerCase()) {
-      await execute("UPDATE users SET role=?, permissions=? WHERE id=?", ["owner", JSON.stringify({ access_admin: true }), r.lastInsertRowid]);
+   const ownerEmail = (process.env.OWNER_EMAIL || "").trim().toLowerCase();
+   if (ownerEmail && email === ownerEmail) {
+   await execute("UPDATE users SET role=? WHERE id=?", ["owner", r.lastInsertRowid]);
     }
     const user = await queryOne("SELECT * FROM users WHERE id = ?", [r.lastInsertRowid]);
-
     const sessionId     = await createSession(user.id, req);
     const accessToken   = signAccessToken(user.id, sessionId);
     const refreshToken  = await signRefreshToken(user.id, sessionId);

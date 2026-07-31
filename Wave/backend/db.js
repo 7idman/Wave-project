@@ -215,9 +215,13 @@ async function initSchema() {
   for (const [key, name, permissions, isOwner] of defaultRoles) {
     await execute("INSERT OR IGNORE INTO roles (role_key, name, permissions, is_owner) VALUES (?, ?, ?, ?)", [key, name, JSON.stringify(permissions), isOwner]);
   }
-  const ownerEmail = (process.env.OWNER_EMAIL || "ambrosebishop26@gmail.com").toLowerCase();
-  await execute("UPDATE users SET role='owner' WHERE lower(email)=?", [ownerEmail]);
-
+  const ownerEmail = (process.env.OWNER_EMAIL || "").trim().toLowerCase();
+  if (ownerEmail) {
+    const result = await execute("UPDATE users SET role='owner' WHERE lower(email)=?", [ownerEmail]);
+    console.log(`Owner check: OWNER_EMAIL=${ownerEmail} → ${result.rowsAffected} row(s) updated to owner`);
+    } else {
+    console.warn("⚠️  OWNER_EMAIL is not set — no account will be assigned the owner role.");
+    }
   // ── Seed price cache ──────────────────────────────────────────────────────
   const count = await queryOne("SELECT COUNT(*) as c FROM price_cache");
   if (!count || Number(count.c) === 0) {
