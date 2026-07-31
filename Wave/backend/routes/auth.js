@@ -35,7 +35,7 @@ const safeUser = (u) => ({
   kycAddrStatus: u.kyc_addr_status|| "pending",
   createdAt:     u.created_at,
   role:          u.role           || "user",
-  permissions:   (typeof u.permissions === 'string' ? JSON.parse(u.permissions) : u.permissions) || {},
+  permissions,
 });
 
 /**
@@ -92,14 +92,17 @@ passport.use(new GoogleStrategy(
         if (user) {
           await execute("UPDATE users SET google_id = ? WHERE id = ?", [profile.id, user.id]);
           user = await queryOne("SELECT * FROM users WHERE id = ?", [user.id]);
-        } else {
-          const r = await execute(
-            "INSERT INTO users (google_id, email, name, cash_balance) VALUES (?, ?, ?, 0)",
-            [profile.id, email, name]
-          );
-          user = await queryOne("SELECT * FROM users WHERE id = ?", [r.lastInsertRowid]);
-        }
-      }
+        }} else {
+  const r = await execute(
+    "INSERT INTO users (google_id, email, name, cash_balance) VALUES (?, ?, ?, 0)",
+    [profile.id, email, name]
+  );
+  const ownerEmail = (process.env.OWNER_EMAIL || "").trim().toLowerCase();
+  if (ownerEmail && email?.trim().toLowerCase() === ownerEmail) {
+    await execute("UPDATE users SET role = 'owner' WHERE id = ?", [r.lastInsertRowid]);
+  }
+  user = await queryOne("SELECT * FROM users WHERE id = ?", [r.lastInsertRowid]);
+}
       return done(null, user);
     } catch (err) {
       return done(err);
@@ -152,7 +155,7 @@ router.post("/register", async (req, res) => {
     const sessionId     = await createSession(user.id, req);
     const accessToken   = signAccessToken(user.id, sessionId);
     const refreshToken  = await signRefreshToken(user.id, sessionId);
-    res.status(201).json({ accessToken, refreshToken, user: safeUser(user) });
+    res.status(201).json({ accessToken, refreshToken, user: await safeUser(user) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -179,7 +182,7 @@ router.post("/login", async (req, res) => {
     const sessionId    = await createSession(user.id, req);
     const accessToken  = signAccessToken(user.id, sessionId);
     const refreshToken = await signRefreshToken(user.id, sessionId);
-    res.json({ accessToken, refreshToken, user: safeUser(user) });
+    res.json({ accessToken, refreshToken, user: await safeUser(user) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -240,7 +243,7 @@ router.get("/google/callback",
 
 // ── Me ────────────────────────────────────────────────────────────────────────
 router.get("/me", authenticate, async (req, res) => {
-  res.json({ user: safeUser(req.user) });
+  res.json({ user: await safeUser(req.user) });
 });
 
 // ── Sessions (login/device history) ─────────────────────────────────────────
@@ -297,7 +300,7 @@ router.patch("/profile", authenticate, async (req, res) => {
     vals.push(userId);
     await execute(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`, vals);
     const updated = await queryOne("SELECT * FROM users WHERE id = ?", [userId]);
-    res.json({ user: safeUser(updated) });
+    res.json({ user: await safeUser(updated) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
