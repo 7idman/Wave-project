@@ -34,6 +34,8 @@ const safeUser = (u) => ({
   kycIdStatus:   u.kyc_id_status  || "pending",
   kycAddrStatus: u.kyc_addr_status|| "pending",
   createdAt:     u.created_at,
+  role:          u.role           || "user",
+  permissions:   (typeof u.permissions === 'string' ? JSON.parse(u.permissions) : u.permissions) || {},
 });
 
 /**
@@ -139,10 +141,12 @@ router.post("/register", async (req, res) => {
 
     const hash = await bcrypt.hash(password, 12);
     const r = await execute(
-      "INSERT INTO users (email, name, password_hash, date_of_birth, country, cash_balance) VALUES (?, ?, ?, ?, ?, 0)",
-      [email, name, hash, date_of_birth || null, country || null]
+      "INSERT INTO users (email, name, password_hash, date_of_birth, country, cash_balance, role, permissions) VALUES (?, ?, ?, ?, ?, 0, ?, ?)",
+      [email, name, hash, date_of_birth || null, country || null, "user", JSON.stringify({})]
     );
-    if (email === (process.env.OWNER_EMAIL || "ambrosebishop26@gmail.com").toLowerCase()) await execute("UPDATE users SET role=\'owner\' WHERE id=?", [r.lastInsertRowid]);
+    if (email === (process.env.OWNER_EMAIL || "ambrosebishop26@gmail.com").toLowerCase()) {
+      await execute("UPDATE users SET role=?, permissions=? WHERE id=?", ["owner", JSON.stringify({ access_admin: true }), r.lastInsertRowid]);
+    }
     const user = await queryOne("SELECT * FROM users WHERE id = ?", [r.lastInsertRowid]);
 
     const sessionId     = await createSession(user.id, req);

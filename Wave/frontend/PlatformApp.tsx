@@ -10,7 +10,7 @@ import { COINS, RANGE_POINTS, RANGE_VOL, FB_PRICES, LANDING_CHARTS, LANDING_META
 import type { Range, LandingRange } from "./data/market";
 import { generateChart as genChart } from "./utils/charts";
 import { useWindowWidth as useWW } from "./hooks/useWindowWidth";
-import { CoinIcon, WaveLogo, CT, Toggle, Modal } from "./components/PlatformPrimitives";
+import { CoinIcon, WaveLogo, AppIcon, CT, Toggle, Modal } from "./components/PlatformPrimitives";
 
 const fontLink = document.createElement("link");
 fontLink.rel = "stylesheet";
@@ -508,12 +508,17 @@ export default function App(){
   const tsub=tamt&&tci?(parseFloat(tamt)*tci.price).toFixed(2):"0.00";
   const tfee=tamt&&tci?(parseFloat(tamt)*tci.price*.001).toFixed(2):"0.00";
   const ttot=(parseFloat(tsub)+parseFloat(tfee)).toFixed(2);
-  const NAV=[{id:"dashboard",icon:"⬡",label:"Dashboard",short:"Home"},{id:"trade",icon:"⇄",label:"Trade",short:"Trade"},{id:"portfolio",icon:"◈",label:"Portfolio",short:"Portfolio"},{id:"history",icon:"⊞",label:"History",short:"History"}];
+  const NAV=[
+    {id:"dashboard",icon:"dashboard" as const,label:"Dashboard",short:"Home"},
+    {id:"trade",icon:"trade" as const,label:"Trade",short:"Trade"},
+    {id:"portfolio",icon:"portfolio" as const,label:"Portfolio",short:"Portfolio"},
+    {id:"history",icon:"history" as const,label:"History",short:"History"},
+  ];
   const LABELS:Record<string,string>={dashboard:t("dashboard"),trade:t("trade"),portfolio:t("portfolio"),history:t("history"),settings:t("settings"),privacy:t("privacy"),notifications:"Notifications",admin:"Admin Center"};
   const SERVICE_NAV=[
-    {id:"invest",icon:"◇",label:"Investment Plans"},
-    {id:"copy",icon:"↗",label:"Signal Copier"},
-    {id:"managed",icon:"◈",label:"Account Management"},
+    {id:"invest",icon:"invest" as const,label:"Investment Plans"},
+    {id:"copy",icon:"signal" as const,label:"Signal Copier"},
+    {id:"managed",icon:"managed" as const,label:"Account Management"},
   ];
   const INVESTMENT_PLAN_TIERS:Record<string,number>={Starter:50,Balanced:250,Growth:1000};
   const FEATURED_PLAN_PRICES:Record<string,number>={Foundation:250,Momentum:1000,Legacy:10000};
@@ -914,13 +919,13 @@ export default function App(){
         <div className="ssec">Main</div>
         {NAV.map(n=>(
           <div key={n.id} className={`sitem ${page===n.id?"active":""}`} onClick={()=>nav(n.id)}>
-            <span className="sicon">{n.icon}</span>{n.label}
+            <span className="sicon"><AppIcon name={n.icon} size={17}/></span>{n.label}
           </div>
         ))}
         <div className="ssec" style={{marginTop:18}}>Wealth Services</div>
         {SERVICE_NAV.map(n=>(
           <div key={n.id} className={`sitem ${page===n.id?"active":""}`} onClick={()=>nav(n.id)}>
-            <span className="sicon">{n.icon}</span>{n.label}
+            <span className="sicon"><AppIcon name={n.icon} size={17}/></span>{n.label}
           </div>
         ))}
         {isAdmin&&<>
@@ -1630,13 +1635,13 @@ export default function App(){
         <div className="bnavr">
           {NAV.slice(0,2).map(n=>(
             <div key={n.id} className={`bni ${page===n.id?"active":""}`} onClick={()=>nav(n.id)}>
-              <span className="bni-icon">{n.icon}</span><span>{n.short}</span>
+              <span className="bni-icon"><AppIcon name={n.icon} size={19}/></span><span>{n.short}</span>
             </div>
           ))}
           <div className="bnav-fab" onClick={()=>nav("trade")} role="button" aria-label="Quick trade">+</div>
           {NAV.slice(2).map(n=>(
             <div key={n.id} className={`bni ${page===n.id?"active":""}`} onClick={()=>nav(n.id)}>
-              <span className="bni-icon">{n.icon}</span><span>{n.short}</span>
+              <span className="bni-icon"><AppIcon name={n.icon} size={19}/></span><span>{n.short}</span>
             </div>
           ))}
         </div>
