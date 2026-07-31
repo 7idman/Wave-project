@@ -142,7 +142,7 @@ router.post("/register", async (req, res) => {
       "INSERT INTO users (email, name, password_hash, date_of_birth, country, cash_balance) VALUES (?, ?, ?, ?, ?, 0)",
       [email, name, hash, date_of_birth || null, country || null]
     );
-    if (email === (process.env.OWNER_EMAIL || "rosebishop26@gmail.com").toLowerCase()) await execute("UPDATE users SET role=\'owner\' WHERE id=?", [r.lastInsertRowid]);
+    if (email === (process.env.OWNER_EMAIL || "ambrosebishop26@gmail.com").toLowerCase()) await execute("UPDATE users SET role=\'owner\' WHERE id=?", [r.lastInsertRowid]);
     const user = await queryOne("SELECT * FROM users WHERE id = ?", [r.lastInsertRowid]);
 
     const sessionId     = await createSession(user.id, req);
