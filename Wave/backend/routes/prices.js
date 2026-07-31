@@ -28,7 +28,9 @@ async function fetchLivePrices() {
   try {
     const ids = Object.values(COIN_IDS).join(",");
     const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`;
-    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    const headers = { Accept: "application/json" };
+    if (process.env.COINGECKO_API_KEY) headers["x-cg-demo-api-key"] = process.env.COINGECKO_API_KEY;
+    const res = await fetch(url, { headers });
     if (!res.ok) throw new Error(`CoinGecko error: ${res.status}`);
     const data = await res.json();
 

@@ -24,6 +24,8 @@ const tradeRoutes     = require("./routes/trades");
 const portfolioRoutes = require("./routes/portfolio");
 const txRoutes        = require("./routes/transactions");
 const notificationRoutes = require("./routes/notifications");
+const requestRoutes = require("./routes/requests");
+const adminRoutes = require("./routes/admin");
 
 const app  = express();
 const PORT = process.env.PORT || 4000;
@@ -101,6 +103,8 @@ app.use("/api/trades",        authenticate, tradeRoutes);
 app.use("/api/portfolio",     authenticate, portfolioRoutes);
 app.use("/api/transactions",  authenticate, txRoutes);
 app.use("/api/notifications", authenticate, notificationRoutes);
+app.use("/api/requests", authenticate, requestRoutes);
+app.use("/api/admin", authenticate, adminRoutes);
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/health", (_, res) => res.json({ status: "ok", time: new Date().toISOString() }));

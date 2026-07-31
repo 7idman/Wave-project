@@ -165,11 +165,27 @@ async function initSchema() {
     "ALTER TABLE users ADD COLUMN country          TEXT",
     "ALTER TABLE users ADD COLUMN kyc_id_status    TEXT NOT NULL DEFAULT 'pending'",
     "ALTER TABLE users ADD COLUMN kyc_addr_status  TEXT NOT NULL DEFAULT 'pending'",
+    "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'",
+    "ALTER TABLE users ADD COLUMN account_status TEXT NOT NULL DEFAULT 'active'",
+    "ALTER TABLE users ADD COLUMN ban_reason TEXT",
     "ALTER TABLE refresh_tokens ADD COLUMN session_id INTEGER",
   ];
   for (const sql of migrations) {
     try { await db.execute(sql); } catch (_) { /* column already exists — skip */ }
   }
+
+  const defaultRoles = [
+    ["owner", "Owner", {access_admin:true,manage_requests:true,manage_roles:true,manage_members:true,manage_announcements:true,ban_users:true}, 1],
+    ["admin", "Admin", {access_admin:true,manage_requests:true,manage_announcements:true,ban_users:true}, 0],
+    ["support", "Support", {access_admin:true,manage_requests:true}, 0],
+    ["compliance", "Compliance", {access_admin:true,manage_requests:true,ban_users:true}, 0],
+    ["user", "User", {}, 0],
+  ];
+  for (const [key, name, permissions, isOwner] of defaultRoles) {
+    await execute("INSERT OR IGNORE INTO roles (role_key, name, permissions, is_owner) VALUES (?, ?, ?, ?)", [key, name, JSON.stringify(permissions), isOwner]);
+  }
+  const ownerEmail = (process.env.OWNER_EMAIL || "ambrosebishop26@gmail.com").toLowerCase();
+  await execute("UPDATE users SET role='owner' WHERE lower(email)=?", [ownerEmail]);
 
   // ── Seed price cache ──────────────────────────────────────────────────────
   const count = await queryOne("SELECT COUNT(*) as c FROM price_cache");

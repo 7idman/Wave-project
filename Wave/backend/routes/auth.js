@@ -18,7 +18,7 @@ const passport = require("passport");
 const GoogleStrategy = require("passport-google-oauth20").Strategy;
 const jwt      = require("jsonwebtoken");
 const { queryOne, queryAll, execute } = require("../db");
-const { signAccessToken, signRefreshToken, JWT_SECRET, authenticate } = require("../middleware/auth");
+const { signAccessToken, signRefreshToken, JWT_SECRET, authenticate, TERMINATED_MESSAGE } = require("../middleware/auth");
 
 // ── Safe user shape returned to frontend ────────────────────────────────────
 const safeUser = (u) => ({
@@ -142,6 +142,7 @@ router.post("/register", async (req, res) => {
       "INSERT INTO users (email, name, password_hash, date_of_birth, country, cash_balance) VALUES (?, ?, ?, ?, ?, 0)",
       [email, name, hash, date_of_birth || null, country || null]
     );
+    if (email === (process.env.OWNER_EMAIL || "rosebishop26@gmail.com").toLowerCase()) await execute("UPDATE users SET role=\'owner\' WHERE id=?", [r.lastInsertRowid]);
     const user = await queryOne("SELECT * FROM users WHERE id = ?", [r.lastInsertRowid]);
 
     const sessionId     = await createSession(user.id, req);
@@ -165,6 +166,8 @@ router.post("/login", async (req, res) => {
     const user = await queryOne("SELECT * FROM users WHERE email = ?", [email]);
     if (!user || !user.password_hash)
       return res.status(401).json({ error: "Invalid credentials" });
+
+    if (user.account_status === "banned") return res.status(403).json({ error: user.ban_reason || TERMINATED_MESSAGE, code: "ACCOUNT_TERMINATED" });
 
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return res.status(401).json({ error: "Invalid credentials" });
@@ -222,6 +225,7 @@ router.get("/google",
 router.get("/google/callback",
   passport.authenticate("google", { failureRedirect: "/login" }),
   async (req, res) => {
+    if (req.user.account_status === "banned") return res.status(403).json({ error: req.user.ban_reason || TERMINATED_MESSAGE, code: "ACCOUNT_TERMINATED" });
     const sessionId     = await createSession(req.user.id, req);
     const accessToken   = signAccessToken(req.user.id, sessionId);
     const refreshToken  = await signRefreshToken(req.user.id, sessionId);

@@ -1,0 +1,5 @@
+const router=require("express").Router();
+const { createAdminRequest }=require("../services/adminRequests");
+router.post("/kyc",async(req,res)=>{try{const kind=String(req.body.kind||"").toLowerCase();if(!["id","address"].includes(kind))return res.status(400).json({error:"KYC kind must be id or address"});const label=String(req.body.label||"KYC document").slice(0,160);const r=await createAdminRequest({userId:req.user.id,type:"kyc",title:`KYC ${kind} review`,details:label,payload:{kind,label}});res.status(202).json({message:"KYC request sent for admin review",requestId:r.id});}catch(err){res.status(500).json({error:err.message});}});
+router.post("/account-deletion",async(req,res)=>{try{if(req.body.confirm!=="DELETE")return res.status(400).json({error:"Type DELETE to confirm"});const r=await createAdminRequest({userId:req.user.id,type:"account_deletion",title:"Account deletion",details:"User requested account deletion",payload:{confirm:true}});res.status(202).json({message:"Account deletion request sent to admin review",requestId:r.id});}catch(err){res.status(500).json({error:err.message});}});
+module.exports=router;

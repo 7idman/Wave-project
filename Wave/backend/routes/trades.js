@@ -5,6 +5,7 @@
 
 const router = require("express").Router();
 const { queryOne, execute } = require("../db");
+const { createAdminRequest } = require("../services/adminRequests");
 
 const FEE_RATE     = 0.001; // 0.1% buy/sell
 const WITHDRAW_FEE = 0.005; // 0.5% withdrawal
