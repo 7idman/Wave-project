@@ -68,6 +68,7 @@ export default function App(){
   const[showTerms,setShowTerms]=useState<string>(""); // "terms"|"privacy"|"" — inline on login page
   const[prices,setPrices]     =useState<Record<string,Price>>(FB_PRICES);
   const[priceDir,setPriceDir] =useState<Record<string,boolean>>(Object.fromEntries(Object.keys(FB_PRICES).map(s=>[s,(FB_PRICES[s].change24h||0)>=0])));
+  const priceSnapshot=useRef<Record<string,Price>>(FB_PRICES);
   const[watchlist,setWatchlist]=useState<string[]>(()=>{
     try{return JSON.parse(localStorage.getItem("wave_watchlist")||"[]").filter((s:string)=>COINS[s]);}catch{return [];}
   });
@@ -208,7 +209,7 @@ export default function App(){
       });
     },3000);
     return()=>clearInterval(iv);
-  },[chartRange]);
+  },[chartRange,prices]);
 
   // Trade chart is separate — regens on tradeRange change
   const[tradeCharts,setTradeCharts]=useState<Record<string,ChartPt[]>>({});
@@ -216,24 +217,40 @@ export default function App(){
     const d:Record<string,ChartPt[]>={};
     Object.keys(COINS).forEach(s=>{d[s]=genChart(prices[s]?.price||100,RANGE_POINTS[tradeRange],RANGE_VOL[tradeRange]);});
     setTradeCharts(d);
-  },[tradeRange,tcoin]);
+  },[tradeRange,tcoin,prices]);
 
   useEffect(()=>{document.body.style.overflow=sbOpen?"hidden":"";return()=>{document.body.style.overflow="";};},[sbOpen]);
 
   const toast2=(msg:string,icon="✓",ok=true)=>{setToast({msg,icon,ok});setTimeout(()=>setToast(null),3500);};
   const toggleWatch=(symbol:string)=>setWatchlist(items=>items.includes(symbol)?items.filter(s=>s!==symbol):[...items,symbol]);
 
-  const loadData=useCallback(async()=>{
-    // Each call is independent — one failing won't block the others
+  const loadMarketPrices=useCallback(async()=>{
     try{
       const p=await api.get("/prices");
-      // prices returns {BTC:{price,change24h,...}} — map to our format
       const mapped:Record<string,Price>={};
       Object.entries(p).forEach(([sym,v]:any)=>{
         mapped[sym]={price:v.price||0,change24h:v.change24h||0};
       });
+      const directions:Record<string,boolean>={};
+      Object.entries(mapped).forEach(([sym,next])=>{
+        directions[sym]=(next.price??0)>=(priceSnapshot.current[sym]?.price??next.price??0);
+      });
+      priceSnapshot.current=mapped;
+      setPriceDir(directions);
       setPrices(mapped);
     }catch(e:any){console.warn("prices:",e.message);}
+  },[]);
+
+  // Market prices are public: keep both the landing page and signed-in app live.
+  useEffect(()=>{
+    loadMarketPrices();
+    const interval=window.setInterval(loadMarketPrices,20000);
+    return()=>window.clearInterval(interval);
+  },[loadMarketPrices]);
+
+  const loadData=useCallback(async()=>{
+    // Each call is independent — one failing won't block the others
+    await loadMarketPrices();
 
     try{
       const pf=await api.get("/portfolio");
@@ -249,13 +266,13 @@ export default function App(){
       const tx=await api.get("/transactions");
       setTxs(tx.transactions??[]);
     }catch(e:any){console.warn("transactions:",e.message);}
-  },[]);
+  },[loadMarketPrices]);
   useEffect(()=>{
     if(!user) return;
     setAccountLoading(true);
     loadData().finally(()=>setAccountLoading(false));
   },[user,loadData]);
-  // Keep market prices, balances, and price alerts current while the dashboard is open.
+  // Keep account balances and transaction history current while the dashboard is open.
   useEffect(()=>{
     if(!user) return;
     const interval=window.setInterval(()=>{loadData();},30000);
@@ -566,6 +583,16 @@ export default function App(){
         <button className="btn btn-ghost landing-signin" onClick={()=>{setAuthTab("login");document.getElementById("access")?.scrollIntoView({behavior:"smooth",block:"center"});}}>Sign in</button>
       </nav>
       <main className="landing-main">
+        <div className="landing-live-strip" aria-label="Live cryptocurrency prices from CoinGecko">
+          <div className="landing-live-label"><i/>Live market pulse</div>
+          <div className="landing-live-track">
+            {Object.keys(COINS).map(symbol=>{
+              const quote=prices[symbol]||FB_PRICES[symbol];
+              const up=(quote?.change24h||0)>=0;
+              return <div className={`landing-live-quote ${priceDir[symbol]?"up":"down"}`} key={symbol}><CoinIcon symbol={symbol} size={18}/><b>{symbol}</b><span>${(quote?.price||0).toLocaleString(undefined,{maximumFractionDigits:quote?.price&&quote.price<10?4:2})}</span><em className={up?"positive":"negative"}>{up?"+":""}{(quote?.change24h||0).toFixed(2)}%</em></div>;
+            })}
+          </div>
+        </div>
         <section className="landing-hero">
           <div className="landing-hero-copy">
             <div className="landing-eyebrow"><i/>The modern home for your wealth</div>

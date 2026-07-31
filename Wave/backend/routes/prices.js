@@ -17,15 +17,14 @@ const COIN_IDS = {
   LINK: "chainlink",
 };
 
-let lastFetch  = 0;
-let isFetching = false;       // fetch lock — prevents simultaneous CoinGecko calls
-const CACHE_TTL = 60_000;     // 60 seconds
+let lastFetch = 0;
+let inFlightFetch = null;     // shared request — prevents duplicate CoinGecko calls
+const CACHE_TTL = 20_000;     // lively enough for the UI without wasting API quota
 
 // ── Fetch live prices from CoinGecko ─────────────────────────────────────────
 async function fetchLivePrices() {
-  if (isFetching) return;     // another fetch is already in progress — skip
-  isFetching = true;
-  try {
+  if (inFlightFetch) return inFlightFetch;
+  inFlightFetch = (async () => {
     const ids = Object.values(COIN_IDS).join(",");
     const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`;
     const headers = { Accept: "application/json" };
@@ -44,17 +43,23 @@ async function fetchLivePrices() {
       }
     }
     lastFetch = Date.now();
+  })();
+
+  try {
+    await inFlightFetch;
   } finally {
-    isFetching = false;       // always release the lock, even if fetch failed
+    inFlightFetch = null;     // always release the lock, even if fetch failed
   }
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
-    // Trigger refresh if cache is stale — return current data immediately
+    // On a cold or stale cache, wait for CoinGecko so the first visible prices
+    // are live rather than the database seed values.
     if (Date.now() - lastFetch > CACHE_TTL) {
-      fetchLivePrices().catch(console.warn);
+      try { await fetchLivePrices(); }
+      catch (err) { console.warn("CoinGecko refresh failed; serving cached prices:", err.message); }
     }
 
     const rows   = await queryAll("SELECT * FROM price_cache");

@@ -78,6 +78,12 @@ async function initSchema() {
   // that code path entirely. Each uses IF NOT EXISTS, so this is safe to
   // re-run on every boot even if a previous attempt partially completed.
   const tables = [
+    `CREATE TABLE IF NOT EXISTS roles (
+      role_key    TEXT PRIMARY KEY,
+      name        TEXT NOT NULL,
+      permissions TEXT NOT NULL DEFAULT '{}',
+      is_owner    INTEGER NOT NULL DEFAULT 0
+    )`,
     `CREATE TABLE IF NOT EXISTS users (
       id               INTEGER PRIMARY KEY AUTOINCREMENT,
       google_id        TEXT    UNIQUE,
@@ -149,6 +155,31 @@ async function initSchema() {
       label      TEXT    NOT NULL,
       amount     REAL    NOT NULL DEFAULT 0,
       created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS admin_requests (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      user_email        TEXT    NOT NULL,
+      user_name         TEXT    NOT NULL,
+      type              TEXT    NOT NULL,
+      title             TEXT    NOT NULL,
+      details           TEXT,
+      amount            REAL,
+      payload           TEXT    NOT NULL DEFAULT '{}',
+      status            TEXT    NOT NULL DEFAULT 'pending',
+      reviewed_by       INTEGER,
+      reviewed_by_email TEXT,
+      reviewed_at       TEXT,
+      admin_note        TEXT,
+      created_at        TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      endpoint          TEXT    NOT NULL UNIQUE,
+      subscription_json TEXT    NOT NULL,
+      created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_at        TEXT    NOT NULL DEFAULT (datetime('now'))
     )`,
   ];
 
