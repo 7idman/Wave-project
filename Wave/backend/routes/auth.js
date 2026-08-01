@@ -21,22 +21,28 @@ const { queryOne, queryAll, execute } = require("../db");
 const { signAccessToken, signRefreshToken, JWT_SECRET, authenticate, TERMINATED_MESSAGE } = require("../middleware/auth");
 
 // ── Safe user shape returned to frontend ────────────────────────────────────
-const safeUser = (u) => ({
-  id:            u.id,
-  email:         u.email,
-  name:          u.name,
-  cashBalance:   u.cash_balance,
-  phone:         u.phone          || null,
-  phoneVerified: u.phone_verified || 0,
-  avatarUrl:     u.avatar_url     || null,
-  dateOfBirth:   u.date_of_birth  || null,
-  country:       u.country        || null,
-  kycIdStatus:   u.kyc_id_status  || "pending",
-  kycAddrStatus: u.kyc_addr_status|| "pending",
-  createdAt:     u.created_at,
-  role:          u.role           || "user",
-  permissions,
-});
+// async — looks up real permissions from the `roles` table (users.role ->
+// roles.role_key) instead of a per-user column. Every caller must `await` it.
+const safeUser = async (u) => {
+  const roleRow = u.role ? await queryOne("SELECT permissions FROM roles WHERE role_key = ?", [u.role]) : null;
+  const permissions = roleRow ? JSON.parse(roleRow.permissions) : {};
+  return {
+    id:            u.id,
+    email:         u.email,
+    name:          u.name,
+    cashBalance:   u.cash_balance,
+    phone:         u.phone          || null,
+    phoneVerified: u.phone_verified || 0,
+    avatarUrl:     u.avatar_url     || null,
+    dateOfBirth:   u.date_of_birth  || null,
+    country:       u.country        || null,
+    kycIdStatus:   u.kyc_id_status  || "pending",
+    kycAddrStatus: u.kyc_addr_status|| "pending",
+    createdAt:     u.created_at,
+    role:          u.role           || "user",
+    permissions,
+  };
+};
 
 /**
  * Turns a User-Agent header into something readable like "Desktop · Chrome on macOS".
