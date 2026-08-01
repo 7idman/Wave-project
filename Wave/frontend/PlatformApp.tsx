@@ -311,7 +311,7 @@ export default function App(){
   const handleAutoInvestActivation=async()=>{
     const amount=Number(autoAmount);
     if(!Number.isFinite(amount)||amount<=0){
-      toast2("Enter a valid contribution amount",false);
+      toast2("Enter a valid contribution amount","⚠",false);
       return;
     }
     await chargeCashBalance(`${autoTier} auto-invest plan`, amount);
