@@ -35,7 +35,7 @@ export default function App(){
       const nm=u.name||"User";
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
       setAccountLoading(true);
-      setUser({name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined});
+      setUser({name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined,role:u.role});
       // Backend doesn't return `country` on /auth/me yet — once it does, this applies the
       // right default currency one time only, and never again once the user (or this logic)
       // has set a currency, so it can never silently overwrite a manual choice.
@@ -332,7 +332,7 @@ export default function App(){
       const nm=u.name||email.split("@")[0]||"User";
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
       setAccountLoading(true);
-      setUser({name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined});
+      setUser({name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined,role:u.role});
       if(u.country&&!localStorage.getItem("wave_currency_auto")){
         setAppSettings(p=>({...p,currency:currencyForCountry(u.country)}));
         localStorage.setItem("wave_currency_auto","1");
@@ -358,7 +358,7 @@ export default function App(){
       const nm=u.name||regName||"User";
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
       setAccountLoading(true);
-      setUser({name:nm,email:u.email,initials});
+      setUser({name:nm,email:u.email,initials,role:u.role});
       setAppSettings(p=>({...p,currency:currencyForCountry(regCountry)}));
       localStorage.setItem("wave_currency_auto","1");
       toast2(`Welcome to Wave, ${nm.split(" ")[0]}!`,);
