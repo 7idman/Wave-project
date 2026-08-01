@@ -146,7 +146,7 @@ router.post("/register", async (req, res) => {
     }
 
     const exists = await queryOne("SELECT id FROM users WHERE email = ?", [email]);
-    if (exists) return res.status(409).json({ error: "Email already registered" });
+    if (exists) return res.status(409).json({ error: "Email already registered, Log in to continue" });
 
     const hash = await bcrypt.hash(password, 12);
     const r = await execute(

@@ -32,11 +32,16 @@ export default function App(){
     api.get("/auth/me").then(d=>{
       if(cancelled) return;
       const u=d.user;
+      if(!u){
+        // Backend returned 200 without a user object — treat it like an invalid
+        // session instead of crashing on u.name below, so we fall through to
+        // the .catch() and clear the bad token rather than silently breaking.
+        throw new Error("Malformed /auth/me response: missing user");
+      }
       const nm=u.name||"User";
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
       setAccountLoading(true);
-      setUser({name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined,role:u.role});
-      // Backend doesn't return `country` on /auth/me yet — once it does, this applies the
+      setUser({id:u.id,name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined,role:u.role,permissions:u.permissions});
       // right default currency one time only, and never again once the user (or this logic)
       // has set a currency, so it can never silently overwrite a manual choice.
       if(u.country&&!localStorage.getItem("wave_currency_auto")){
@@ -44,7 +49,7 @@ export default function App(){
         localStorage.setItem("wave_currency_auto","1");
       }
     }).catch(()=>{
-      api.clearTokens(); // token was invalid/expired — clear it so we don't keep retrying
+      api.clearTokens(); // token was invalid/expired/malformed — clear it so we don't keep retrying
     }).finally(()=>{
       if(!cancelled) setAuthChecking(false);
     });
@@ -332,7 +337,7 @@ export default function App(){
       const nm=u.name||email.split("@")[0]||"User";
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
       setAccountLoading(true);
-      setUser({name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined,role:u.role});
+      setUser({id:u.id,name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined,role:u.role,permissions:u.permissions});
       if(u.country&&!localStorage.getItem("wave_currency_auto")){
         setAppSettings(p=>({...p,currency:currencyForCountry(u.country)}));
         localStorage.setItem("wave_currency_auto","1");
@@ -358,7 +363,7 @@ export default function App(){
       const nm=u.name||regName||"User";
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
       setAccountLoading(true);
-      setUser({name:nm,email:u.email,initials,role:u.role});
+      setUser({id:u.id,name:nm,email:u.email,initials,role:u.role,permissions:u.permissions});
       setAppSettings(p=>({...p,currency:currencyForCountry(regCountry)}));
       localStorage.setItem("wave_currency_auto","1");
       toast2(`Welcome to Wave, ${nm.split(" ")[0]}!`,);
@@ -381,7 +386,7 @@ export default function App(){
       await api.post(`/auth/sessions/${session.id}/logout`,{});
       setLoginHistory(items=>items.filter(item=>item.id!==session.id));
       toast2(`${session.device} signed out`);
-    }catch(e:any){toast2(e.message||"Unable to sign out this device","âš ",false);}
+    }catch(e:any){toast2(e.message||"Unable to sign out this device","âš ",false);}
   };
 
   /* Save profile */
@@ -508,6 +513,12 @@ export default function App(){
   const tsub=tamt&&tci?(parseFloat(tamt)*tci.price).toFixed(2):"0.00";
   const tfee=tamt&&tci?(parseFloat(tamt)*tci.price*.001).toFixed(2):"0.00";
   const ttot=(parseFloat(tsub)+parseFloat(tfee)).toFixed(2);
+  // Guarded landing-page chart series: if LANDING_CHARTS[landingRange] is ever empty,
+  // fall back to a safe default instead of indexing [-1] and crashing the logged-out
+  // landing page with "Cannot read properties of undefined (reading 'value')".
+  const landingSeries=LANDING_CHARTS[landingRange]||[];
+  const landingIndex=landingHover??landingSeries.length-1;
+  const landingValue=landingSeries[landingIndex]?.value??0;
   const NAV=[
     {id:"dashboard",icon:"dashboard" as const,label:"Dashboard",short:"Home"},
     {id:"trade",icon:"trade" as const,label:"Trade",short:"Trade"},
@@ -529,7 +540,7 @@ export default function App(){
   const openCoin=(symbol:string)=>{setSelCoin(symbol);setTcoin(symbol);nav("coin");};
   const goToDeposit=()=>{setTtype("deposit");setTamt("");nav("trade");};
   const pieData=port.holdings.filter(h=>h.amount>0).map(h=>({name:h.symbol,value:h.value,color:COINS[h.symbol]?.color||"#ccc"}));
-  const isAdmin=user?.role==="owner"||user?.role==="admin"||Boolean((user as any)?.permissions?.access_admin);
+  const isAdmin=user?.role==="owner"||user?.role==="admin"||Boolean(user?.permissions?.access_admin);
 
   const AvatarDisplay=({size=40,fontSize=15}:{size?:number;fontSize?:number})=>(
     user?.avatarUrl
@@ -801,7 +812,7 @@ export default function App(){
         <div className="landing-logos"><span>Designed for conviction</span><span>Private by default</span><span>Built for every market</span><span>Always in your control</span></div>
         <section id="platform" className="landing-section"><div className="landing-section-head"><div className="landing-overline">A calmer way to invest</div><h2 className="landing-h2">Everything you need. Nothing you do not.</h2><p>Wave brings your cash, crypto, and investing decisions into one intentional workspace—so the important information is always close and the noise stays out of the way.</p></div><div className="landing-features">{[['O','One view of your money','See available cash, holdings, performance, and recent activity together. Your full financial picture should not require a maze of tabs.'],['~','Better context before a trade','Review price, amount, fees, and what you receive before confirming. Every action is designed to feel considered, not rushed.'],['*','A rhythm that fits your life','Follow markets in real time, build your own process, and return to a dashboard that makes your next step easy to find.']].map(([icon,title,text])=><article className="landing-feature" key={title}><div className="landing-icon">{icon}</div><h3>{title}</h3><p>{text}</p></article>)}</div></section>
         <section className="landing-section" style={{paddingTop:18}}><div className="landing-section-head"><div className="landing-overline">Built around good decisions</div><h2 className="landing-h2">More context. Less noise.</h2><p>Investing is personal. Wave gives you a clear place to learn from the past, understand the present, and decide what comes next.</p></div><div className="landing-principles"><article className="landing-principle featured"><h3>Keep the signal close.</h3><p>Your dashboard brings the details that matter into focus: your portfolio value, available balance, market movements, and a clean record of every action you take.</p><div className="landing-checklist"><span><b>01</b>Portfolio at a glance</span><span><b>02</b>Fees shown before you act</span><span><b>03</b>Activity you can follow</span></div></article><article className="landing-principle"><div className="landing-point"><strong>A calmer daily check-in</strong><p>See what changed without being pulled into a constant stream of alerts, opinions, or pressure.</p></div><div className="landing-point"><strong>Clear actions, plain language</strong><p>From deposits to trades, the key details appear before confirmation, so you know what you are choosing.</p></div><div className="landing-point"><strong>Your account, thoughtfully protected</strong><p>Security settings and account activity are easy to find, understand, and manage when you need them.</p></div></article></div></section>
-        <section id="security" className="landing-section" style={{paddingTop:20}}><div className="landing-showcase"><div className="landing-terminal"><div className="terminal-top"><span>Portfolio overview</span><div className="terminal-range" aria-label="Portfolio chart range">{(Object.keys(LANDING_CHARTS) as LandingRange[]).map(range=><button key={range} className={landingRange===range?"active":""} onClick={()=>{setLandingRange(range);setLandingHover(null);}}>{range}</button>)}</div></div><div className="terminal-value">${(LANDING_CHARTS[landingRange][landingHover??LANDING_CHARTS[landingRange].length-1].value).toLocaleString(undefined,{minimumFractionDigits:2})}</div><div className="terminal-gain">{LANDING_META[landingRange]}</div><div className="terminal-chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={LANDING_CHARTS[landingRange]} onMouseMove={(state:any)=>setLandingHover(typeof state?.activeTooltipIndex==="number"?state.activeTooltipIndex:null)} onMouseLeave={()=>setLandingHover(null)} margin={{top:8,right:3,left:3,bottom:0}}><defs><linearGradient id="landing-chart-fill" x1="0" x2="0" y1="0" y2="1"><stop stopColor="#818CF8" stopOpacity=".42"/><stop offset="1" stopColor="#818CF8" stopOpacity="0"/></linearGradient></defs><XAxis dataKey="label" axisLine={false} tickLine={false} tick={{fill:"#777D91",fontSize:10}} dy={9}/><YAxis hide domain={["dataMin - 500","dataMax + 500"]}/><Tooltip cursor={{stroke:"rgba(199,210,254,.4)",strokeWidth:1}} content={({active,payload}:any)=>active&&payload?.[0]?<div className="landing-chart-tip"><b>${Number(payload[0].value).toLocaleString(undefined,{minimumFractionDigits:2})}</b><span>{payload[0].payload.label}</span></div>:null}/><Area type="monotone" dataKey="value" stroke="#A5B4FC" strokeWidth={3} fill="url(#landing-chart-fill)" animationDuration={700} activeDot={{r:5,fill:"#F7F8FC",stroke:"#818CF8",strokeWidth:3}}/></AreaChart></ResponsiveContainer></div></div><div className="landing-sidecard"><div><div className="landing-overline">Protected at every step</div><h2 className="landing-h2" style={{fontSize:"clamp(30px,3vw,43px)"}}>Your wealth deserves a quieter kind of security.</h2><p>Session-level controls, transparent activity, and built-in safeguards work together without getting in your way.</p></div><div className="side-stat">24/7<small>Account activity monitoring</small></div></div></div></section>
+        <section id="security" className="landing-section" style={{paddingTop:20}}><div className="landing-showcase"><div className="landing-terminal"><div className="terminal-top"><span>Portfolio overview</span><div className="terminal-range" aria-label="Portfolio chart range">{(Object.keys(LANDING_CHARTS) as LandingRange[]).map(range=><button key={range} className={landingRange===range?"active":""} onClick={()=>{setLandingRange(range);setLandingHover(null);}}>{range}</button>)}</div></div><div className="terminal-value">${landingValue.toLocaleString(undefined,{minimumFractionDigits:2})}</div><div className="terminal-gain">{LANDING_META[landingRange]}</div><div className="terminal-chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={landingSeries} onMouseMove={(state:any)=>setLandingHover(typeof state?.activeTooltipIndex==="number"?state.activeTooltipIndex:null)} onMouseLeave={()=>setLandingHover(null)} margin={{top:8,right:3,left:3,bottom:0}}><defs><linearGradient id="landing-chart-fill" x1="0" x2="0" y1="0" y2="1"><stop stopColor="#818CF8" stopOpacity=".42"/><stop offset="1" stopColor="#818CF8" stopOpacity="0"/></linearGradient></defs><XAxis dataKey="label" axisLine={false} tickLine={false} tick={{fill:"#777D91",fontSize:10}} dy={9}/><YAxis hide domain={["dataMin - 500","dataMax + 500"]}/><Tooltip cursor={{stroke:"rgba(199,210,254,.4)",strokeWidth:1}} content={({active,payload}:any)=>active&&payload?.[0]?<div className="landing-chart-tip"><b>${Number(payload[0].value).toLocaleString(undefined,{minimumFractionDigits:2})}</b><span>{payload[0].payload.label}</span></div>:null}/><Area type="monotone" dataKey="value" stroke="#A5B4FC" strokeWidth={3} fill="url(#landing-chart-fill)" animationDuration={700} activeDot={{r:5,fill:"#F7F8FC",stroke:"#818CF8",strokeWidth:3}}/></AreaChart></ResponsiveContainer></div></div><div className="landing-sidecard"><div><div className="landing-overline">Protected at every step</div><h2 className="landing-h2" style={{fontSize:"clamp(30px,3vw,43px)"}}>Your wealth deserves a quieter kind of security.</h2><p>Session-level controls, transparent activity, and built-in safeguards work together without getting in your way.</p></div><div className="side-stat">24/7<small>Account activity monitoring</small></div></div></div></section>
         <section className="landing-section" style={{paddingTop:42}}><div className="landing-stats">{[['$2.4B+','Assets represented'],['99.99%','Platform uptime'],['150+','Markets available'],['4.9/5','Member experience']].map(([value,label])=><div className="landing-stat" key={label}><strong>{value}</strong><span>{label}</span></div>)}</div></section>
         <section id="how-it-works" className="landing-section"><div className="landing-section-head"><div className="landing-overline">Designed for momentum</div><h2 className="landing-h2">From first step to better habits.</h2><p>Wave removes the friction between intent and action without oversimplifying the decisions that matter.</p></div><div className="landing-steps">{[['01','Create your secure account','Set up in minutes with the details you need to keep your account protected.'],['02','Fund with intention','Add cash, explore the market, and make every next step visible before you take it.'],['03','Build what is next','Invest directly or put your strategy on autopilot while staying in control.']].map(([number,title,text])=><div className="landing-step" key={number}><b>{number}</b><h3>{title}</h3><p>{text}</p></div>)}</div></section>
         <section className="landing-section" style={{paddingTop:18}}><div className="landing-section-head"><div className="landing-overline">Member stories</div><h2 className="landing-h2">Made for people who value their time.</h2></div><div className="landing-quotes">{[['It feels less like a trading app and more like a considered financial home.','AM','Avery M.','Product leader'],['The clarity is the difference. I always know where I am and what I am choosing next.','JL','Jordan L.','Independent investor'],['Everything is deliberate, from the activity feed to the way the portfolio moves.','SK','Samira K.','Creative director']].map(([quote,initials,name,role])=><figure className="landing-quote" key={name}><p>&ldquo;{quote}&rdquo;</p><figcaption className="landing-person"><span className="landing-avatar">{initials}</span><span><b>{name}</b>{role}</span></figcaption></figure>)}</div></section>
@@ -1004,7 +1015,9 @@ export default function App(){
       <div className="ttl">
         {page==="dashboard"
           ? `Good ${new Date().getHours()<12?t("morning"):new Date().getHours()<17?t("afternoon"):t("evening")}, ${user.name.split(" ")[0]} 👋`
-          : (LANG[appSettings.language]?.[page]||LABELS[page]||pageTitle[page])
+          : page==="coin"
+            ? `${COINS[selCoin]?.name||selCoin} (${selCoin})`
+            : (LANG[appSettings.language]?.[page]||LABELS[page]||pageTitle[page])
         }
       </div>
       <div className="tdate">{new Date().toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div>
