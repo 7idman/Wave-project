@@ -311,7 +311,7 @@ export default function App(){
   const handleAutoInvestActivation=async()=>{
     const amount=Number(autoAmount);
     if(!Number.isFinite(amount)||amount<=0){
-      toast2("Enter a valid contribution amount","⚠",false);
+      toast2("Enter a valid contribution amount",false);
       return;
     }
     await chargeCashBalance(`${autoTier} auto-invest plan`, amount);
@@ -544,7 +544,7 @@ export default function App(){
         <AvatarDisplay size={size} fontSize={fontSize}/>
       </div>
       {profileOpen&&(
-        <div style={{position:"absolute",top:"calc(100% + 10px)",right:0,minWidth:190,background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:14,padding:6,boxShadow:"0 16px 40px rgba(0,0,0,.35)",zIndex:400}}>
+        <div style={{position:"absolute",top:"calc(100% + 10px)",right:0,minWidth:190,background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:14,padding:6,boxShadow:"0 16px 40px rgba(0,0,0,.35)",}}>
           <div style={{padding:"8px 10px",marginBottom:2}}>
             <div style={{fontSize:12,fontWeight:700,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{user?.name}</div>
             <div style={{fontSize:10,color:"var(--text3)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{user?.email}</div>
@@ -565,8 +565,8 @@ export default function App(){
   );
 
   const kycLabel=(status:string)=>{
-    if(status==="verified") return <span className="badge badge-green">✓ Verified</span>;
-    if(status==="review")   return <span className="badge badge-blue">⏳ In Review</span>;
+    if(status==="verified") return <span className="badge badge-green">Verified</span>;
+    if(status==="review")   return <span className="badge badge-blue">KYC-Unverified</span>;
     return null;
   };
 
@@ -589,7 +589,7 @@ export default function App(){
       </nav>
       <main className="landing-main">
         <div className="landing-live-strip" aria-label="Live cryptocurrency prices from CoinGecko">
-          <div className="landing-live-label"><i/>Live market pulse</div>
+          <div className="landing-live-label"><i/>Live market prize</div>
           <div className="landing-live-track">
             {Object.keys(COINS).map(symbol=>{
               const quote=prices[symbol]||FB_PRICES[symbol];
@@ -658,11 +658,11 @@ export default function App(){
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
               <div>
                 <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Full Name *</div>
-                <input className="inp" placeholder="Alex Morgan" type="text" autoComplete="name" value={regName} onChange={e=>{setRegName(e.target.value);setLoginErr("");}}/>
+                <input className="inp" placeholder="John Doe" type="text" autoComplete="name" value={regName} onChange={e=>{setRegName(e.target.value);setLoginErr("");}}/>
               </div>
               <div>
                 <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Email *</div>
-                <input className="inp" placeholder="you@example.com" type="email" autoComplete="email" value={regEmail} onChange={e=>{setRegEmail(e.target.value);setLoginErr("");}}/>
+                <input className="inp" placeholder="Jack.Reaper@wave.io" type="email" autoComplete="email" value={regEmail} onChange={e=>{setRegEmail(e.target.value);setLoginErr("");}}/>
               </div>
             </div>
             <div style={{marginBottom:8}}>
@@ -723,7 +723,7 @@ export default function App(){
               </div>
               <div>
                 <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Confirm Password *</div>
-                <input className="inp" placeholder="Repeat password" type="password" autoComplete="new-password" value={regPw2} onChange={e=>{setRegPw2(e.target.value);setLoginErr("");}} onKeyDown={e=>e.key==="Enter"&&doRegister()}/>
+                <input className="inp" placeholder="Confirm password" type="password" autoComplete="new-password" value={regPw2} onChange={e=>{setRegPw2(e.target.value);setLoginErr("");}} onKeyDown={e=>e.key==="Enter"&&doRegister()}/>
               </div>
             </div>
             {/* Password strength indicator */}
@@ -734,7 +734,7 @@ export default function App(){
                     <div key={i} style={{flex:1,height:3,borderRadius:2,background:regPw.length>=(i*2+4)?(i<=1?"var(--red)":i===2?"var(--yellow)":i===3?"#06B6D4":"var(--green)"):"var(--border)"}}/>
                   ))}
                 </div>
-                <div style={{fontSize:10,color:"var(--text3)"}}>{regPw.length<6?"Too short":regPw.length<8?"Weak":regPw.length<12?"Fair":regPw.length<16?"Good":"Strong"}</div>
+                <div style={{fontSize:10,color:"var(--text3)"}}>{regPw.length<6?"Too short":regPw.length<8?"Weak":regPw.length<12?"Fair":regPw.length<16?"Good":"Strong Password comrade"}</div>
               </div>
             )}
             {/* Terms checkbox */}
@@ -873,7 +873,7 @@ export default function App(){
       <Modal open={addrOpen} onClose={()=>setAddrOpen(false)} title="Upload Address Proof">
         <div style={{fontSize:13,color:"var(--text3)",marginBottom:16}}>Upload a utility bill, bank statement or council tax letter dated within the last 3 months.</div>
         <div onClick={()=>addrInput.current?.click()} style={{border:"2px dashed var(--border2)",borderRadius:12,padding:"32px 20px",textAlign:"center",cursor:"pointer",marginBottom:20,transition:"border-color .15s"}} onMouseEnter={e=>(e.currentTarget.style.borderColor="var(--indigo2)")} onMouseLeave={e=>(e.currentTarget.style.borderColor="var(--border2)")}>
-          <div style={{fontSize:32,marginBottom:8}}>🏠</div>
+          <div style={{fontSize:32,marginBottom:8}}></div>
           {addrFile?<div style={{color:"var(--green)",fontWeight:600,fontSize:13}}>✓ {addrFile.name}</div>:<div style={{color:"var(--text3)",fontSize:13}}>Click to upload · JPG, PNG or PDF · Max 10MB</div>}
         </div>
         <input ref={addrInput} type="file" accept="image/*,.pdf" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(f)setAddrFile(f);}}/>
@@ -894,7 +894,7 @@ export default function App(){
         </button>
       </Modal>
 
-      <Modal open={deleteOpen} onClose={()=>setDeleteOpen(false)} title="⚠ Close Account">
+      <Modal open={deleteOpen} onClose={()=>setDeleteOpen(false)} title="Close Account">
         <div style={{color:"var(--red)",fontSize:13,marginBottom:16,lineHeight:1.6}}>This is permanent and cannot be undone. All your data, holdings and history will be erased.</div>
         <div className="tlab">Type DELETE to confirm</div>
         <input className="inp" placeholder="DELETE" style={{marginBottom:20}} value={deleteConfirm} onChange={e=>setDeleteConfirm(e.target.value)}/>
@@ -1189,18 +1189,35 @@ export default function App(){
               </>}
 
               {ttype==="deposit"&&<>
-                <div className="tlab">Amount (USD)</div>
-                <div className="tiwrap"><input className="tinp" type="number" placeholder="0.00" inputMode="decimal" value={tamt} onChange={e=>setTamt(e.target.value)}/><span className="tsfx">USD</span></div>
-                <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>{["100","500","1000","5000"].map(v=><button key={v} className={`qpill ${tamt===v?"act":""}`} onClick={()=>setTamt(v)}>${v}</button>)}</div>
-                <div className="tlab">Payment Method</div>
-                <select className="sel" style={{marginBottom:14}}><option>Bank Transfer (Free)</option><option>Credit / Debit Card (1.5%)</option><option>PayPal (2%)</option></select>
-                <div className="tsum">
-                  <div className="trow"><span className="trl">Amount</span><span className="trv">${tamt||"0.00"}</span></div>
-                  <div className="trow"><span className="trl">Fee</span><span className="trv">$0.00</span></div>
-                  <div className="trow"><span className="trl">You receive</span><span className="trt">${tamt||"0.00"}</span></div>
+                <div className="deposit-hero">
+                  <div>
+                    <div className="deposit-title">Instant deposit</div>
+                    <p className="deposit-copy">Move funds into your account quickly with a clean, modern checkout designed to help you stay invested.</p>
+                  </div>
+                  <div className="deposit-badge"><span>Available balance</span><strong>{cur(port.cashBalance)}</strong></div>
                 </div>
-                <button className="btn btn-primary btn-lg" style={{width:"100%"}} onClick={doTrade} disabled={loading}>{loading?"Processing…":"Deposit Funds"}</button>
-                <div className="tbal">Balance: <span>{cur(port.cashBalance)}</span></div>
+                <div className="deposit-panel">
+                  <div className="deposit-row">
+                    <div style={{flex:1}}>
+                      <div className="tlab">Amount (USD)</div>
+                      <div className="tiwrap"><input className="tinp" type="number" placeholder="0.00" inputMode="decimal" value={tamt} onChange={e=>setTamt(e.target.value)}/><span className="tsfx">USD</span></div>
+                    </div>
+                  </div>
+                  <div className="deposit-quick">{["100","500","1000","5000"].map(v=><button key={v} className={`qpill ${tamt===v?"act":""}`} onClick={()=>setTamt(v)}>${v}</button>)}</div>
+                  <div className="deposit-method">
+                    <div className="tlab">Payment Method</div>
+                    <select className="sel"><option>Bank Transfer (Free)</option><option>Credit / Debit Card (1.5%)</option><option>PayPal (2%)</option></select>
+                  </div>
+                  <div className="deposit-summary">
+                    <div className="trow"><span className="trl">Amount</span><span className="trv">${tamt||"0.00"}</span></div>
+                    <div className="trow"><span className="trl">Fee</span><span className="trv">$0.00</span></div>
+                    <div className="trow"><span className="trl">You receive</span><span className="trt">${tamt||"0.00"}</span></div>
+                  </div>
+                  <div className="deposit-action">
+                    <button className="btn btn-primary btn-lg" style={{width:"100%"}} onClick={doTrade} disabled={loading}>{loading?"Processing…":"Deposit Funds"}</button>
+                    <div className="deposit-note">Your deposit will appear in your balance instantly after completion.</div>
+                  </div>
+                </div>
               </>}
 
               {ttype==="withdraw"&&<>
