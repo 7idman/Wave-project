@@ -181,6 +181,15 @@ async function initSchema() {
       created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
       updated_at        TEXT    NOT NULL DEFAULT (datetime('now'))
     )`,
+    `CREATE TABLE IF NOT EXISTS admin_actions (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      admin_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      admin_email    TEXT,
+      action         TEXT    NOT NULL,
+      target_user_id INTEGER NOT NULL,
+      reason         TEXT,
+      created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
   ];
 
   for (const sql of tables) {
