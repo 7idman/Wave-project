@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { forwardRef, useEffect, useId, type ButtonHTMLAttributes, type HTMLAttributes, type InputHTMLAttributes, type ReactNode } from "react";
 import { COINS } from "../data/market";
 
 export const CoinIcon=({symbol,size=32}:{symbol:string;size?:number})=>{
@@ -31,20 +31,52 @@ export const AppIcon=({name,size=18}:{name:AppIconName;size?:number})=>{
 };
 
 export const CT=({active,payload}:any)=>active&&payload?.length?<div style={{background:"rgba(15,17,26,.95)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"7px 12px",fontSize:12,color:"#fff",fontWeight:600}}>${payload[0].value.toLocaleString()}</div>:null;
-export const Toggle=({on,onToggle}:{on:boolean;onToggle:()=>void})=>(
-  <button onClick={onToggle} aria-pressed={on} style={{width:46,height:26,borderRadius:13,position:"relative",cursor:"pointer",border:"none",outline:"none",background:on?"linear-gradient(135deg,#818CF8,#6366F1)":"rgba(255,255,255,.08)",transition:"background .2s",flexShrink:0}}>
+export const Toggle=({on,onToggle,label="Toggle setting"}:{on:boolean;onToggle:()=>void;label?:string})=>(
+  <button type="button" onClick={onToggle} aria-label={label} aria-pressed={on} style={{width:46,height:26,borderRadius:13,position:"relative",cursor:"pointer",border:"none",outline:"none",background:on?"linear-gradient(135deg,#818CF8,#6366F1)":"rgba(255,255,255,.08)",transition:"background .2s",flexShrink:0}}>
     <div style={{position:"absolute",top:3,left:on?23:3,width:20,height:20,borderRadius:"50%",background:"white",transition:"left .2s",boxShadow:"0 2px 6px rgba(0,0,0,.3)"}}/>
   </button>
 );
 
+export const Card=({children,className="",...props}:{children:ReactNode;className?:string}&HTMLAttributes<HTMLDivElement>)=>(
+  <div className={`gcard ui-card ${className}`} {...props}>{children}</div>
+);
+
+export const Button=({className="",type="button",...props}:{className?:string}&ButtonHTMLAttributes<HTMLButtonElement>)=>(
+  <button type={type} className={`btn ${className}`} {...props}/>
+);
+
+export const Input=forwardRef<HTMLInputElement,InputHTMLAttributes<HTMLInputElement>>(({className="",...props},ref)=>(
+  <input ref={ref} className={`inp ${className}`} {...props}/>
+));
+Input.displayName="Input";
+
+export const Badge=({children,tone="blue",className=""}:{children:ReactNode;tone?:"blue"|"green"|"red"|"purple"|"gray";className?:string})=>(
+  <span className={`badge badge-${tone} ${className}`}>{children}</span>
+);
+
+export const Tooltip=({label,children}:{label:string;children:ReactNode})=>(
+  <span className="ui-tooltip" data-tooltip={label}>{children}</span>
+);
+
+export const Dropdown=({children,className="",...props}:{children:ReactNode;className?:string}&HTMLAttributes<HTMLDivElement>)=>(
+  <div className={`ui-dropdown ${className}`} {...props}>{children}</div>
+);
+
 /* ── Modal ── */
 export const Modal=({open,onClose,title,children}:{open:boolean;onClose:()=>void;title:string;children:ReactNode})=>{
+  const titleId=useId();
+  useEffect(()=>{
+    if(!open) return;
+    const onKeyDown=(event:KeyboardEvent)=>{if(event.key==="Escape") onClose();};
+    document.addEventListener("keydown",onKeyDown);
+    return()=>document.removeEventListener("keydown",onKeyDown);
+  },[open,onClose]);
   if(!open) return null;
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20,backdropFilter:"blur(6px)"}} onClick={onClose}>
-      <div style={{background:"#161822",border:"1px solid rgba(255,255,255,.1)",borderRadius:20,padding:"28px 24px",width:"100%",maxWidth:460,position:"relative",boxShadow:"0 24px 60px rgba(0,0,0,.5)"}} onClick={e=>e.stopPropagation()}>
+    <div className="ui-modal-backdrop" onMouseDown={onClose}>
+      <div className="ui-modal" role="dialog" aria-modal="true" aria-labelledby={titleId} onMouseDown={e=>e.stopPropagation()}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
-          <span style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontWeight:800,fontSize:18,color:"#F1F2F8"}}>{title}</span>
+          <span id={titleId} style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontWeight:800,fontSize:18,color:"var(--text)"}}>{title}</span>
           <button onClick={onClose} style={{width:30,height:30,borderRadius:"50%",background:"rgba(255,255,255,.08)",border:"none",cursor:"pointer",color:"#9496A8",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
         </div>
         {children}

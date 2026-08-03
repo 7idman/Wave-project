@@ -25,5 +25,5 @@ export const api={
   setTokens:(access:string,refresh:string)=>{accessToken=access;refreshToken=refresh;localStorage.setItem("wave_access",access);localStorage.setItem("wave_refresh",refresh);},
   clearTokens:()=>{accessToken=null;refreshToken=null;localStorage.removeItem("wave_access");localStorage.removeItem("wave_refresh");},
   request,
-  get:(path:string)=>request(path), post:(path:string,body:any)=>request(path,{method:"POST",body:JSON.stringify(body)}), patch:(path:string,body:any)=>request(path,{method:"PATCH",body:JSON.stringify(body)}),
+  get:(path:string)=>request(path), post:(path:string,body:any)=>request(path,{method:"POST",body:JSON.stringify(body)}), patch:(path:string,body:any)=>request(path,{method:"PATCH",body:JSON.stringify(body)}), delete:(path:string,body:any)=>request(path,{method:"DELETE",body:JSON.stringify(body)}),
 };

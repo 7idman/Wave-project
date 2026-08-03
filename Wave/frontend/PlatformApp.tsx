@@ -1,8 +1,7 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { Suspense, lazy, useState, useEffect, useCallback, useRef } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 import "./styles/platform.css";
 import { api } from "./api/client";
-import AdminPanel from "./admin/AdminPanel";
 import type { User, Price, Holding, Portfolio, Tx } from "./types";
 import type { AppSettings, SiteUpdate, LoginEvent, Activity, ChartPt } from "./types/platform";
 import { LANG, LANGUAGE_OPTIONS } from "./data/languages";
@@ -12,10 +11,13 @@ import { generateChart as genChart } from "./utils/charts";
 import { useWindowWidth as useWW } from "./hooks/useWindowWidth";
 import { CoinIcon, WaveLogo, AppIcon, CT, Toggle, Modal } from "./components/PlatformPrimitives";
 
+const AdminPanel=lazy(()=>import("./admin/AdminPanel"));
+
 const fontLink = document.createElement("link");
 fontLink.rel = "stylesheet";
 fontLink.href = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800;900&display=swap";
 document.head.appendChild(fontLink);
+const keyToBytes=(key:string)=>{const pad="=".repeat((4-key.length%4)%4);const raw=atob((key+pad).replace(/-/g,"+").replace(/_/g,"/"));return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));};
 /* ════════════════ APP ════════════════ */
 export default function App(){
   const[user,setUser]         =useState<User|null>(null);
@@ -96,8 +98,6 @@ export default function App(){
   const[pw,setPw]             =useState("");
   const[sbOpen,setSbOpen]     =useState(false);      // mobile: sidebar slid in/out
   const[sbCollapsed,setSbCollapsed]=useState(true);  // desktop: sidebar hidden/shown
-  const[profileOpen,setProfileOpen]=useState(false);  // profile-circle dropdown (topbar)
-  const profileRef=useRef<HTMLDivElement>(null);
   const sidebarRef=useRef<HTMLDivElement>(null);
   const sidebarTouchRef=useRef<{y:number;scrollTop:number}|null>(null);
   const onSidebarKeyDown=(e:any)=>{
@@ -137,16 +137,13 @@ export default function App(){
     sidebarRef.current.scrollTop = sidebarTouchRef.current.scrollTop - delta;
   };
   const onSidebarTouchEnd=()=>{ sidebarTouchRef.current=null; };
-  useEffect(()=>{
-    const h=(e:MouseEvent)=>{ if(profileRef.current&&!profileRef.current.contains(e.target as Node)) setProfileOpen(false); };
-    document.addEventListener("mousedown",h);
-    return()=>document.removeEventListener("mousedown",h);
-  },[]);
   const[loginErr,setLoginErr] =useState("");
   const[siteUpdates,setSiteUpdates]=useState<SiteUpdate[]>([]);
   const[loginHistory,setLoginHistory]=useState<LoginEvent[]>([]);
   const[activities,setActivities]=useState<Activity[]>([]);
   const[notifLoading,setNotifLoading]=useState(false);
+  const[pushSubscribed,setPushSubscribed]=useState<boolean|null>(null);
+  const[pushBusy,setPushBusy]=useState(false);
   const[appSettings,setAppSettings]=useState<AppSettings>(()=>{
     try{
       const saved=localStorage.getItem("wave_prefs");
@@ -389,6 +386,44 @@ export default function App(){
     }catch(e:any){toast2(e.message||"Unable to sign out this device","âš ",false);}
   };
 
+  const checkPushStatus=async()=>{
+    if(!("serviceWorker" in navigator)||!("PushManager" in window)){setPushSubscribed(false);return;}
+    try{
+      const reg=await navigator.serviceWorker.getRegistration("/sw.js");
+      const sub=await reg?.pushManager.getSubscription();
+      setPushSubscribed(!!sub);
+    }catch{setPushSubscribed(false);}
+  };
+  const enableAdminPush=async()=>{
+    setPushBusy(true);
+    try{
+      if(!("serviceWorker" in navigator)||!("PushManager" in window)) throw new Error("Push is not supported on this device");
+      const cfg=await api.get("/admin/push/config");
+      if(!cfg.publicKey) throw new Error("Push isn't configured on the backend yet");
+      const reg=await navigator.serviceWorker.register("/sw.js");
+      const existing=await reg.pushManager.getSubscription();
+      const sub=existing||await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:keyToBytes(cfg.publicKey)});
+      await api.post("/admin/push/subscribe",sub);
+      setPushSubscribed(true);
+      toast2("This device will receive admin alerts","OK");
+    }catch(e:any){toast2(e.message,"!",false);}
+    finally{setPushBusy(false);}
+  };
+  const disableAdminPush=async()=>{
+    setPushBusy(true);
+    try{
+      const reg=await navigator.serviceWorker.getRegistration("/sw.js");
+      const sub=await reg?.pushManager.getSubscription();
+      if(sub){
+        await api.delete("/admin/push/subscribe",{endpoint:sub.endpoint});
+        await sub.unsubscribe();
+      }
+      setPushSubscribed(false);
+      toast2("Admin alerts turned off");
+    }catch(e:any){toast2(e.message,"!",false);}
+    finally{setPushBusy(false);}
+  };
+
   /* Save profile */
   const doSaveProfile=async()=>{
     if(!editName.trim()&&!avatarPreview)return toast2("Nothing to update","⚠",false);
@@ -537,10 +572,17 @@ export default function App(){
   const ACCOUNT_MANAGEMENT_FEE=1500;
   const pageTitle:Record<string,string>={invest:"Investment Plans",copy:"Signal Copier",managed:"Account Management"};
   const nav=(id:string)=>{setPage(id);setSbOpen(false);};
+  const onActivate=(event:React.KeyboardEvent<HTMLElement>,action:()=>void)=>{
+    if(event.key==="Enter"||event.key===" "){event.preventDefault();action();}
+  };
   const openCoin=(symbol:string)=>{setSelCoin(symbol);setTcoin(symbol);nav("coin");};
   const goToDeposit=()=>{setTtype("deposit");setTamt("");nav("trade");};
   const pieData=port.holdings.filter(h=>h.amount>0).map(h=>({name:h.symbol,value:h.value,color:COINS[h.symbol]?.color||"#ccc"}));
   const isAdmin=user?.role==="owner"||user?.role==="admin"||Boolean(user?.permissions?.access_admin);
+  useEffect(()=>{
+    if(!isAdmin) return;
+    checkPushStatus();
+  },[isAdmin]);
 
   const AvatarDisplay=({size=40,fontSize=15}:{size?:number;fontSize?:number})=>(
     user?.avatarUrl
@@ -549,9 +591,16 @@ export default function App(){
   );
 
   /* Profile circle + dropdown — sits beside the balance chip in both topbars */
-  const ProfileMenu=({size=34,fontSize=13}:{size?:number;fontSize?:number})=>(
-    <div ref={profileRef} style={{position:"relative"}}>
-      <div onClick={()=>setProfileOpen(o=>!o)} style={{cursor:"pointer",borderRadius:"50%",border:"2px solid var(--border2)",lineHeight:0,transition:"border-color .15s"}} title={user?.name} role="button" aria-label="Profile menu">
+  const ProfileMenu=({size=34,fontSize=13}:{size?:number;fontSize?:number})=>{
+    const[profileOpen,setProfileOpen]=useState(false);
+    const profileRef=useRef<HTMLDivElement>(null);
+    useEffect(()=>{
+      const h=(e:MouseEvent)=>{ if(profileRef.current&&!profileRef.current.contains(e.target as Node)) setProfileOpen(false); };
+      document.addEventListener("mousedown",h);
+      return()=>document.removeEventListener("mousedown",h);
+    },[]);
+    return <div ref={profileRef} style={{position:"relative"}}>
+      <div onClick={()=>setProfileOpen(o=>!o)} onKeyDown={e=>onActivate(e,()=>setProfileOpen(o=>!o))} style={{cursor:"pointer",borderRadius:"50%",border:"2px solid var(--border2)",lineHeight:0,transition:"border-color .15s"}} title={user?.name} role="button" tabIndex={0} aria-label="Profile menu" aria-expanded={profileOpen}>
         <AvatarDisplay size={size} fontSize={fontSize}/>
       </div>
       {profileOpen&&(
@@ -572,8 +621,8 @@ export default function App(){
           </div>
         </div>
       )}
-    </div>
-  );
+    </div>;
+  };
 
   const kycLabel=(status:string)=>{
     if(status==="verified") return <span className="badge badge-green">Verified</span>;
@@ -923,33 +972,33 @@ export default function App(){
           <div>
             <div className="slogo" style={{fontSize:21}}>Wave</div>
           </div>
-          <div className="sb-close" onClick={()=>{setSbOpen(false);setSbCollapsed(true);}} title="Close sidebar" role="button" aria-label="Close sidebar">
+          <div className="sb-close" onClick={()=>{setSbOpen(false);setSbCollapsed(true);}} onKeyDown={e=>onActivate(e,()=>{setSbOpen(false);setSbCollapsed(true);})} title="Close sidebar" role="button" tabIndex={0} aria-label="Close sidebar">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </div>
         </div>
         <div className="ssec">Main</div>
         {NAV.map(n=>(
-          <div key={n.id} className={`sitem ${page===n.id?"active":""}`} onClick={()=>nav(n.id)}>
+          <div key={n.id} className={`sitem ${page===n.id?"active":""}`} onClick={()=>nav(n.id)} onKeyDown={e=>onActivate(e,()=>nav(n.id))} role="button" tabIndex={0} aria-current={page===n.id?"page":undefined}>
             <span className="sicon"><AppIcon name={n.icon} size={17}/></span>{n.label}
           </div>
         ))}
         <div className="ssec" style={{marginTop:18}}>Wealth Services</div>
         {SERVICE_NAV.map(n=>(
-          <div key={n.id} className={`sitem ${page===n.id?"active":""}`} onClick={()=>nav(n.id)}>
+          <div key={n.id} className={`sitem ${page===n.id?"active":""}`} onClick={()=>nav(n.id)} onKeyDown={e=>onActivate(e,()=>nav(n.id))} role="button" tabIndex={0} aria-current={page===n.id?"page":undefined}>
             <span className="sicon"><AppIcon name={n.icon} size={17}/></span>{n.label}
           </div>
         ))}
         {isAdmin&&<>
           <div className="ssec" style={{marginTop:18}}>Admin</div>
-          <div className={`sitem ${page==="admin"?"active":""}`} onClick={()=>nav("admin")}>
+          <div className={`sitem ${page==="admin"?"active":""}`} onClick={()=>nav("admin")} onKeyDown={e=>onActivate(e,()=>nav("admin"))} role="button" tabIndex={0} aria-current={page==="admin"?"page":undefined}>
             <span className="sicon">+</span>Admin Center
           </div>
         </>}
         <div className="ssec" style={{marginTop:8}}>Account</div>
-        <div className={`sitem ${page==="settings"?"active":""}`} onClick={()=>nav("settings")}>
+        <div className={`sitem ${page==="settings"?"active":""}`} onClick={()=>nav("settings")} onKeyDown={e=>onActivate(e,()=>nav("settings"))} role="button" tabIndex={0} aria-current={page==="settings"?"page":undefined}>
           <span className="sicon">⚙</span>Settings
         </div>
-        <div className={`sitem ${page==="notifications"?"active":""}`} onClick={()=>nav("notifications")} style={{position:"relative"}}>
+        <div className={`sitem ${page==="notifications"?"active":""}`} onClick={()=>nav("notifications")} onKeyDown={e=>onActivate(e,()=>nav("notifications"))} role="button" tabIndex={0} aria-current={page==="notifications"?"page":undefined} style={{position:"relative"}}>
           <span className="sicon">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
           </span>
@@ -957,11 +1006,11 @@ export default function App(){
           {appSettings.notifications&&<span style={{marginLeft:"auto",width:7,height:7,borderRadius:"50%",background:"var(--green)",flexShrink:0}}/>}
         </div>
         <div className="sbot">
-          <div className="suser" onClick={()=>nav("settings")}>
+          <div className="suser" onClick={()=>nav("settings")} onKeyDown={e=>onActivate(e,()=>nav("settings"))} role="button" tabIndex={0} aria-label="Open profile settings">
             <AvatarDisplay size={34} fontSize={13}/>
             <div style={{flex:1,minWidth:0}}><div className="suname">{user.name}</div><div className="suemail">{user.email}</div></div>
             {/* SVG logout icon */}
-            <div className="logbtn" onClick={e=>{e.stopPropagation();doLogout();}} title="Sign out">
+            <div className="logbtn" onClick={e=>{e.stopPropagation();doLogout();}} onKeyDown={e=>onActivate(e,()=>doLogout())} title="Sign out" role="button" tabIndex={0} aria-label="Sign out">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             </div>
           </div>
@@ -977,7 +1026,7 @@ export default function App(){
         {/* Mobile topbar */}
         <div className="mtop">
           <div className="mlogo-row">
-            <div className="mmenu" onClick={()=>setSbOpen(true)}>
+            <div className="mmenu" onClick={()=>setSbOpen(true)} onKeyDown={e=>onActivate(e,()=>setSbOpen(true))} role="button" tabIndex={0} aria-label="Open navigation menu">
               <svg width="22" height="16" viewBox="0 0 22 16" fill="none"><rect y="0" width="22" height="2.5" rx="1.25" fill="currentColor"/><rect y="6.75" width="16" height="2.5" rx="1.25" fill="currentColor"/><rect y="13.5" width="22" height="2.5" rx="1.25" fill="currentColor"/></svg>
             </div>
             <WaveLogo size={24}/><div className="mlogo">Wave</div>
@@ -1008,7 +1057,7 @@ export default function App(){
         {/* Desktop topbar */}
 <div className="topbar">
   <div style={{display:"flex",alignItems:"center",gap:14}}>
-    <div className="sb-open" style={{visibility:sbCollapsed?"visible":"hidden"}} onClick={()=>setSbCollapsed(false)} title="Open sidebar" role="button" aria-label="Open sidebar">
+    <div className="sb-open" style={{visibility:sbCollapsed?"visible":"hidden"}} onClick={()=>setSbCollapsed(false)} onKeyDown={e=>onActivate(e,()=>setSbCollapsed(false))} title="Open sidebar" role="button" tabIndex={0} aria-label="Open sidebar">
       <svg width="18" height="14" viewBox="0 0 22 16" fill="none"><rect y="0" width="22" height="2.5" rx="1.25" fill="currentColor"/><rect y="6.75" width="16" height="2.5" rx="1.25" fill="currentColor"/><rect y="13.5" width="22" height="2.5" rx="1.25" fill="currentColor"/></svg>
     </div>
     <div>
@@ -1028,7 +1077,7 @@ export default function App(){
     <ProfileMenu/>
   </div>
 </div>        {/* ══ DASHBOARD ══ */}
-        {page==="admin"&&<AdminPanel currentUser={user} notify={toast2}/>}
+        {page==="admin"&&<Suspense fallback={<div className="gcard skeleton" style={{minHeight:360}} aria-label="Loading admin center"/>}><AdminPanel currentUser={user} notify={toast2}/></Suspense>}
 
         {page==="dashboard"&&<>
           <div className="stats" style={{marginTop:mob?12:0}}>
@@ -1588,10 +1637,14 @@ export default function App(){
                 <div><div className="setting-label">Trade Alerts</div><div className="setting-desc">Notify when a buy/sell order is completed</div></div>
                 <Toggle on={true} onToggle={()=>toast2("Trade alerts always on for security","🔒")}/>
               </div>
-              <div className="setting-row" style={{borderBottom:"none"}}>
+              <div className="setting-row" style={{borderBottom:isAdmin?undefined:"none"}}>
                 <div><div className="setting-label">Price Alerts</div><div className="setting-desc">Get notified on major price movements</div></div>
                 <Toggle on={false} onToggle={()=>toast2("Price alerts coming soon","📈")}/>
               </div>
+              {isAdmin&&<div className="setting-row" style={{borderBottom:"none"}}>
+                <div><div className="setting-label">Admin Device Alerts</div><div className="setting-desc">Push notification on this device for new pending requests</div></div>
+                <Toggle label="Toggle admin device alerts" on={!!pushSubscribed} onToggle={()=>pushBusy?null:(pushSubscribed?disableAdminPush():enableAdminPush())}/>
+              </div>}
             </div>
 
             <div className="gcard" style={{marginBottom:14}}>
@@ -1664,13 +1717,13 @@ export default function App(){
       <div className="bnav">
         <div className="bnavr">
           {NAV.slice(0,2).map(n=>(
-            <div key={n.id} className={`bni ${page===n.id?"active":""}`} onClick={()=>nav(n.id)}>
+            <div key={n.id} className={`bni ${page===n.id?"active":""}`} onClick={()=>nav(n.id)} onKeyDown={e=>onActivate(e,()=>nav(n.id))} role="button" tabIndex={0} aria-current={page===n.id?"page":undefined}>
               <span className="bni-icon"><AppIcon name={n.icon} size={19}/></span><span>{n.short}</span>
             </div>
           ))}
-          <div className="bnav-fab" onClick={()=>nav("trade")} role="button" aria-label="Quick trade">+</div>
+          <div className="bnav-fab" onClick={()=>nav("trade")} onKeyDown={e=>onActivate(e,()=>nav("trade"))} role="button" tabIndex={0} aria-label="Quick trade">+</div>
           {NAV.slice(2).map(n=>(
-            <div key={n.id} className={`bni ${page===n.id?"active":""}`} onClick={()=>nav(n.id)}>
+            <div key={n.id} className={`bni ${page===n.id?"active":""}`} onClick={()=>nav(n.id)} onKeyDown={e=>onActivate(e,()=>nav(n.id))} role="button" tabIndex={0} aria-current={page===n.id?"page":undefined}>
               <span className="bni-icon"><AppIcon name={n.icon} size={19}/></span><span>{n.short}</span>
             </div>
           ))}
