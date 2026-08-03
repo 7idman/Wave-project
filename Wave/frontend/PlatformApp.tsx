@@ -98,6 +98,8 @@ export default function App(){
   const[pw,setPw]             =useState("");
   const[sbOpen,setSbOpen]     =useState(false);      // mobile: sidebar slid in/out
   const[sbCollapsed,setSbCollapsed]=useState(true);  // desktop: sidebar hidden/shown
+  const[profileOpen,setProfileOpen]=useState<"mobile"|"desktop"|null>(null);
+  const profileRefs=useRef<Record<"mobile"|"desktop",HTMLDivElement|null>>({mobile:null,desktop:null});
   const sidebarRef=useRef<HTMLDivElement>(null);
   const sidebarTouchRef=useRef<{y:number;scrollTop:number}|null>(null);
   const onSidebarKeyDown=(e:any)=>{
@@ -137,6 +139,14 @@ export default function App(){
     sidebarRef.current.scrollTop = sidebarTouchRef.current.scrollTop - delta;
   };
   const onSidebarTouchEnd=()=>{ sidebarTouchRef.current=null; };
+  useEffect(()=>{
+    if(!profileOpen) return;
+    const closeOnOutsideClick=(event:MouseEvent)=>{
+      if(!profileRefs.current[profileOpen]?.contains(event.target as Node)) setProfileOpen(null);
+    };
+    document.addEventListener("mousedown",closeOnOutsideClick);
+    return()=>document.removeEventListener("mousedown",closeOnOutsideClick);
+  },[profileOpen]);
   const[loginErr,setLoginErr] =useState("");
   const[siteUpdates,setSiteUpdates]=useState<SiteUpdate[]>([]);
   const[loginHistory,setLoginHistory]=useState<LoginEvent[]>([]);
@@ -591,31 +601,26 @@ export default function App(){
   );
 
   /* Profile circle + dropdown — sits beside the balance chip in both topbars */
-  const ProfileMenu=({size=34,fontSize=13}:{size?:number;fontSize?:number})=>{
-    const[profileOpen,setProfileOpen]=useState(false);
-    const profileRef=useRef<HTMLDivElement>(null);
-    useEffect(()=>{
-      const h=(e:MouseEvent)=>{ if(profileRef.current&&!profileRef.current.contains(e.target as Node)) setProfileOpen(false); };
-      document.addEventListener("mousedown",h);
-      return()=>document.removeEventListener("mousedown",h);
-    },[]);
-    return <div ref={profileRef} style={{position:"relative"}}>
-      <div onClick={()=>setProfileOpen(o=>!o)} onKeyDown={e=>onActivate(e,()=>setProfileOpen(o=>!o))} style={{cursor:"pointer",borderRadius:"50%",border:"2px solid var(--border2)",lineHeight:0,transition:"border-color .15s"}} title={user?.name} role="button" tabIndex={0} aria-label="Profile menu" aria-expanded={profileOpen}>
+  const ProfileMenu=({menuId,size=34,fontSize=13}:{menuId:"mobile"|"desktop";size?:number;fontSize?:number})=>{
+    const isOpen=profileOpen===menuId;
+    const toggleProfileMenu=()=>setProfileOpen(current=>current===menuId?null:menuId);
+    return <div ref={node=>{profileRefs.current[menuId]=node;}} style={{position:"relative",zIndex:isOpen?500:1}}>
+      <div onClick={toggleProfileMenu} onKeyDown={e=>onActivate(e,toggleProfileMenu)} style={{cursor:"pointer",borderRadius:"50%",border:"2px solid var(--border2)",lineHeight:0,transition:"border-color .15s"}} title={user?.name} role="button" tabIndex={0} aria-label="Profile menu" aria-expanded={isOpen}>
         <AvatarDisplay size={size} fontSize={fontSize}/>
       </div>
-      {profileOpen&&(
-        <div style={{position:"absolute",top:"calc(100% + 10px)",right:0,minWidth:190,background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:14,padding:6,boxShadow:"0 16px 40px rgba(0,0,0,.35)",}}>
+      {isOpen&&(
+        <div style={{position:"absolute",zIndex:501,top:"calc(100% + 10px)",right:0,minWidth:190,background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:14,padding:6,boxShadow:"0 20px 50px rgba(0,0,0,.42)",}}>
           <div style={{padding:"8px 10px",marginBottom:2}}>
             <div style={{fontSize:12,fontWeight:700,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{user?.name}</div>
             <div style={{fontSize:10,color:"var(--text3)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{user?.email}</div>
           </div>
-          <div className="sitem" style={{margin:"1px 0",borderRadius:10}} onClick={()=>{nav("settings");setProfileOpen(false);}}>
+          <div className="sitem" style={{margin:"1px 0",borderRadius:10}} onClick={()=>{nav("settings");setProfileOpen(null);}}>
             <span className="sicon">⚙</span>Profile &amp; Settings
           </div>
-          <div className="sitem" style={{margin:"1px 0",borderRadius:10}} onClick={()=>{nav("notifications");setProfileOpen(false);}}>
+          <div className="sitem" style={{margin:"1px 0",borderRadius:10}} onClick={()=>{nav("notifications");setProfileOpen(null);}}>
             <span className="sicon">🔔</span>Notifications
           </div>
-          <div className="sitem" style={{margin:"1px 0",borderRadius:10,color:"var(--red)"}} onClick={()=>{setProfileOpen(false);doLogout();}}>
+          <div className="sitem" style={{margin:"1px 0",borderRadius:10,color:"var(--red)"}} onClick={()=>{setProfileOpen(null);doLogout();}}>
             <span className="sicon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>
             Log Out
           </div>
@@ -1033,7 +1038,7 @@ export default function App(){
           </div>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <button type="button" className="mchip balance-chip" onClick={goToDeposit} title="Add funds">{cur(port.cashBalance)}</button>
-            <ProfileMenu size={30} fontSize={12}/>
+            <ProfileMenu menuId="mobile" size={30} fontSize={12}/>
           </div>
         </div>
 
@@ -1057,9 +1062,9 @@ export default function App(){
         {/* Desktop topbar */}
 <div className="topbar">
   <div style={{display:"flex",alignItems:"center",gap:14}}>
-    <div className="sb-open" style={{visibility:sbCollapsed?"visible":"hidden"}} onClick={()=>setSbCollapsed(false)} onKeyDown={e=>onActivate(e,()=>setSbCollapsed(false))} title="Open sidebar" role="button" tabIndex={0} aria-label="Open sidebar">
+    {sbCollapsed&&<div className="sb-open" onClick={()=>setSbCollapsed(false)} onKeyDown={e=>onActivate(e,()=>setSbCollapsed(false))} title="Open sidebar" role="button" tabIndex={0} aria-label="Open sidebar">
       <svg width="18" height="14" viewBox="0 0 22 16" fill="none"><rect y="0" width="22" height="2.5" rx="1.25" fill="currentColor"/><rect y="6.75" width="16" height="2.5" rx="1.25" fill="currentColor"/><rect y="13.5" width="22" height="2.5" rx="1.25" fill="currentColor"/></svg>
-    </div>
+    </div>}
     <div>
       <div className="ttl">
         {page==="dashboard"
@@ -1074,7 +1079,7 @@ export default function App(){
   </div>
   <div style={{display:"flex",alignItems:"center",gap:12}}>
     <button type="button" className="tchip balance-chip" onClick={goToDeposit} title="Add funds">{cur(port.cashBalance)}</button>
-    <ProfileMenu/>
+    <ProfileMenu menuId="desktop"/>
   </div>
 </div>        {/* ══ DASHBOARD ══ */}
         {page==="admin"&&<Suspense fallback={<div className="gcard skeleton" style={{minHeight:360}} aria-label="Loading admin center"/>}><AdminPanel currentUser={user} notify={toast2}/></Suspense>}
