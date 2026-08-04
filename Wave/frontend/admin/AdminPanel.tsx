@@ -154,7 +154,7 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
       <div className="tlab">Reason{confirm.kind==="reject"?" (optional)":""}</div>
       <textarea className="inp" placeholder="Explain why…" value={confirmReason} onChange={e=>setConfirmReason(e.target.value)} style={{minHeight:90,resize:"vertical",marginBottom:16}}/>
       <button className="btn btn-danger" style={{width:"100%",justifyContent:"center"}} onClick={submitConfirm} disabled={confirmBusy}>
-        {confirmBusy?"Submitting…":`Confirm ${confirm.kind==="ban"?"ban":confirm.kind==="revoke"?"revoke":"reject"}`}
+        {confirmBusy?"Submitting Request...":`Confirm ${confirm.kind==="ban"?"ban":confirm.kind==="revoke"?"revoke":"reject"}`}
       </button>
     </Modal>}
   </div>;
