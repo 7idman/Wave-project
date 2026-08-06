@@ -3,14 +3,25 @@ import { api } from "../api/client";
 import { Modal } from "../components/PlatformPrimitives";
 import type { User } from "../types";
 
-type Tab="requests"|"members"|"roles"|"violations"|"updates"|"search";
+type Tab="requests"|"members"|"roles"|"violations"|"updates"|"search"|"strategies"|"managed"|"promotions";
 type AdminRequest={id:number;type:string;status:string;amount?:number;title:string;details?:string;user_email:string;user_name:string;created_at:string;reviewed_by_email?:string;reviewed_at?:string;admin_note?:string};
 type Role={role_key:string;name:string;permissions:Record<string,boolean>;is_owner?:number};
-type Member={id:number;email:string;name:string;role:string;account_status:string;created_at:string};
+type Member={id:number;email:string;name:string;avatar_url?:string;role:string;account_status:string;created_at:string};
 type Violation={id:number;email:string;name:string;reason:string;severity:string;account_status:string};
 type SiteUpdate={id:number|string;title:string;body:string;created_at:string};
-type SearchUser={id:number;email:string;name:string;phone?:string;role:string;account_status:string;created_at:string};
+type SearchUser={id:number;email:string;name:string;avatar_url?:string;phone?:string;role:string;account_status:string;created_at:string};
 type ConfirmAction={kind:"reject"|"ban"|"revoke";id:number;label:string};
+type AdminStrategy={id:number;name:string;description:string;fee:number;status:string;cashBalance:number;holdingsValue:number;totalValue:number;subscribers:number};
+type StrategyTrade={id:number;symbol:string;side:string;amount:number;price:number;created_at:string};
+type AdminManagedAccount={portfolioId:number;userId:number;email:string;name:string;cashBalance:number;holdingsValue:number;totalValue:number;createdAt:string};
+type Promotion={id:number;name:string;bonus_pct:number;min_tier:string;min_deposit:number;lock_days:number;start_at:string;end_at:string};
+
+function AdminAvatar({name,avatarUrl}:{name:string;avatarUrl?:string}){
+  const initials=(name||"?").trim().split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
+  return avatarUrl
+    ? <img src={avatarUrl} alt="" style={{width:32,height:32,borderRadius:"50%",objectFit:"cover",flexShrink:0}}/>
+    : <div style={{width:32,height:32,borderRadius:"50%",background:"var(--surface2)",color:"var(--text2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,flexShrink:0}}>{initials}</div>;
+}
 const PERMS=["access_admin","manage_requests","manage_roles","manage_members","manage_announcements","ban_users"];
 const blankPerms=()=>Object.fromEntries(PERMS.map(p=>[p,false])) as Record<string,boolean>;
 
@@ -23,6 +34,17 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
   const[announceTitle,setAnnounceTitle]=useState(""),[announceBody,setAnnounceBody]=useState("");
   const[confirm,setConfirm]=useState<ConfirmAction|null>(null),[confirmReason,setConfirmReason]=useState(""),[confirmBusy,setConfirmBusy]=useState(false);
   const[searchQuery,setSearchQuery]=useState(""),[searchResults,setSearchResults]=useState<SearchUser[]>([]),[searching,setSearching]=useState(false);
+  const[adminStrategies,setAdminStrategies]=useState<AdminStrategy[]>([]),[strategiesLoading,setStrategiesLoading]=useState(false);
+  const[newStratName,setNewStratName]=useState(""),[newStratDesc,setNewStratDesc]=useState(""),[newStratFee,setNewStratFee]=useState("");
+  const[fundTarget,setFundTarget]=useState<AdminStrategy|null>(null),[fundAmount,setFundAmount]=useState(""),[fundBusy,setFundBusy]=useState(false);
+  const[tradeTarget,setTradeTarget]=useState<AdminStrategy|null>(null),[tradeSymbol,setTradeSymbol]=useState(""),[tradeSide,setTradeSide]=useState<"buy"|"sell">("buy"),[tradeAmount,setTradeAmount]=useState(""),[tradeBusy,setTradeBusy]=useState(false);
+  const[tradesView,setTradesView]=useState<AdminStrategy|null>(null),[strategyTrades,setStrategyTrades]=useState<StrategyTrade[]>([]),[tradesLoading,setTradesLoading]=useState(false);
+  const[adminManaged,setAdminManaged]=useState<AdminManagedAccount[]>([]),[managedTabLoading,setManagedTabLoading]=useState(false);
+  const[managedPickQuery,setManagedPickQuery]=useState(""),[managedPickResults,setManagedPickResults]=useState<SearchUser[]>([]),[managedPicking,setManagedPicking]=useState(false);
+  const[managedFundTarget,setManagedFundTarget]=useState<AdminManagedAccount|null>(null),[managedFundAmount,setManagedFundAmount]=useState(""),[managedFundBusy,setManagedFundBusy]=useState(false);
+  const[managedAllocTarget,setManagedAllocTarget]=useState<AdminManagedAccount|null>(null),[managedAllocSymbol,setManagedAllocSymbol]=useState(""),[managedAllocAmount,setManagedAllocAmount]=useState(""),[managedAllocBusy,setManagedAllocBusy]=useState(false);
+  const[promotions,setPromotions]=useState<Promotion[]>([]),[promotionsLoading,setPromotionsLoading]=useState(false);
+  const[promoName,setPromoName]=useState(""),[promoBonusPct,setPromoBonusPct]=useState(""),[promoMinTier,setPromoMinTier]=useState("bronze"),[promoMinDeposit,setPromoMinDeposit]=useState(""),[promoLockDays,setPromoLockDays]=useState("7"),[promoStart,setPromoStart]=useState(""),[promoEnd,setPromoEnd]=useState("");
   const canOwner=currentUser?.role==="owner";
   const can=(perm:string)=>canOwner||!!currentUser?.permissions?.[perm];
   const pendingCount=useMemo(()=>requests.filter(r=>r.status==="pending").length,[requests]);
@@ -43,6 +65,88 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
     },350);
     return()=>clearTimeout(t);
   },[searchQuery]);
+
+  const refreshStrategies=async()=>{setStrategiesLoading(true);try{const d=await api.get("/admin/strategies");setAdminStrategies(d.strategies||[]);}catch(e:any){notify(e.message,"!",false);}finally{setStrategiesLoading(false);}};
+  useEffect(()=>{if(tab==="strategies")refreshStrategies();},[tab]);
+
+  const createStrategy=async()=>{
+    const fee=Number(newStratFee);
+    if(!newStratName.trim()||!Number.isFinite(fee)||fee<0){notify("Name and a valid fee are required","!",false);return;}
+    try{await api.post("/admin/strategies",{name:newStratName.trim(),description:newStratDesc.trim(),fee});setNewStratName("");setNewStratDesc("");setNewStratFee("");notify("Strategy created","OK");refreshStrategies();}catch(e:any){notify(e.message,"!",false);}
+  };
+  const submitFund=async()=>{
+    if(!fundTarget)return;
+    const amount=Number(fundAmount);
+    if(!Number.isFinite(amount)||amount<=0){notify("Enter a valid amount","!",false);return;}
+    setFundBusy(true);
+    try{await api.post(`/admin/strategies/${fundTarget.id}/fund`,{amount});notify(`Funded ${fundTarget.name}`,"OK");setFundTarget(null);setFundAmount("");refreshStrategies();}catch(e:any){notify(e.message,"!",false);}finally{setFundBusy(false);}
+  };
+  const submitTrade=async()=>{
+    if(!tradeTarget)return;
+    const amount=Number(tradeAmount);
+    if(!tradeSymbol.trim()||!Number.isFinite(amount)||amount<=0){notify("Symbol and a valid amount are required","!",false);return;}
+    setTradeBusy(true);
+    try{
+      const d=await api.post(`/admin/strategies/${tradeTarget.id}/trades`,{symbol:tradeSymbol.trim().toUpperCase(),side:tradeSide,amount});
+      notify(`Logged — mirrored to ${d.mirrored} subscriber(s)${d.skipped?`, ${d.skipped} skipped`:""}`,"OK");
+      setTradeTarget(null);setTradeSymbol("");setTradeAmount("");
+      refreshStrategies();
+    }catch(e:any){notify(e.message,"!",false);}finally{setTradeBusy(false);}
+  };
+  const openTradesView=async(s:AdminStrategy)=>{
+    setTradesView(s);setTradesLoading(true);
+    try{const d=await api.get(`/admin/strategies/${s.id}/trades`);setStrategyTrades(d.trades||[]);}catch(e:any){notify(e.message,"!",false);}finally{setTradesLoading(false);}
+  };
+
+  const refreshManaged=async()=>{setManagedTabLoading(true);try{const d=await api.get("/admin/managed");setAdminManaged(d.accounts||[]);}catch(e:any){notify(e.message,"!",false);}finally{setManagedTabLoading(false);}};
+  useEffect(()=>{if(tab==="managed")refreshManaged();},[tab]);
+
+  useEffect(()=>{
+    const q=managedPickQuery.trim();
+    if(!q){setManagedPickResults([]);setManagedPicking(false);return;}
+    setManagedPicking(true);
+    const t=setTimeout(async()=>{
+      try{const d=await api.get(`/admin/users/search?q=${encodeURIComponent(q)}`);setManagedPickResults(d.users||[]);}
+      catch(e:any){notify(e.message,"!",false);}
+      finally{setManagedPicking(false);}
+    },350);
+    return()=>clearTimeout(t);
+  },[managedPickQuery]);
+
+  const createManagedFor=async(u:SearchUser)=>{
+    try{await api.post(`/admin/managed/${u.id}`,{});notify(`Managed account ready for ${u.email}`,"OK");setManagedPickQuery("");setManagedPickResults([]);refreshManaged();}catch(e:any){notify(e.message,"!",false);}
+  };
+  const submitManagedFund=async()=>{
+    if(!managedFundTarget)return;
+    const amount=Number(managedFundAmount);
+    if(!Number.isFinite(amount)||amount<=0){notify("Enter a valid amount","!",false);return;}
+    setManagedFundBusy(true);
+    try{await api.post(`/admin/managed/${managedFundTarget.userId}/fund`,{amount});notify(`Funded ${managedFundTarget.email}`,"OK");setManagedFundTarget(null);setManagedFundAmount("");refreshManaged();}catch(e:any){notify(e.message,"!",false);}finally{setManagedFundBusy(false);}
+  };
+  const submitManagedAllocate=async()=>{
+    if(!managedAllocTarget)return;
+    const amount=Number(managedAllocAmount);
+    if(!managedAllocSymbol.trim()||!Number.isFinite(amount)||amount<=0){notify("Symbol and a valid amount are required","!",false);return;}
+    setManagedAllocBusy(true);
+    try{await api.post(`/admin/managed/${managedAllocTarget.userId}/allocate`,{symbol:managedAllocSymbol.trim().toUpperCase(),amount});notify(`Allocated ${amount} ${managedAllocSymbol.trim().toUpperCase()} to ${managedAllocTarget.email}`,"OK");setManagedAllocTarget(null);setManagedAllocSymbol("");setManagedAllocAmount("");refreshManaged();}catch(e:any){notify(e.message,"!",false);}finally{setManagedAllocBusy(false);}
+  };
+
+  const refreshPromotions=async()=>{setPromotionsLoading(true);try{const d=await api.get("/admin/promotions");setPromotions(d.promotions||[]);}catch(e:any){notify(e.message,"!",false);}finally{setPromotionsLoading(false);}};
+  useEffect(()=>{if(tab==="promotions")refreshPromotions();},[tab]);
+  const createPromotion=async()=>{
+    const bonusPct=Number(promoBonusPct)/100;
+    const minDeposit=Number(promoMinDeposit);
+    const lockDays=Number(promoLockDays);
+    if(!promoName.trim()||!Number.isFinite(bonusPct)||bonusPct<=0||bonusPct>1){notify("Name and a bonus % between 0-100 are required","!",false);return;}
+    if(!promoStart||!promoEnd){notify("Start and end dates are required","!",false);return;}
+    try{
+      await api.post("/admin/promotions",{name:promoName.trim(),bonusPct,minTier:promoMinTier,minDeposit,lockDays,startAt:promoStart.replace("T"," ")+":00",endAt:promoEnd.replace("T"," ")+":00"});
+      notify("Promotion created","OK");
+      setPromoName("");setPromoBonusPct("");setPromoMinDeposit("");setPromoLockDays("7");setPromoStart("");setPromoEnd("");
+      refreshPromotions();
+    }catch(e:any){notify(e.message,"!",false);}
+  };
+  const endPromotion=async(id:number)=>{try{await api.delete(`/admin/promotions/${id}`,{});notify("Promotion ended","OK");refreshPromotions();}catch(e:any){notify(e.message,"!",false);}};
 
   const approveRequest=async(id:number)=>{try{await api.patch(`/admin/requests/${id}`,{action:"approve"});notify("Request approved","OK");refreshAdminData({showLoading:false,showError:false});}catch(e:any){notify(e.message,"!",false);}};
   const addMember=async()=>{try{await api.post("/admin/members",{email,role:memberRole});setEmail("");notify("Member role updated","OK");refreshAdminData({showLoading:false,showError:false});}catch(e:any){notify(e.message,"!",false);}};
@@ -84,7 +188,7 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
 
     <div className="admin-banner"><b>{pendingCount}</b> pending request(s). Manage device alerts in Settings → Notifications.</div>
 
-    <div className="admin-tabs">{(["requests","members","roles","violations","updates","search"] as Tab[]).map(x=><button key={x} className={`chip ${tab===x?"active":""}`} onClick={()=>setTab(x)}>{x}</button>)}</div>
+    <div className="admin-tabs">{(["requests","members","roles","violations","updates","search","strategies","managed","promotions"] as Tab[]).map(x=><button key={x} className={`chip ${tab===x?"active":""}`} onClick={()=>setTab(x)}>{x}</button>)}</div>
 
     {loading?<div className="gcard">Loading admin data...</div>:<>
       {tab==="requests"&&<>
@@ -119,7 +223,7 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
         </tbody></table></div>}
       </>}
 
-      {tab==="members"&&<div className="admin-grid"><div className="gcard admin-table-wrap"><table className="admin-table"><tbody>{members.map(m=>{const isSelfOrOwner=m.role==="owner"||m.id===currentUser?.id;return <tr key={m.id}><td>{m.name}<div className="admin-note">{m.email}</div></td><td>{m.role}</td><td><span className={`admin-status ${m.account_status}`}>{m.account_status}</span></td><td><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{!isSelfOrOwner&&can("manage_members")&&<button className="btn btn-ghost btn-sm" onClick={()=>openConfirm("revoke",m.id,`revoke ${m.name}'s admin access`)}>Revoke admin</button>}{!isSelfOrOwner&&can("ban_users")&&(m.account_status==="banned"?<button className="btn btn-action btn-sm" onClick={()=>restore(m.id)}>Restore</button>:<button className="btn btn-danger btn-sm" onClick={()=>openConfirm("ban",m.id,`ban ${m.name}`)}>Ban</button>)}</div></td></tr>})}</tbody></table></div><div className="gcard"><div className="stitle">Add member</div><div className="admin-form-grid"><input className="inp" placeholder="member@email.com" value={email} onChange={e=>setEmail(e.target.value)}/><select className="sel" value={memberRole} onChange={e=>setMemberRole(e.target.value)}>{roles.filter(r=>!r.is_owner).map(r=><option key={r.role_key} value={r.role_key}>{r.name}</option>)}</select><button className="btn btn-primary admin-plus" onClick={addMember}>+</button></div></div></div>}
+      {tab==="members"&&<div className="admin-grid"><div className="gcard admin-table-wrap"><table className="admin-table"><tbody>{members.map(m=>{const isSelfOrOwner=m.role==="owner"||m.id===currentUser?.id;return <tr key={m.id}><td><div style={{display:"flex",alignItems:"center",gap:10}}><AdminAvatar name={m.name} avatarUrl={m.avatar_url}/><div>{m.name}<div className="admin-note">{m.email}</div></div></div></td><td>{m.role}</td><td><span className={`admin-status ${m.account_status}`}>{m.account_status}</span></td><td><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{!isSelfOrOwner&&can("manage_members")&&<button className="btn btn-ghost btn-sm" onClick={()=>openConfirm("revoke",m.id,`revoke ${m.name}'s admin access`)}>Revoke admin</button>}{!isSelfOrOwner&&can("ban_users")&&(m.account_status==="banned"?<button className="btn btn-action btn-sm" onClick={()=>restore(m.id)}>Restore</button>:<button className="btn btn-danger btn-sm" onClick={()=>openConfirm("ban",m.id,`ban ${m.name}`)}>Ban</button>)}</div></td></tr>})}</tbody></table></div><div className="gcard"><div className="stitle">Add member</div><div className="admin-form-grid"><input className="inp" placeholder="member@email.com" value={email} onChange={e=>setEmail(e.target.value)}/><select className="sel" value={memberRole} onChange={e=>setMemberRole(e.target.value)}>{roles.filter(r=>!r.is_owner).map(r=><option key={r.role_key} value={r.role_key}>{r.name}</option>)}</select><button className="btn btn-primary admin-plus" onClick={addMember}>+</button></div></div></div>}
 
       {tab==="roles"&&<div className="admin-grid"><div className="gcard admin-card-list">{roles.map(r=><div key={r.role_key} className="admin-banner"><b>{r.name}</b><div className="admin-note">{Object.entries(r.permissions||{}).filter(([,v])=>v).map(([k])=>k).join(", ")||"No permissions"}</div></div>)}</div><div className="gcard"><div className="stitle">Create role</div><input className="inp" placeholder="Role name" value={roleName} onChange={e=>setRoleName(e.target.value)}/><div className="admin-perms">{PERMS.map(p=><label key={p} className="admin-perm"><input type="checkbox" checked={!!rolePerms[p]} onChange={e=>setRolePerms(v=>({...v,[p]:e.target.checked}))}/>{p}</label>)}</div><button className="btn btn-primary" style={{marginTop:14,width:"100%"}} onClick={createRole} disabled={!can("manage_roles")}>Create role</button></div></div>}
 
@@ -137,13 +241,103 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
         {!searching&&searchQuery.trim()&&searchResults.length===0&&<div className="gcard admin-note" style={{textAlign:"center",padding:"24px 0"}}>No users match "{searchQuery.trim()}".</div>}
         {!searching&&searchResults.length>0&&<div className="gcard admin-table-wrap"><table className="admin-table"><thead><tr><th>User</th><th>Role</th><th>Status</th><th>Joined</th><th></th></tr></thead><tbody>
           {searchResults.map(u=>{const isSelfOrOwner=u.role==="owner"||u.id===currentUser?.id;return <tr key={u.id}>
-            <td>{u.name}<div className="admin-note">{u.email}{u.phone?` · ${u.phone}`:""}</div></td>
+            <td><div style={{display:"flex",alignItems:"center",gap:10}}><AdminAvatar name={u.name} avatarUrl={u.avatar_url}/><div>{u.name}<div className="admin-note">{u.email}{u.phone?` · ${u.phone}`:""}</div></div></div></td>
             <td>{u.role}</td>
             <td><span className={`admin-status ${u.account_status}`}>{u.account_status}</span></td>
             <td>{new Date(u.created_at).toLocaleDateString()}</td>
             <td>{!isSelfOrOwner&&can("ban_users")&&<div style={{display:"flex",gap:8}}>{u.account_status==="banned"?<button className="btn btn-action btn-sm" onClick={()=>restore(u.id)}>Restore</button>:<button className="btn btn-danger btn-sm" onClick={()=>openConfirm("ban",u.id,`ban ${u.name}`)}>Ban</button>}</div>}</td>
           </tr>})}
         </tbody></table></div>}
+      </div>}
+
+      {tab==="strategies"&&<div className="admin-grid">
+        <div className="gcard admin-table-wrap">
+          {strategiesLoading?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>Loading…</div>:
+          adminStrategies.length===0?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>No strategies yet — create one.</div>:
+          <table className="admin-table"><thead><tr><th>Strategy</th><th>Fee</th><th>Account value</th><th>Subscribers</th><th></th></tr></thead><tbody>
+            {adminStrategies.map(s=><tr key={s.id}>
+              <td><b style={{color:"var(--text)"}}>{s.name}</b><div className="admin-note">{s.description}</div></td>
+              <td>${s.fee.toLocaleString()}</td>
+              <td>${s.totalValue.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}<div className="admin-note">${s.cashBalance.toLocaleString(undefined,{maximumFractionDigits:2})} cash</div></td>
+              <td>{s.subscribers}</td>
+              <td><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <button className="btn btn-ghost btn-sm" onClick={()=>setFundTarget(s)}>Fund</button>
+                <button className="btn btn-action btn-sm" onClick={()=>setTradeTarget(s)}>Log trade</button>
+                <button className="btn btn-ghost btn-sm" onClick={()=>openTradesView(s)}>History</button>
+              </div></td>
+            </tr>)}
+          </tbody></table>}
+        </div>
+        <div className="gcard">
+          <div className="stitle">Create strategy</div>
+          <div className="admin-note" style={{marginBottom:12}}>Trades you log against a strategy mirror proportionally into every subscriber's own account.</div>
+          <input className="inp" placeholder="Strategy name" value={newStratName} onChange={e=>setNewStratName(e.target.value)} style={{marginBottom:10}}/>
+          <textarea className="inp" placeholder="Description shown to users" value={newStratDesc} onChange={e=>setNewStratDesc(e.target.value)} style={{minHeight:80,resize:"vertical",marginBottom:10}}/>
+          <input className="inp" type="number" placeholder="Connect fee ($)" value={newStratFee} onChange={e=>setNewStratFee(e.target.value)} style={{marginBottom:12}}/>
+          <button className="btn btn-primary" style={{width:"100%"}} onClick={createStrategy}>Create strategy</button>
+        </div>
+      </div>}
+
+      {tab==="managed"&&<div className="admin-grid">
+        <div className="gcard admin-table-wrap">
+          {managedTabLoading?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>Loading…</div>:
+          adminManaged.length===0?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>No managed accounts yet — create one for a user.</div>:
+          <table className="admin-table"><thead><tr><th>User</th><th>Account value</th><th></th></tr></thead><tbody>
+            {adminManaged.map(m=><tr key={m.portfolioId}>
+              <td><b style={{color:"var(--text)"}}>{m.name}</b><div className="admin-note">{m.email}</div></td>
+              <td>${m.totalValue.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}<div className="admin-note">${m.cashBalance.toLocaleString(undefined,{maximumFractionDigits:2})} cash</div></td>
+              <td><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <button className="btn btn-ghost btn-sm" onClick={()=>setManagedFundTarget(m)}>Fund</button>
+                <button className="btn btn-action btn-sm" onClick={()=>setManagedAllocTarget(m)}>Allocate</button>
+              </div></td>
+            </tr>)}
+          </tbody></table>}
+        </div>
+        <div className="gcard">
+          <div className="stitle">Create managed account</div>
+          <div className="admin-note" style={{marginBottom:12}}>Search for a user, then create their managed account. Fund it and allocate real assets from the table on the left.</div>
+          <input className="inp" placeholder="name@email.com or full name" value={managedPickQuery} onChange={e=>setManagedPickQuery(e.target.value)}/>
+          {managedPicking&&<div className="admin-note" style={{padding:"10px 0"}}>Searching…</div>}
+          {!managedPicking&&managedPickQuery.trim()&&managedPickResults.length===0&&<div className="admin-note" style={{padding:"10px 0"}}>No users match "{managedPickQuery.trim()}".</div>}
+          {managedPickResults.map(u=><div key={u.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"1px solid var(--border)"}}>
+            <div><b style={{color:"var(--text)",fontSize:13}}>{u.name}</b><div className="admin-note">{u.email}</div></div>
+            <button className="btn btn-primary btn-sm" onClick={()=>createManagedFor(u)}>Create</button>
+          </div>)}
+        </div>
+      </div>}
+
+      {tab==="promotions"&&<div className="admin-grid">
+        <div className="gcard admin-table-wrap">
+          {promotionsLoading?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>Loading…</div>:
+          promotions.length===0?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>No promotions yet.</div>:
+          <table className="admin-table"><thead><tr><th>Promotion</th><th>Terms</th><th>Window</th><th></th></tr></thead><tbody>
+            {promotions.map(p=>{const active=new Date(p.end_at)>new Date()&&new Date(p.start_at)<=new Date();return(
+              <tr key={p.id}>
+                <td><b style={{color:"var(--text)"}}>{p.name}</b><div className="admin-note">{active?"🟢 Active":"⚪ Ended"}</div></td>
+                <td>{(p.bonus_pct*100).toFixed(0)}% bonus<div className="admin-note">{p.min_tier}+ tier · ${p.min_deposit.toLocaleString()} min · {p.lock_days}d lock</div></td>
+                <td className="admin-note">{p.start_at.slice(0,10)} → {p.end_at.slice(0,10)}</td>
+                <td>{active&&<button className="btn btn-danger btn-sm" onClick={()=>endPromotion(p.id)}>End now</button>}</td>
+              </tr>
+            );})}
+          </tbody></table>}
+        </div>
+        <div className="gcard">
+          <div className="stitle">Create promotion</div>
+          <div className="admin-note" style={{marginBottom:12}}>Users at/above the minimum tier who deposit at least the minimum amount while this is active get the bonus credited immediately, locked from withdrawal for the lock period.</div>
+          <input className="inp" placeholder="Promotion name" value={promoName} onChange={e=>setPromoName(e.target.value)} style={{marginBottom:10}}/>
+          <input className="inp" type="number" placeholder="Bonus % (e.g. 10 for 10%)" value={promoBonusPct} onChange={e=>setPromoBonusPct(e.target.value)} style={{marginBottom:10}}/>
+          <div className="tlab">Minimum tier</div>
+          <select className="sel" value={promoMinTier} onChange={e=>setPromoMinTier(e.target.value)} style={{width:"100%",marginBottom:10}}>
+            {["bronze","silver","gold","platinum"].map(t=><option key={t} value={t}>{t}</option>)}
+          </select>
+          <input className="inp" type="number" placeholder="Minimum deposit ($)" value={promoMinDeposit} onChange={e=>setPromoMinDeposit(e.target.value)} style={{marginBottom:10}}/>
+          <input className="inp" type="number" placeholder="Lock days" value={promoLockDays} onChange={e=>setPromoLockDays(e.target.value)} style={{marginBottom:10}}/>
+          <div className="tlab">Start</div>
+          <input className="inp" type="datetime-local" value={promoStart} onChange={e=>setPromoStart(e.target.value)} style={{marginBottom:10}}/>
+          <div className="tlab">End</div>
+          <input className="inp" type="datetime-local" value={promoEnd} onChange={e=>setPromoEnd(e.target.value)} style={{marginBottom:12}}/>
+          <button className="btn btn-primary" style={{width:"100%"}} onClick={createPromotion}>Create promotion</button>
+        </div>
       </div>}
     </>}
 
@@ -154,8 +348,59 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
       <div className="tlab">Reason{confirm.kind==="reject"?" (optional)":""}</div>
       <textarea className="inp" placeholder="Explain why…" value={confirmReason} onChange={e=>setConfirmReason(e.target.value)} style={{minHeight:90,resize:"vertical",marginBottom:16}}/>
       <button className="btn btn-danger" style={{width:"100%",justifyContent:"center"}} onClick={submitConfirm} disabled={confirmBusy}>
-        {confirmBusy?"Submitting Request...":`Confirm ${confirm.kind==="ban"?"ban":confirm.kind==="revoke"?"revoke":"reject"}`}
+        {confirmBusy?"Submitting…":`Confirm ${confirm.kind==="ban"?"ban":confirm.kind==="revoke"?"revoke":"reject"}`}
       </button>
+    </Modal>}
+
+    {fundTarget&&<Modal open={!!fundTarget} onClose={()=>fundBusy?null:setFundTarget(null)} title={`Fund ${fundTarget.name}`}>
+      <div style={{fontSize:13,color:"var(--text3)",marginBottom:14,lineHeight:1.5}}>Adds cash to this strategy's own trading account — separate from any user's transfer. Current value: ${fundTarget.totalValue.toLocaleString()}.</div>
+      <div className="tlab">Amount ($)</div>
+      <input className="inp" type="number" placeholder="10000" value={fundAmount} onChange={e=>setFundAmount(e.target.value)} style={{marginBottom:16}}/>
+      <button className="btn btn-primary" style={{width:"100%",justifyContent:"center"}} onClick={submitFund} disabled={fundBusy}>{fundBusy?"Funding…":"Fund strategy"}</button>
+    </Modal>}
+
+    {tradeTarget&&<Modal open={!!tradeTarget} onClose={()=>tradeBusy?null:setTradeTarget(null)} title={`Log trade — ${tradeTarget.name}`}>
+      <div style={{fontSize:13,color:"var(--text3)",marginBottom:14,lineHeight:1.5}}>This mirrors proportionally into every subscriber's own copier account. Strategy account value: ${tradeTarget.totalValue.toLocaleString()}.</div>
+      <div className="tlab">Symbol</div>
+      <input className="inp" placeholder="BTC" value={tradeSymbol} onChange={e=>setTradeSymbol(e.target.value)} style={{marginBottom:12,textTransform:"uppercase"}}/>
+      <div className="tlab">Side</div>
+      <div style={{display:"flex",gap:8,marginBottom:12}}>
+        <button className={`chip ${tradeSide==="buy"?"active":""}`} onClick={()=>setTradeSide("buy")} style={{flex:1}}>Buy</button>
+        <button className={`chip ${tradeSide==="sell"?"active":""}`} onClick={()=>setTradeSide("sell")} style={{flex:1}}>Sell</button>
+      </div>
+      <div className="tlab">Amount (units of {tradeSymbol.trim()||"the symbol"})</div>
+      <input className="inp" type="number" placeholder="0.02" value={tradeAmount} onChange={e=>setTradeAmount(e.target.value)} style={{marginBottom:16}}/>
+      <button className="btn btn-primary" style={{width:"100%",justifyContent:"center"}} onClick={submitTrade} disabled={tradeBusy}>{tradeBusy?"Logging…":"Log trade & mirror"}</button>
+    </Modal>}
+
+    {tradesView&&<Modal open={!!tradesView} onClose={()=>setTradesView(null)} title={`${tradesView.name} — trade history`}>
+      {tradesLoading?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>Loading…</div>:
+      strategyTrades.length===0?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>No trades logged yet.</div>:
+      <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Symbol</th><th>Side</th><th>Amount</th><th>Price</th><th>When</th></tr></thead><tbody>
+        {strategyTrades.map(t=><tr key={t.id}>
+          <td>{t.symbol}</td>
+          <td style={{textTransform:"capitalize"}}>{t.side}</td>
+          <td>{t.amount}</td>
+          <td>${t.price.toLocaleString()}</td>
+          <td>{new Date(t.created_at).toLocaleString()}</td>
+        </tr>)}
+      </tbody></table></div>}
+    </Modal>}
+
+    {managedFundTarget&&<Modal open={!!managedFundTarget} onClose={()=>managedFundBusy?null:setManagedFundTarget(null)} title={`Fund ${managedFundTarget.email}`}>
+      <div style={{fontSize:13,color:"var(--text3)",marginBottom:14,lineHeight:1.5}}>Adds cash to this user's managed account. Current value: ${managedFundTarget.totalValue.toLocaleString()}.</div>
+      <div className="tlab">Amount ($)</div>
+      <input className="inp" type="number" placeholder="20000" value={managedFundAmount} onChange={e=>setManagedFundAmount(e.target.value)} style={{marginBottom:16}}/>
+      <button className="btn btn-primary" style={{width:"100%",justifyContent:"center"}} onClick={submitManagedFund} disabled={managedFundBusy}>{managedFundBusy?"Funding…":"Fund account"}</button>
+    </Modal>}
+
+    {managedAllocTarget&&<Modal open={!!managedAllocTarget} onClose={()=>managedAllocBusy?null:setManagedAllocTarget(null)} title={`Allocate — ${managedAllocTarget.email}`}>
+      <div style={{fontSize:13,color:"var(--text3)",marginBottom:14,lineHeight:1.5}}>Buys a real asset into this user's managed account using its cash balance. Available cash: ${managedAllocTarget.cashBalance.toLocaleString()}.</div>
+      <div className="tlab">Symbol</div>
+      <input className="inp" placeholder="BTC" value={managedAllocSymbol} onChange={e=>setManagedAllocSymbol(e.target.value)} style={{marginBottom:12,textTransform:"uppercase"}}/>
+      <div className="tlab">Amount (units)</div>
+      <input className="inp" type="number" placeholder="0.2" value={managedAllocAmount} onChange={e=>setManagedAllocAmount(e.target.value)} style={{marginBottom:16}}/>
+      <button className="btn btn-primary" style={{width:"100%",justifyContent:"center"}} onClick={submitManagedAllocate} disabled={managedAllocBusy}>{managedAllocBusy?"Allocating…":"Allocate"}</button>
     </Modal>}
   </div>;
 }

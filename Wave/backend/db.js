@@ -190,6 +190,109 @@ async function initSchema() {
       reason         TEXT,
       created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
     )`,
+    // ── Multi-portfolio support ──────────────────────────────────────────────
+    // A "portfolio" is any account beyond the user's original main balance
+    // (users.cash_balance + holdings). user_id is NULL for a strategy's own
+    // trading account — that account isn't owned by any one user.
+    `CREATE TABLE IF NOT EXISTS portfolios (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id      INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      type         TEXT    NOT NULL CHECK(type IN ('copier','managed','strategy')),
+      strategy_id  INTEGER REFERENCES strategies(id),
+      cash_balance REAL    NOT NULL DEFAULT 0,
+      created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS strategies (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      name         TEXT    NOT NULL,
+      description  TEXT,
+      fee          REAL    NOT NULL DEFAULT 0,
+      portfolio_id INTEGER REFERENCES portfolios(id),
+      status       TEXT    NOT NULL DEFAULT 'active',
+      created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS strategy_trades (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      strategy_id INTEGER NOT NULL REFERENCES strategies(id) ON DELETE CASCADE,
+      symbol      TEXT    NOT NULL,
+      side        TEXT    NOT NULL CHECK(side IN ('buy','sell')),
+      amount      REAL    NOT NULL,
+      price       REAL    NOT NULL,
+      admin_id    INTEGER NOT NULL REFERENCES users(id),
+      created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
+    // One row per subscriber per trade — the audit trail proving exactly what
+    // was mirrored into whose account and why.
+    `CREATE TABLE IF NOT EXISTS strategy_trade_mirrors (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      strategy_trade_id INTEGER NOT NULL REFERENCES strategy_trades(id) ON DELETE CASCADE,
+      user_id           INTEGER NOT NULL REFERENCES users(id),
+      portfolio_id      INTEGER NOT NULL REFERENCES portfolios(id),
+      mirrored_amount   REAL    NOT NULL,
+      mirrored_price    REAL    NOT NULL,
+      created_at        TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS internal_transfers (
+      id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id             INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      direction           TEXT    NOT NULL CHECK(direction IN ('to_portfolio','from_portfolio')),
+      portfolio_id        INTEGER NOT NULL REFERENCES portfolios(id),
+      amount              REAL    NOT NULL,
+      reference_id        TEXT    NOT NULL UNIQUE,
+      verification_status TEXT    NOT NULL DEFAULT 'not_required',
+      status              TEXT    NOT NULL DEFAULT 'completed',
+      created_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
+    // Deliberately separate from `holdings` (see chat) — keeps the live main
+    // trading engine (trades.js) completely untouched. One row per
+    // (portfolio, symbol); safe to use ON CONFLICT upserts here since every
+    // portfolio_id here is a real, non-null id — no NULL-uniqueness pitfall.
+    `CREATE TABLE IF NOT EXISTS portfolio_holdings (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      portfolio_id INTEGER NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+      symbol       TEXT    NOT NULL,
+      amount       REAL    NOT NULL DEFAULT 0,
+      updated_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(portfolio_id, symbol)
+    )`,
+    // ── Ranking-tier deposit bonuses ────────────────────────────────────────
+    // An admin-configured promotion: users at/above min_tier who deposit at
+    // least min_deposit while the promotion is active get bonus_pct credited.
+    `CREATE TABLE IF NOT EXISTS promotions (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT    NOT NULL,
+      bonus_pct   REAL    NOT NULL,
+      min_tier    TEXT    NOT NULL DEFAULT 'bronze',
+      min_deposit REAL    NOT NULL DEFAULT 0,
+      lock_days   INTEGER NOT NULL DEFAULT 0,
+      start_at    TEXT    NOT NULL,
+      end_at      TEXT    NOT NULL,
+      created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
+    // Whether a bonus is still locked is always computed live from unlock_at
+    // (unlock_at > now = locked) rather than a separate status column — a
+    // second source of truth for the same fact is just something that can
+    // drift out of sync with reality.
+    `CREATE TABLE IF NOT EXISTS bonus_grants (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      promotion_id   INTEGER NOT NULL REFERENCES promotions(id),
+      transaction_id INTEGER REFERENCES transactions(id),
+      amount         REAL    NOT NULL,
+      unlock_at      TEXT    NOT NULL,
+      created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
+    // Periodic price snapshots, captured going forward from whenever this
+    // table first gets rows — there's no way to reconstruct prices from
+    // before snapshotting started, so history begins exactly at "now".
+    `CREATE TABLE IF NOT EXISTS price_history (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      symbol      TEXT    NOT NULL,
+      price       REAL    NOT NULL,
+      change_24h  REAL,
+      recorded_at TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
   ];
 
   for (const sql of tables) {
@@ -209,6 +312,9 @@ async function initSchema() {
     "ALTER TABLE users ADD COLUMN account_status TEXT NOT NULL DEFAULT 'active'",
     "ALTER TABLE users ADD COLUMN ban_reason TEXT",
     "ALTER TABLE refresh_tokens ADD COLUMN session_id INTEGER",
+    "CREATE INDEX IF NOT EXISTS idx_price_history_symbol_time ON price_history(symbol, recorded_at)",
+    "ALTER TABLE price_cache ADD COLUMN asset_type TEXT NOT NULL DEFAULT 'crypto'",
+    "ALTER TABLE transactions ADD COLUMN reference_id TEXT",
   ];
   for (const sql of migrations) {
     try { await db.execute(sql); } catch (_) { /* column already exists — skip */ }
@@ -223,6 +329,17 @@ async function initSchema() {
   ];
   for (const [key, name, permissions, isOwner] of defaultRoles) {
     await execute("INSERT OR IGNORE INTO roles (role_key, name, permissions, is_owner) VALUES (?, ?, ?, ?)", [key, name, JSON.stringify(permissions), isOwner]);
+  }
+  // ── VIP (Platinum tier) permanent deposit bonus ─────────────────────────
+  // Reuses the same promotions engine admins use for time-boxed campaigns —
+  // this one just has an effectively permanent window. Editable/endable
+  // from the admin Promotions tab like any other promotion.
+  const vipPromoExists = await queryOne("SELECT id FROM promotions WHERE name = 'VIP Deposit Bonus'");
+  if (!vipPromoExists) {
+    await execute(
+      "INSERT INTO promotions (name, bonus_pct, min_tier, min_deposit, lock_days, start_at, end_at) VALUES (?,?,?,?,?,?,?)",
+      ["VIP Deposit Bonus", 0.12, "platinum", 0, 7, "2020-01-01 00:00:00", "2099-01-01 00:00:00"]
+    );
   }
   const ownerEmail = (process.env.OWNER_EMAIL || "").trim().toLowerCase();
   if (ownerEmail) {

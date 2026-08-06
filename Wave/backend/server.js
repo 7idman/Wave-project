@@ -26,6 +26,12 @@ const txRoutes        = require("./routes/transactions");
 const notificationRoutes = require("./routes/notifications");
 const requestRoutes = require("./routes/requests");
 const adminRoutes = require("./routes/admin");
+const transferRoutes = require("./routes/transfers");
+const strategyRoutes = require("./routes/strategies");
+const managedRoutes = require("./routes/managed");
+const accountRoutes = require("./routes/account");
+const { startPriceSnapshotSchedule } = require("./services/priceSnapshot");
+const { fetchStockPrices } = require("./services/stocks");
 
 const app  = express();
 const PORT = process.env.PORT || 4000;
@@ -105,6 +111,10 @@ app.use("/api/transactions",  authenticate, txRoutes);
 app.use("/api/notifications", authenticate, notificationRoutes);
 app.use("/api/requests", authenticate, requestRoutes);
 app.use("/api/admin", authenticate, adminRoutes);
+app.use("/api/transfers", authenticate, transferRoutes);
+app.use("/api/strategies", authenticate, strategyRoutes);
+app.use("/api/managed", authenticate, managedRoutes);
+app.use("/api/account", authenticate, accountRoutes);
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/health", (_, res) => res.json({ status: "ok", time: new Date().toISOString() }));
@@ -128,6 +138,9 @@ if (cleanup.rowsAffected > 0) {
   console.log(`🧹 Cleared ${cleanup.rowsAffected} expired refresh token(s)`);
 }
     priceRoutes.fetchLivePrices().catch(console.warn);
+    fetchStockPrices().then(r=>console.log(`Stocks: ${r.updated} updated, ${r.skipped} skipped`)).catch(console.warn);
+    setInterval(() => { fetchStockPrices().catch(console.warn); }, 5 * 60 * 1000);
+    startPriceSnapshotSchedule();
     app.listen(PORT, () => {
       console.log(`🚀 Wave API running on http://localhost:${PORT}`);
       console.log(`📦 Database: ${process.env.LIBSQL_URL || "file:wave.db"}`);

@@ -2,7 +2,7 @@ import React, { Suspense, lazy, useState, useEffect, useCallback, useRef } from 
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 import "./styles/platform.css";
 import { api } from "./api/client";
-import type { User, Price, Holding, Portfolio, Tx } from "./types";
+import type { User, Price, Holding, Portfolio, Tx, Strategy, CopierPortfolio, ManagedPortfolio, TierInfo, BalancePoint, WalletAnalytics } from "./types";
 import type { AppSettings, SiteUpdate, LoginEvent, Activity, ChartPt } from "./types/platform";
 import { LANG, LANGUAGE_OPTIONS } from "./data/languages";
 import { COINS, RANGE_POINTS, RANGE_VOL, FB_PRICES, LANDING_CHARTS, LANDING_META, COIN_STATS, COIN_DETAILS } from "./data/market";
@@ -18,11 +18,38 @@ fontLink.rel = "stylesheet";
 fontLink.href = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800;900&display=swap";
 document.head.appendChild(fontLink);
 const keyToBytes=(key:string)=>{const pad="=".repeat((4-key.length%4)%4);const raw=atob((key+pad).replace(/-/g,"+").replace(/_/g,"/"));return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));};
+
+/* Count-up animation for stat values. Ramps from its previous value to `value`
+   over ~600ms using requestAnimationFrame — no animation library needed. */
+function AnimatedStat({value,format}:{value:number;format:(n:number)=>string}){
+  const[display,setDisplay]=useState(value);
+  const prevRef=useRef(value);
+  useEffect(()=>{
+    const from=prevRef.current;
+    const to=value;
+    if(from===to){setDisplay(to);return;}
+    const duration=600;
+    const start=performance.now();
+    let raf=0;
+    const tick=(now:number)=>{
+      const p=Math.min(1,(now-start)/duration);
+      const eased=1-Math.pow(1-p,3); // ease-out cubic
+      setDisplay(from+(to-from)*eased);
+      if(p<1) raf=requestAnimationFrame(tick);
+      else prevRef.current=to;
+    };
+    raf=requestAnimationFrame(tick);
+    return()=>cancelAnimationFrame(raf);
+  },[value]);
+  return <>{format(display)}</>;
+}
 /* ════════════════ APP ════════════════ */
 export default function App(){
   const[user,setUser]         =useState<User|null>(null);
   const[authChecking,setAuthChecking]=useState(true);
   const[accountLoading,setAccountLoading]=useState(false);
+  const[showTour,setShowTour]=useState(false);
+  const dismissTour=()=>{localStorage.setItem("wave_tour_seen","1");setShowTour(false);};
   // On first load, if a saved token exists, verify it and restore the session —
   // this is what fixes "refresh logs me out". Runs once when the app mounts.
   useEffect(()=>{
@@ -91,6 +118,10 @@ export default function App(){
   const[ttype,setTtype]       =useState("buy");
   const[tcoin,setTcoin]       =useState("BTC");
   const[tamt,setTamt]         =useState("");
+  const[selStock,setSelStock] =useState("AAPL");
+  const[stockSide,setStockSide]=useState<"buy"|"sell">("buy");
+  const[stockAmt,setStockAmt] =useState("");
+  const[stockSearch,setStockSearch]=useState("");
   const[loading,setLoading]   =useState(false);
   const[signingOut,setSigningOut]=useState(false);
   const[toast,setToast]       =useState<{msg:string;icon:string;ok?:boolean}|null>(null);
@@ -98,8 +129,6 @@ export default function App(){
   const[pw,setPw]             =useState("");
   const[sbOpen,setSbOpen]     =useState(false);      // mobile: sidebar slid in/out
   const[sbCollapsed,setSbCollapsed]=useState(true);  // desktop: sidebar hidden/shown
-  const[profileOpen,setProfileOpen]=useState<"mobile"|"desktop"|null>(null);
-  const profileRefs=useRef<Record<"mobile"|"desktop",HTMLDivElement|null>>({mobile:null,desktop:null});
   const sidebarRef=useRef<HTMLDivElement>(null);
   const sidebarTouchRef=useRef<{y:number;scrollTop:number}|null>(null);
   const onSidebarKeyDown=(e:any)=>{
@@ -139,21 +168,30 @@ export default function App(){
     sidebarRef.current.scrollTop = sidebarTouchRef.current.scrollTop - delta;
   };
   const onSidebarTouchEnd=()=>{ sidebarTouchRef.current=null; };
-  useEffect(()=>{
-    if(!profileOpen) return;
-    const closeOnOutsideClick=(event:MouseEvent)=>{
-      if(!profileRefs.current[profileOpen]?.contains(event.target as Node)) setProfileOpen(null);
-    };
-    document.addEventListener("mousedown",closeOnOutsideClick);
-    return()=>document.removeEventListener("mousedown",closeOnOutsideClick);
-  },[profileOpen]);
   const[loginErr,setLoginErr] =useState("");
   const[siteUpdates,setSiteUpdates]=useState<SiteUpdate[]>([]);
   const[loginHistory,setLoginHistory]=useState<LoginEvent[]>([]);
   const[activities,setActivities]=useState<Activity[]>([]);
+  const[strategies,setStrategies]=useState<Strategy[]>([]);
+  const[myCopiers,setMyCopiers]=useState<CopierPortfolio[]>([]);
+  const[copierLoading,setCopierLoading]=useState(false);
+  const[myManaged,setMyManaged]=useState<ManagedPortfolio[]>([]);
+  const[managedLoading,setManagedLoading]=useState(false);
+  const[tierInfo,setTierInfo]=useState<TierInfo|null>(null);
+  const[balanceHistory,setBalanceHistory]=useState<BalancePoint[]>([]);
+  const[walletAnalytics,setWalletAnalytics]=useState<WalletAnalytics|null>(null);
+  const[depositReceipt,setDepositReceipt]=useState<{referenceId:string;amount:number;cashBalance:number;bonus:{promotionName:string;bonusAmount:number;unlockAt:string}|null;timestamp:string}|null>(null);
+  const[txSearch,setTxSearch]=useState("");
+  const[txTypeFilter,setTxTypeFilter]=useState<"all"|"deposit"|"withdraw">("all");
+  const[txSort,setTxSort]=useState<"date_desc"|"date_asc"|"amount_desc"|"amount_asc">("date_desc");
+  const[txPage,setTxPage]=useState(1);
+  const[txDetail,setTxDetail]=useState<Tx|null>(null);
+  const TX_PAGE_SIZE=10;
   const[notifLoading,setNotifLoading]=useState(false);
   const[pushSubscribed,setPushSubscribed]=useState<boolean|null>(null);
   const[pushBusy,setPushBusy]=useState(false);
+  const[balancePushSubscribed,setBalancePushSubscribed]=useState<boolean|null>(null);
+  const[balancePushBusy,setBalancePushBusy]=useState(false);
   const[appSettings,setAppSettings]=useState<AppSettings>(()=>{
     try{
       const saved=localStorage.getItem("wave_prefs");
@@ -241,7 +279,7 @@ export default function App(){
       const p=await api.get("/prices");
       const mapped:Record<string,Price>={};
       Object.entries(p).forEach(([sym,v]:any)=>{
-        mapped[sym]={price:v.price||0,change24h:v.change24h||0};
+        mapped[sym]={price:v.price||0,change24h:v.change24h||0,assetType:v.assetType||"crypto"};
       });
       const directions:Record<string,boolean>={};
       Object.entries(mapped).forEach(([sym,next])=>{
@@ -283,6 +321,8 @@ export default function App(){
     if(!user) return;
     setAccountLoading(true);
     loadData().finally(()=>setAccountLoading(false));
+    api.get("/account/tier").then(setTierInfo).catch(e=>console.warn("tier:",e.message));
+    if(!localStorage.getItem("wave_tour_seen")) setShowTour(true);
   },[user,loadData]);
   // Keep account balances and transaction history current while the dashboard is open.
   useEffect(()=>{
@@ -292,7 +332,7 @@ export default function App(){
   },[user,loadData]);
 
   useEffect(()=>{
-    if(!user||page!=="notifications") return;
+    if(!user||(page!=="notifications"&&page!=="dashboard")) return;
     setNotifLoading(true);
     Promise.allSettled([
       api.get("/notifications/updates").then(d=>setSiteUpdates(d.updates??[])).catch(e=>console.warn("site updates:",e.message)),
@@ -300,6 +340,67 @@ export default function App(){
       api.get("/notifications/activity").then(d=>setActivities(d.activities??[])).catch(e=>console.warn("activity:",e.message)),
     ]).finally(()=>setNotifLoading(false));
   },[page,user]);
+
+  const loadCopiers=useCallback(async()=>{
+    if(!user) return;
+    setCopierLoading(true);
+    try{
+      const[stratRes,myRes]=await Promise.all([
+        api.get("/strategies"),
+        api.get("/strategies/my"),
+      ]);
+      setStrategies(stratRes.strategies??[]);
+      setMyCopiers(myRes.portfolios??[]);
+    }catch(e:any){
+      console.warn("strategies:",e.message);
+    }finally{
+      setCopierLoading(false);
+    }
+  },[user]);
+
+  useEffect(()=>{
+    if(!user||(page!=="copy"&&page!=="transactions")) return;
+    loadCopiers();
+  },[page,user,loadCopiers]);
+
+  const loadManaged=useCallback(async()=>{
+    if(!user) return;
+    setManagedLoading(true);
+    try{
+      const d=await api.get("/managed/my");
+      setMyManaged(d.portfolios??[]);
+    }catch(e:any){
+      console.warn("managed:",e.message);
+    }finally{
+      setManagedLoading(false);
+    }
+  },[user]);
+
+  useEffect(()=>{
+    if(!user||(page!=="managed"&&page!=="transactions")) return;
+    loadManaged();
+  },[page,user,loadManaged]);
+
+  useEffect(()=>{
+    if(!user||page!=="transactions") return;
+    api.get("/account/balance-history").then(d=>setBalanceHistory(d.points??[])).catch(e=>console.warn("balance history:",e.message));
+    api.get("/account/wallet-analytics").then(setWalletAnalytics).catch(e=>console.warn("wallet analytics:",e.message));
+  },[page,user]);
+
+  const handleConnectStrategy=async(strategyId:number,strategyName:string)=>{
+    setLoading(true);
+    try{
+      const d=await api.post(`/strategies/${strategyId}/subscribe`,{});
+      toast2(`Connected to ${strategyName}`,"🟢");
+      await Promise.all([loadCopiers(),loadData()]);
+      return d;
+    }catch(e:any){
+      toast2(e.message||`Unable to connect to ${strategyName}.`,"⚠",false);
+      return null;
+    }finally{
+      setLoading(false);
+    }
+  };
 
   const chargeCashBalance=async(label:string,amount:number)=>{
     if(!Number.isFinite(amount)||amount<=0){
@@ -434,6 +535,64 @@ export default function App(){
     finally{setPushBusy(false);}
   };
 
+  const checkBalancePushStatus=async()=>{
+    if(!("serviceWorker" in navigator)||!("PushManager" in window)){setBalancePushSubscribed(false);return;}
+    try{
+      const reg=await navigator.serviceWorker.getRegistration("/sw.js");
+      const sub=await reg?.pushManager.getSubscription();
+      setBalancePushSubscribed(!!sub);
+    }catch{setBalancePushSubscribed(false);}
+  };
+  const enableBalancePush=async()=>{
+    setBalancePushBusy(true);
+    try{
+      if(!("serviceWorker" in navigator)||!("PushManager" in window)) throw new Error("Push is not supported on this device");
+      const cfg=await api.get("/notifications/push/config");
+      if(!cfg.publicKey) throw new Error("Push isn't configured on the backend yet");
+      const reg=await navigator.serviceWorker.register("/sw.js");
+      const existing=await reg.pushManager.getSubscription();
+      const sub=existing||await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:keyToBytes(cfg.publicKey)});
+      await api.post("/notifications/push/subscribe",sub);
+      setBalancePushSubscribed(true);
+      toast2("You'll see your balance update live","OK");
+    }catch(e:any){toast2(e.message,"!",false);}
+    finally{setBalancePushBusy(false);}
+  };
+  const disableBalancePush=async()=>{
+    setBalancePushBusy(true);
+    try{
+      const reg=await navigator.serviceWorker.getRegistration("/sw.js");
+      const sub=await reg?.pushManager.getSubscription();
+      if(sub){
+        await api.delete("/notifications/push/subscribe",{endpoint:sub.endpoint});
+        await sub.unsubscribe();
+      }
+      setBalancePushSubscribed(false);
+      toast2("Live balance updates turned off");
+    }catch(e:any){toast2(e.message,"!",false);}
+    finally{setBalancePushBusy(false);}
+  };
+
+  // Add-only balance updates from push: never lets a push event decrease
+  // the displayed balance, even if the payload were ever stale or malformed
+  // — worst case is a UI briefly behind reality (fixed by the next normal
+  // fetch), never money appearing to vanish.
+  useEffect(()=>{
+    if(!("serviceWorker" in navigator)) return;
+    const handler=(event:MessageEvent)=>{
+      const data=event.data;
+      if(!data||data.type!=="balance_update"||typeof data.cashBalance!=="number") return;
+      setPort(p=>{
+        const delta=Math.max(0,data.cashBalance-p.cashBalance);
+        if(delta<=0) return p;
+        return {...p,cashBalance:p.cashBalance+delta,totalValue:p.totalValue+delta};
+      });
+      if(data.body) toast2(data.body,"💰");
+    };
+    navigator.serviceWorker.addEventListener("message",handler);
+    return()=>navigator.serviceWorker.removeEventListener("message",handler);
+  },[]);
+
   /* Save profile */
   const doSaveProfile=async()=>{
     if(!editName.trim()&&!avatarPreview)return toast2("Nothing to update","⚠",false);
@@ -517,15 +676,34 @@ export default function App(){
   const doTrade=async()=>{
   const amt=parseFloat(tamt);
   if(!amt||amt<=0)return toast2("Enter a valid amount","⚠",false);
+  if(ttype==="deposit"&&amt<100)return toast2("Minimum deposit is $100","⚠",false);
   setLoading(true);
   try{
     const d=await api.post("/trades",{type:ttype,symbol:tcoin,amount:amt});
-    toast2(d.message,ttype==="buy"?"🟢":"🔴");
+    if(ttype==="deposit"){
+      setDepositReceipt({referenceId:d.referenceId,amount:amt,cashBalance:d.cashBalance,bonus:d.bonus||null,timestamp:new Date().toISOString()});
+      api.get("/account/tier").then(setTierInfo).catch(()=>{});
+    }else{
+      toast2(d.message,ttype==="buy"?"🟢":"🔴");
+    }
     setTamt("");
     await loadData();
   }catch(e:any){toast2(e.message,"⚠",false);}
   finally{setLoading(false);}
 }; 
+
+  const doStockTrade=async()=>{
+    const amt=parseFloat(stockAmt);
+    if(!amt||amt<=0)return toast2("Enter a valid number of shares","⚠",false);
+    setLoading(true);
+    try{
+      const d=await api.post("/trades",{type:stockSide,symbol:selStock,amount:amt});
+      toast2(d.message,stockSide==="buy"?"🟢":"🔴");
+      setStockAmt("");
+      await loadData();
+    }catch(e:any){toast2(e.message,"⚠",false);}
+    finally{setLoading(false);}
+  };
 
   /* Country → default currency. Only covers currencies Wave actually supports (see CURRENCY_SYMBOLS);
      everything else falls back to USD. Applied once at signup — never overwrites a currency the
@@ -541,6 +719,33 @@ export default function App(){
 
   /* Currency symbol helper */
   const CURRENCY_SYMBOLS:Record<string,string>={USD:"$",EUR:"€",GBP:"£",NGN:"₦",BTC:"₿"};
+  const TIER_COLORS:Record<string,{icon:string;fg:string;bg:string}>={
+    bronze:{icon:"🥉",fg:"#CD7F32",bg:"rgba(205,127,50,.12)"},
+    silver:{icon:"🥈",fg:"#9CA3AF",bg:"rgba(156,163,175,.12)"},
+    gold:{icon:"🥇",fg:"#F59E0B",bg:"rgba(245,158,11,.12)"},
+    platinum:{icon:"💎",fg:"#67e8f9",bg:"rgba(103,232,249,.12)"},
+  };
+  // Matches STOCK_NAMES in backend/services/stocks.js exactly — this is
+  // display metadata only, the backend decides which symbols get real
+  // price data. Badge colors are computed (STOCK_BADGE_PALETTE below)
+  // rather than hand-picked per symbol — doesn't scale to hand-pick 40+ colors.
+  const STOCK_NAMES:Record<string,string>={
+    AAPL:"Apple Inc.", MSFT:"Microsoft Corp.", GOOGL:"Alphabet Inc.", AMZN:"Amazon.com Inc.",
+    TSLA:"Tesla Inc.", NVDA:"NVIDIA Corp.", META:"Meta Platforms", NFLX:"Netflix Inc.",
+    ADBE:"Adobe Inc.", CRM:"Salesforce Inc.", ORCL:"Oracle Corp.", INTC:"Intel Corp.",
+    AMD:"Advanced Micro Devices", CSCO:"Cisco Systems", IBM:"IBM Corp.",
+    JPM:"JPMorgan Chase", V:"Visa Inc.", MA:"Mastercard Inc.", BAC:"Bank of America",
+    WFC:"Wells Fargo", GS:"Goldman Sachs", MS:"Morgan Stanley", AXP:"American Express",
+    JNJ:"Johnson & Johnson", PFE:"Pfizer Inc.", UNH:"UnitedHealth Group",
+    ABBV:"AbbVie Inc.", MRK:"Merck & Co.", LLY:"Eli Lilly and Co.",
+    WMT:"Walmart Inc.", PG:"Procter & Gamble", KO:"Coca-Cola Co.", PEP:"PepsiCo Inc.",
+    MCD:"McDonald's Corp.", NKE:"Nike Inc.", SBUX:"Starbucks Corp.", DIS:"Walt Disney Co.",
+    HD:"Home Depot Inc.", COST:"Costco Wholesale",
+    XOM:"Exxon Mobil Corp.", CVX:"Chevron Corp.", BA:"Boeing Co.", CAT:"Caterpillar Inc.", GE:"General Electric",
+    T:"AT&T Inc.", VZ:"Verizon Communications",
+  };
+  const STOCK_BADGE_PALETTE=["#6366F1","#10B981","#F59E0B","#EF4444","#8B5CF6","#06B6D4","#EC4899","#84CC16","#F97316","#3B82F6"];
+  const stockColor=(sym:string)=>STOCK_BADGE_PALETTE[[...sym].reduce((a,c)=>a+c.charCodeAt(0),0)%STOCK_BADGE_PALETTE.length];
   const CURRENCY_RATES:Record<string,number>={USD:1,EUR:0.92,GBP:0.79,NGN:1580,BTC:0.0000148};
   const cur=(usd:number)=>{
     const sym=CURRENCY_SYMBOLS[appSettings.currency]||"$";
@@ -549,6 +754,19 @@ export default function App(){
     if(appSettings.currency==="BTC") return `${sym}${val.toFixed(6)}`;
     return `${sym}${val.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
   };
+
+  // Real 24h P&L, derived from each holding's price-feed change24h — reverses the
+  // percentage to get the dollar move: value * r / (100 + r). Reflects unrealized
+  // price movement on *currently held* amounts only; it can't distinguish gains from
+  // price movement vs. amount changes from trades made earlier today (would need a
+  // balance_history snapshot table for that). Cash is excluded — it doesn't move.
+  const dayPnl=port.holdings.reduce((sum,h)=>{
+    const r=h.change24h||0;
+    if(r===-100) return sum; // avoid divide-by-zero on a 100% drop
+    return sum+(h.value*r)/(100+r);
+  },0);
+  const dayPnlBase=port.totalPortfolioValue-dayPnl; // portfolio value ~24h ago, for a % figure
+  const dayPnlPct=dayPnlBase>0?(dayPnl/dayPnlBase)*100:0;
 
   /* Derived */
   const lcd=charts[selCoin]||[];const lp=lcd[lcd.length-1]?.v||prices[selCoin]?.price||0;
@@ -567,10 +785,12 @@ export default function App(){
   const NAV=[
     {id:"dashboard",icon:"dashboard" as const,label:"Dashboard",short:"Home"},
     {id:"trade",icon:"trade" as const,label:"Trade",short:"Trade"},
+    {id:"stocks",icon:"stocks" as const,label:"Stocks",short:"Stocks"},
+    {id:"transactions",icon:"transactions" as const,label:"Transactions",short:"Transactions"},
     {id:"portfolio",icon:"portfolio" as const,label:"Portfolio",short:"Portfolio"},
     {id:"history",icon:"history" as const,label:"History",short:"History"},
   ];
-  const LABELS:Record<string,string>={dashboard:t("dashboard"),trade:t("trade"),portfolio:t("portfolio"),history:t("history"),settings:t("settings"),privacy:t("privacy"),notifications:"Notifications",admin:"Admin Center"};
+  const LABELS:Record<string,string>={dashboard:t("dashboard"),trade:t("trade"),transactions:t("transactions"),portfolio:t("portfolio"),history:t("history"),settings:t("settings"),privacy:t("privacy"),notifications:"Notifications",admin:"Admin Center"};
   const SERVICE_NAV=[
     {id:"invest",icon:"invest" as const,label:"Investment Plans"},
     {id:"copy",icon:"signal" as const,label:"Signal Copier"},
@@ -578,7 +798,6 @@ export default function App(){
   ];
   const INVESTMENT_PLAN_TIERS:Record<string,number>={Starter:50,Balanced:250,Growth:1000};
   const FEATURED_PLAN_PRICES:Record<string,number>={Foundation:250,Momentum:1000,Legacy:10000};
-  const SIGNAL_COPIER_FEE=250;
   const ACCOUNT_MANAGEMENT_FEE=1500;
   const pageTitle:Record<string,string>={invest:"Investment Plans",copy:"Signal Copier",managed:"Account Management"};
   const nav=(id:string)=>{setPage(id);setSbOpen(false);};
@@ -586,13 +805,17 @@ export default function App(){
     if(event.key==="Enter"||event.key===" "){event.preventDefault();action();}
   };
   const openCoin=(symbol:string)=>{setSelCoin(symbol);setTcoin(symbol);nav("coin");};
-  const goToDeposit=()=>{setTtype("deposit");setTamt("");nav("trade");};
+  const goToDeposit=()=>{setTtype("deposit");setTamt("");nav("transactions");};
   const pieData=port.holdings.filter(h=>h.amount>0).map(h=>({name:h.symbol,value:h.value,color:COINS[h.symbol]?.color||"#ccc"}));
   const isAdmin=user?.role==="owner"||user?.role==="admin"||Boolean(user?.permissions?.access_admin);
   useEffect(()=>{
     if(!isAdmin) return;
     checkPushStatus();
   },[isAdmin]);
+  useEffect(()=>{
+    if(!user) return;
+    checkBalancePushStatus();
+  },[user]);
 
   const AvatarDisplay=({size=40,fontSize=15}:{size?:number;fontSize?:number})=>(
     user?.avatarUrl
@@ -601,26 +824,31 @@ export default function App(){
   );
 
   /* Profile circle + dropdown — sits beside the balance chip in both topbars */
-  const ProfileMenu=({menuId,size=34,fontSize=13}:{menuId:"mobile"|"desktop";size?:number;fontSize?:number})=>{
-    const isOpen=profileOpen===menuId;
-    const toggleProfileMenu=()=>setProfileOpen(current=>current===menuId?null:menuId);
-    return <div ref={node=>{profileRefs.current[menuId]=node;}} style={{position:"relative",zIndex:isOpen?500:1}}>
-      <div onClick={toggleProfileMenu} onKeyDown={e=>onActivate(e,toggleProfileMenu)} style={{cursor:"pointer",borderRadius:"50%",border:"2px solid var(--border2)",lineHeight:0,transition:"border-color .15s"}} title={user?.name} role="button" tabIndex={0} aria-label="Profile menu" aria-expanded={isOpen}>
+  const ProfileMenu=({size=34,fontSize=13}:{size?:number;fontSize?:number})=>{
+    const[profileOpen,setProfileOpen]=useState(false);
+    const profileRef=useRef<HTMLDivElement>(null);
+    useEffect(()=>{
+      const h=(e:MouseEvent)=>{ if(profileRef.current&&!profileRef.current.contains(e.target as Node)) setProfileOpen(false); };
+      document.addEventListener("mousedown",h);
+      return()=>document.removeEventListener("mousedown",h);
+    },[]);
+    return <div ref={profileRef} style={{position:"relative"}}>
+      <div onClick={()=>setProfileOpen(o=>!o)} onKeyDown={e=>onActivate(e,()=>setProfileOpen(o=>!o))} style={{cursor:"pointer",borderRadius:"50%",border:"2px solid var(--border2)",lineHeight:0,transition:"border-color .15s"}} title={user?.name} role="button" tabIndex={0} aria-label="Profile menu" aria-expanded={profileOpen}>
         <AvatarDisplay size={size} fontSize={fontSize}/>
       </div>
-      {isOpen&&(
-        <div style={{position:"absolute",zIndex:501,top:"calc(100% + 10px)",right:0,minWidth:190,background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:14,padding:6,boxShadow:"0 20px 50px rgba(0,0,0,.42)",}}>
+      {profileOpen&&(
+        <div style={{position:"absolute",top:"calc(100% + 10px)",right:0,minWidth:190,background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:14,padding:6,boxShadow:"0 16px 40px rgba(0,0,0,.35)",}}>
           <div style={{padding:"8px 10px",marginBottom:2}}>
             <div style={{fontSize:12,fontWeight:700,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{user?.name}</div>
             <div style={{fontSize:10,color:"var(--text3)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{user?.email}</div>
           </div>
-          <div className="sitem" style={{margin:"1px 0",borderRadius:10}} onClick={()=>{nav("settings");setProfileOpen(null);}}>
+          <div className="sitem" style={{margin:"1px 0",borderRadius:10}} onClick={()=>{nav("settings");setProfileOpen(false);}}>
             <span className="sicon">⚙</span>Profile &amp; Settings
           </div>
-          <div className="sitem" style={{margin:"1px 0",borderRadius:10}} onClick={()=>{nav("notifications");setProfileOpen(null);}}>
+          <div className="sitem" style={{margin:"1px 0",borderRadius:10}} onClick={()=>{nav("notifications");setProfileOpen(false);}}>
             <span className="sicon">🔔</span>Notifications
           </div>
-          <div className="sitem" style={{margin:"1px 0",borderRadius:10,color:"var(--red)"}} onClick={()=>{setProfileOpen(null);doLogout();}}>
+          <div className="sitem" style={{margin:"1px 0",borderRadius:10,color:"var(--red)"}} onClick={()=>{setProfileOpen(false);doLogout();}}>
             <span className="sicon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>
             Log Out
           </div>
@@ -1038,7 +1266,7 @@ export default function App(){
           </div>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <button type="button" className="mchip balance-chip" onClick={goToDeposit} title="Add funds">{cur(port.cashBalance)}</button>
-            <ProfileMenu menuId="mobile" size={30} fontSize={12}/>
+            <ProfileMenu size={30} fontSize={12}/>
           </div>
         </div>
 
@@ -1062,9 +1290,9 @@ export default function App(){
         {/* Desktop topbar */}
 <div className="topbar">
   <div style={{display:"flex",alignItems:"center",gap:14}}>
-    {sbCollapsed&&<div className="sb-open" onClick={()=>setSbCollapsed(false)} onKeyDown={e=>onActivate(e,()=>setSbCollapsed(false))} title="Open sidebar" role="button" tabIndex={0} aria-label="Open sidebar">
+    <div className="sb-open" style={{visibility:sbCollapsed?"visible":"hidden"}} onClick={()=>setSbCollapsed(false)} onKeyDown={e=>onActivate(e,()=>setSbCollapsed(false))} title="Open sidebar" role="button" tabIndex={0} aria-label="Open sidebar">
       <svg width="18" height="14" viewBox="0 0 22 16" fill="none"><rect y="0" width="22" height="2.5" rx="1.25" fill="currentColor"/><rect y="6.75" width="16" height="2.5" rx="1.25" fill="currentColor"/><rect y="13.5" width="22" height="2.5" rx="1.25" fill="currentColor"/></svg>
-    </div>}
+    </div>
     <div>
       <div className="ttl">
         {page==="dashboard"
@@ -1079,26 +1307,48 @@ export default function App(){
   </div>
   <div style={{display:"flex",alignItems:"center",gap:12}}>
     <button type="button" className="tchip balance-chip" onClick={goToDeposit} title="Add funds">{cur(port.cashBalance)}</button>
-    <ProfileMenu menuId="desktop"/>
+    <ProfileMenu/>
   </div>
 </div>        {/* ══ DASHBOARD ══ */}
         {page==="admin"&&<Suspense fallback={<div className="gcard skeleton" style={{minHeight:360}} aria-label="Loading admin center"/>}><AdminPanel currentUser={user} notify={toast2}/></Suspense>}
 
+        <Modal open={showTour} onClose={dismissTour} title="Welcome to Wave 👋">
+          <div style={{fontSize:13,color:"var(--text2)",lineHeight:1.7}}>
+            <p><b>Dashboard</b> — your balances, live markets, and holdings at a glance.</p>
+            <p><b>Trade</b> — buy, sell, deposit, or withdraw.</p>
+            <p><b>Portfolio</b> — a full breakdown of everything you hold.</p>
+            <p><b>Settings</b> — manage your profile, security, and preferences.</p>
+          </div>
+          <button className="btn btn-primary" style={{width:"100%",marginTop:18}} onClick={dismissTour}>Got it</button>
+        </Modal>
+
         {page==="dashboard"&&<>
           <div className="stats" style={{marginTop:mob?12:0}}>
-            {[
-              {l:"Total Balance",  v:cur(port.totalValue),                  s:"+3.82% today",pos:true,  glow:"#6366F1"},
-              {l:"Portfolio Value",v:cur(port.totalPortfolioValue),          s:"Invested",    pos:null,  glow:"#06B6D4"},
-              {l:"Cash Balance",   v:cur(port.cashBalance),                  s:"Available",  pos:null,  glow:"#10B981"},
-              {l:"24h P&L",        v:"+$1,248.50",                                                                     s:"+3.82%",     pos:true,  glow:"#8B5CF6"},
+            {accountLoading?[0,1,2,3].map(i=>(
+              <div key={i} className="stat skeleton" style={{minHeight:88}}/>
+            )):[
+              {l:"Total Balance",  raw:port.totalValue,           s:"+3.82% today",pos:true,  glow:"#6366F1",tip:"Cash balance plus the current value of everything you hold"},
+              {l:"Portfolio Value",raw:port.totalPortfolioValue,  s:"Invested",    pos:null,  glow:"#06B6D4",tip:"Current market value of your holdings only, excluding cash"},
+              {l:"Cash Balance",   raw:port.cashBalance,          s:"Available",  pos:null,  glow:"#10B981",tip:"Uninvested cash available to trade or withdraw"},
+              {l:"24h P&L",        raw:dayPnl,                    s:`${dayPnl>=0?"+":""}${dayPnlPct.toFixed(2)}%`, pos:dayPnl>=0,  glow:"#8B5CF6",tip:"Unrealized 24h price movement on your current holdings. Doesn't separate out trades made earlier today — cash isn't included since it doesn't move in price.",signed:true},
             ].map((s,i)=>(
-              <div key={i} className={`stat ${s.l==="Total Balance"||s.l==="Cash Balance"?"balance-link":""}`} onClick={s.l==="Total Balance"||s.l==="Cash Balance"?goToDeposit:undefined}>
+              <div key={i} className={`stat ${s.l==="Total Balance"||s.l==="Cash Balance"?"balance-link":""}`} onClick={s.l==="Total Balance"||s.l==="Cash Balance"?goToDeposit:undefined} title={s.tip}>
                 <div className="stat-glow" style={{background:s.glow}}/>
                 <div className="stat-label">{s.l}</div>
-                <div className="stat-value">{s.v}</div>
+                <div className="stat-value">
+                  {s.signed&&s.raw<0?"-":s.signed?"+":""}
+                  <AnimatedStat value={Math.abs(s.raw)} format={cur}/>
+                </div>
                 <div className="stat-sub" style={{color:s.pos===true?"var(--green)":s.pos===false?"var(--red)":"var(--text3)"}}>{s.pos===true&&"▲ "}{s.s}</div>
               </div>
             ))}
+          </div>
+
+          <div className="quick-actions" style={{display:"flex",gap:10,flexWrap:"wrap",margin:"16px 0"}}>
+            <button className="btn btn-primary btn-sm" onClick={()=>{setTtype("buy");nav("trade");}} title="Buy crypto">+ Buy</button>
+            <button className="btn btn-ghost btn-sm" onClick={goToDeposit} title="Add funds to your cash balance">Deposit</button>
+            <button className="btn btn-ghost btn-sm" onClick={()=>{setTtype("withdraw");nav("transactions");}} title="Withdraw cash">Withdraw</button>
+            <button className="btn btn-ghost btn-sm" onClick={()=>nav("portfolio")} title="View full portfolio">Portfolio</button>
           </div>
 
           <div className="crow">
@@ -1179,6 +1429,69 @@ export default function App(){
               );
             })}
           </div>
+
+          <div className="gcard" style={{marginTop:20}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+              <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)"}}>⚡ Recent Activity</div>
+              <button className="btn btn-ghost btn-sm" style={{padding:"5px 9px",fontSize:10}} onClick={()=>nav("notifications")}>View all →</button>
+            </div>
+            {notifLoading?<div style={{fontSize:12,color:"var(--text3)"}}>Loading…</div>
+            :activities.length===0?<div style={{fontSize:12,color:"var(--text3)"}}>No activity yet — your trades and transfers will show up here.</div>
+            :activities.slice(0,5).map((tx,i)=>(
+              <div key={i} className="setting-row" style={{borderBottom:i<Math.min(4,activities.length-1)?"1px solid var(--border)":"none",paddingTop:12,paddingBottom:12}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{width:34,height:34,borderRadius:"50%",background:tx.type==="buy"||tx.type==="deposit"?"rgba(16,185,129,.15)":"rgba(239,68,68,.1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>
+                    {tx.type==="buy"?"🟢":tx.type==="sell"?"🔴":tx.type==="deposit"?"💵":"⚡"}
+                  </div>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{tx.type==="investment"?`${tx.label} activated`:`${tx.type.charAt(0).toUpperCase()+tx.type.slice(1)} ${tx.label}`}</div>
+                    <div style={{fontSize:11,color:"var(--text3)"}}>{new Date(tx.created_at).toLocaleString()}</div>
+                  </div>
+                </div>
+                <div style={{fontSize:13,fontWeight:700,color:tx.type==="buy"||tx.type==="withdraw"?"var(--red)":"var(--green)"}}>
+                  {tx.type==="buy"||tx.type==="withdraw"||tx.type==="investment"?"-":"+"}${Number(tx.amount||0).toLocaleString()}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {(()=>{
+            const heldOnly=port.holdings.filter(h=>h.amount>0);
+            const topHolding=heldOnly.length?heldOnly.reduce((a,b)=>a.value>b.value?a:b):null;
+            const topPct=topHolding&&port.totalPortfolioValue>0?(topHolding.value/port.totalPortfolioValue*100):0;
+            const cashPct=port.totalValue>0?(port.cashBalance/port.totalValue*100):0;
+            const insights=[
+              topHolding?{icon:"🏆",text:<>Your largest position is <b>{topHolding.symbol}</b>, {topPct.toFixed(0)}% of your portfolio.</>}:{icon:"👋",text:<>You don't hold any assets yet — head to Trade to make your first buy.</>},
+              {icon:dayPnl>=0?"📈":"📉",text:<>Your holdings are <b style={{color:dayPnl>=0?"var(--green)":"var(--red)"}}>{dayPnl>=0?"up":"down"} {Math.abs(dayPnlPct).toFixed(2)}%</b> over the last 24h.</>},
+              cashPct>40?{icon:"💰",text:<><b>{cashPct.toFixed(0)}%</b> of your account is sitting in cash — consider putting it to work.</>}:{icon:"⚖️",text:<>{cashPct.toFixed(0)}% of your account is in cash — the rest is invested.</>},
+            ];
+            return(
+              <div className="gcard" style={{marginTop:20}}>
+                <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:16}}>💡 Insights</div>
+                {insights.map((ins,i)=>(
+                  <div key={i} style={{display:"flex",alignItems:"flex-start",gap:12,padding:"10px 0",borderBottom:i<insights.length-1?"1px solid var(--border)":"none"}}>
+                    <span style={{fontSize:18,flexShrink:0}}>{ins.icon}</span>
+                    <span style={{fontSize:13,color:"var(--text2)",lineHeight:1.5}}>{ins.text}</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
+          <div className="gcard" style={{marginTop:20}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+              <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)"}}>🔔 Notifications</div>
+              <button className="btn btn-ghost btn-sm" style={{padding:"5px 9px",fontSize:10}} onClick={()=>nav("notifications")}>View all →</button>
+            </div>
+            {notifLoading?<div style={{fontSize:12,color:"var(--text3)"}}>Loading…</div>
+            :siteUpdates.length===0?<div style={{fontSize:12,color:"var(--text3)"}}>No notifications right now.</div>
+            :siteUpdates.slice(0,3).map((u,i)=>(
+              <div key={i} style={{padding:"10px 0",borderBottom:i<Math.min(2,siteUpdates.length-1)?"1px solid var(--border)":"none"}}>
+                <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{u.title}</div>
+                <div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>{u.body}</div>
+              </div>
+            ))}
+          </div>
         </>}
 
         {/* ══ TRADE ══ */}
@@ -1222,7 +1535,7 @@ export default function App(){
           <div className="tgrid">
             <div className="gcard tcrd">
               <div className="ttabs">
-                {(["buy","sell","deposit","withdraw"] as const).map(t=>(
+                {(["buy","sell"] as const).map(t=>(
                   <button key={t} className={`ttab ${ttype===t?`active ${t}`:""}`} onClick={()=>{setTtype(t);setTamt("");}}>
                     {t.charAt(0).toUpperCase()+t.slice(1)}
                   </button>
@@ -1253,56 +1566,6 @@ export default function App(){
                   {loading?"Processing…":`${ttype==="buy"?"Buy":"Sell"} ${tcoin}`}
                 </button>
                 <div className="tbal">Available cash: <span>{cur(port.cashBalance)}</span></div>
-              </>}
-
-              {ttype==="deposit"&&<>
-                <div className="deposit-hero">
-                  <div>
-                    <div className="deposit-title">Instant deposit</div>
-                    <p className="deposit-copy">Move funds into your account quickly with a clean, modern checkout designed to help you stay invested.</p>
-                  </div>
-                  <div className="deposit-badge"><span>Available balance</span><strong>{cur(port.cashBalance)}</strong></div>
-                </div>
-                <div className="deposit-panel">
-                  <div className="deposit-row">
-                    <div style={{flex:1}}>
-                      <div className="tlab">Amount (USD)</div>
-                      <div className="tiwrap"><input className="tinp" type="number" placeholder="0.00" inputMode="decimal" value={tamt} onChange={e=>setTamt(e.target.value)}/><span className="tsfx">USD</span></div>
-                    </div>
-                  </div>
-                  <div className="deposit-quick">{["100","500","1000","5000"].map(v=><button key={v} className={`qpill ${tamt===v?"act":""}`} onClick={()=>setTamt(v)}>${v}</button>)}</div>
-                  <div className="deposit-method">
-                    <div className="tlab">Payment Method</div>
-                    <select className="sel"><option>Bank Transfer (Free)</option><option>Credit / Debit Card (1.5%)</option><option>PayPal (2%)</option></select>
-                  </div>
-                  <div className="deposit-summary">
-                    <div className="trow"><span className="trl">Amount</span><span className="trv">${tamt||"0.00"}</span></div>
-                    <div className="trow"><span className="trl">Fee</span><span className="trv">$0.00</span></div>
-                    <div className="trow"><span className="trl">You receive</span><span className="trt">${tamt||"0.00"}</span></div>
-                  </div>
-                  <div className="deposit-action">
-                    <button className="btn btn-primary btn-lg" style={{width:"100%"}} onClick={doTrade} disabled={loading}>{loading?"Processing…":"Deposit Funds"}</button>
-                    <div className="deposit-note">Your deposit will appear in your balance instantly after completion.</div>
-                  </div>
-                </div>
-              </>}
-
-              {ttype==="withdraw"&&<>
-                <div className="tlab">Amount (USD)</div>
-                <div className="tiwrap"><input className="tinp" type="number" placeholder="0.00" inputMode="decimal" value={tamt} onChange={e=>setTamt(e.target.value)}/><span className="tsfx">USD</span></div>
-                <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
-                  {["100","500","1000"].map(v=><button key={v} className={`qpill ${tamt===v?"act":""}`} onClick={()=>setTamt(v)}>${v}</button>)}
-                  <button className="qpill" onClick={()=>setTamt(String(port.cashBalance))}>Max</button>
-                </div>
-                <div className="tlab">Withdraw To</div>
-                <select className="sel" style={{marginBottom:14}}><option>Bank Account ••• 4291</option><option>PayPal</option><option>Crypto Wallet</option></select>
-                <div className="tsum">
-                  <div className="trow"><span className="trl">Amount</span><span className="trv">${tamt||"0.00"}</span></div>
-                  <div className="trow"><span className="trl">Fee (0.5%)</span><span className="trv">${tamt?(parseFloat(tamt)*.005).toFixed(2):"0.00"}</span></div>
-                  <div className="trow"><span className="trl">You receive</span><span className="trt">${tamt?(parseFloat(tamt)*.995).toFixed(2):"0.00"}</span></div>
-                </div>
-                <button className="btn btn-primary btn-lg" style={{width:"100%",background:"linear-gradient(135deg,#8B5CF6,#6D28D9)",boxShadow:"0 4px 20px rgba(139,92,246,.35)"}} onClick={doTrade} disabled={loading}>{loading?"Processing…":"Withdraw Funds"}</button>
-                <div className="tbal">Available: <span>{cur(port.cashBalance)}</span></div>
               </>}
             </div>
 
@@ -1349,7 +1612,272 @@ export default function App(){
           </div>
         )}
 
-        {/* ══ PORTFOLIO ══ */}
+        {/* ══ STOCKS ══ */}
+        {page==="stocks"&&(
+          <div className="page-wrap">
+            <div className="stitle">Stocks</div>
+            <div style={{fontSize:12,color:"var(--text3)",marginBottom:14}}>Real quotes via Finnhub. Same paper-trading engine as crypto — buy/sell instantly, no real brokerage involved.</div>
+            <input className="inp" placeholder="Search by ticker or company name…" value={stockSearch} onChange={e=>setStockSearch(e.target.value)} style={{marginBottom:18,maxWidth:360}}/>
+
+            <div className="tgrid">
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:12,alignContent:"start"}}>
+                {Object.entries(STOCK_NAMES).filter(([sym,name])=>{
+                  const q=stockSearch.trim().toLowerCase();
+                  return !q||sym.toLowerCase().includes(q)||name.toLowerCase().includes(q);
+                }).map(([sym,name])=>{
+                  const p=prices[sym];
+                  const chg=p?.change24h||0;
+                  return (
+                    <div key={sym} className="gcard" onClick={()=>setSelStock(sym)} style={{cursor:"pointer",border:selStock===sym?"1px solid #6366F1":undefined,padding:16}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+                        <div style={{width:34,height:34,borderRadius:10,background:stockColor(sym),color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,flexShrink:0}}>{sym.slice(0,2)}</div>
+                        <div style={{minWidth:0}}>
+                          <div style={{fontWeight:700,fontSize:13}}>{sym}</div>
+                          <div style={{fontSize:11,color:"var(--text3)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{name}</div>
+                        </div>
+                      </div>
+                      {p?<>
+                        <div style={{fontSize:18,fontWeight:800}}>{cur(p.price)}</div>
+                        <div style={{fontSize:12,fontWeight:700,color:chg>=0?"var(--green)":"var(--red)"}}>{chg>=0?"▲":"▼"} {Math.abs(chg).toFixed(2)}%</div>
+                      </>:<div style={{fontSize:12,color:"var(--text3)"}}>Price not loaded yet</div>}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="gcard tcrd">
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+                  <div style={{width:30,height:30,borderRadius:8,background:stockColor(selStock),color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800}}>{selStock.slice(0,2)}</div>
+                  <div><div style={{fontWeight:800}}>{selStock}</div><div style={{fontSize:11,color:"var(--text3)"}}>{STOCK_NAMES[selStock]}</div></div>
+                </div>
+                <div className="ttabs">
+                  {(["buy","sell"] as const).map(t=>(
+                    <button key={t} className={`ttab ${stockSide===t?`active ${t}`:""}`} onClick={()=>{setStockSide(t);setStockAmt("");}}>{t.charAt(0).toUpperCase()+t.slice(1)}</button>
+                  ))}
+                </div>
+                <div className="tlab">Shares</div>
+                <div className="tiwrap"><input className="tinp" type="number" placeholder="0" inputMode="decimal" autoComplete="off" value={stockAmt} onChange={e=>setStockAmt(e.target.value)}/><span className="tsfx">{selStock}</span></div>
+                <div className="tsum">
+                  <div className="trow"><span className="trl">Price</span><span className="trv">{cur(prices[selStock]?.price||0)}</span></div>
+                  <div className="trow"><span className="trl">{stockSide==="buy"?"Total Cost":"You Receive"}</span><span className="trt">{cur((parseFloat(stockAmt)||0)*(prices[selStock]?.price||0))}</span></div>
+                </div>
+                <button className="btn btn-primary btn-lg" style={{width:"100%",background:stockSide==="buy"?"linear-gradient(135deg,#10B981,#059669)":"linear-gradient(135deg,#EF4444,#DC2626)"}} onClick={doStockTrade} disabled={loading||!prices[selStock]}>
+                  {loading?"Processing…":`${stockSide==="buy"?"Buy":"Sell"} ${selStock}`}
+                </button>
+                <div className="tbal">Available cash: <span>{cur(port.cashBalance)}</span></div>
+              </div>
+            </div>
+
+            {(()=>{const stockHoldings=port.holdings.filter(h=>STOCK_NAMES[h.symbol]&&h.amount>0);
+              return stockHoldings.length>0&&<div className="gcard" style={{marginTop:20}}>
+                <div className="stitle">My Stock Holdings</div>
+                {stockHoldings.map(h=>(
+                  <div key={h.symbol} className="setting-row">
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      <div style={{width:30,height:30,borderRadius:8,background:stockColor(h.symbol),color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800}}>{h.symbol.slice(0,2)}</div>
+                      <div><div style={{fontWeight:700,fontSize:13}}>{h.symbol}</div><div style={{fontSize:11,color:"var(--text3)"}}>{h.amount} shares</div></div>
+                    </div>
+                    <div style={{fontWeight:800}}>{cur(h.value)}</div>
+                  </div>
+                ))}
+              </div>;
+            })()}
+          </div>
+        )}
+
+        {/* ══ TRANSACTIONS ══ (deposit / withdraw — split out of Trade per the original request) */}
+        {page==="transactions"&&(
+          <div className="page-wrap">
+            <div className="stitle">Your wallets</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:14,marginBottom:22}}>
+              <div className="gcard" style={{borderLeft:"3px solid #6366F1"}}>
+                <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase"}}>Main wallet</div>
+                <div style={{fontSize:22,fontWeight:900,margin:"8px 0 4px"}}>{cur(port.cashBalance)}</div>
+                <div style={{fontSize:11,color:"var(--text3)"}}>Used for trading, deposits & withdrawals</div>
+              </div>
+              {myCopiers.map(c=>(
+                <div key={`w-copier-${c.portfolioId}`} className="gcard" style={{borderLeft:"3px solid #10B981"}}>
+                  <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase"}}>{c.strategyName}</div>
+                  <div style={{fontSize:22,fontWeight:900,margin:"8px 0 4px"}}>{cur(c.totalValue)}</div>
+                  <div style={{fontSize:11,color:"var(--text3)"}}>Signal Copier</div>
+                </div>
+              ))}
+              {myManaged.map(m=>(
+                <div key={`w-managed-${m.portfolioId}`} className="gcard" style={{borderLeft:"3px solid #67e8f9"}}>
+                  <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase"}}>Managed account</div>
+                  <div style={{fontSize:22,fontWeight:900,margin:"8px 0 4px"}}>{cur(m.totalValue)}</div>
+                  <div style={{fontSize:11,color:"var(--text3)"}}>{m.allocation.length} asset{m.allocation.length===1?"":"s"}</div>
+                </div>
+              ))}
+            </div>
+
+            {balanceHistory.length>1&&<div className="gcard" style={{marginBottom:22}}>
+              <div className="stitle" style={{marginBottom:2}}>Main wallet balance history</div>
+              <div style={{fontSize:11,color:"var(--text3)",marginBottom:10}}>Reconstructed from your real deposit/withdraw/trade/bonus history — not an estimate.</div>
+              <ResponsiveContainer width="100%" height={180}>
+                <AreaChart data={balanceHistory}>
+                  <defs><linearGradient id="balGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#6366F1" stopOpacity={0.35}/><stop offset="100%" stopColor="#6366F1" stopOpacity={0}/></linearGradient></defs>
+                  <XAxis dataKey="date" tickFormatter={d=>new Date(d).toLocaleDateString(undefined,{month:"short",day:"numeric"})} tick={{fontSize:10,fill:"var(--text3)"}} axisLine={false} tickLine={false}/>
+                  <YAxis tick={{fontSize:10,fill:"var(--text3)"}} axisLine={false} tickLine={false} width={50} tickFormatter={v=>`$${v}`}/>
+                  <Tooltip formatter={(v:any)=>[`$${Number(v).toLocaleString()}`,"Balance"]} labelFormatter={d=>new Date(d).toLocaleString()} contentStyle={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:8,fontSize:12}}/>
+                  <Area type="monotone" dataKey="balance" stroke="#6366F1" strokeWidth={2} fill="url(#balGrad)"/>
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>}
+
+            {walletAnalytics&&<div className="gcard" style={{marginBottom:22}}>
+              <div className="stitle">Wallet analytics</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:14,marginTop:8}}>
+                {[
+                  ["Total deposited",cur(walletAnalytics.totalDeposited)],
+                  ["Total withdrawn",cur(walletAnalytics.totalWithdrawn)],
+                  ["Net flow",cur(walletAnalytics.netFlow)],
+                  ["Deposits made",String(walletAnalytics.depositCount)],
+                  ["Largest deposit",cur(walletAnalytics.largestDeposit)],
+                  ["Bonus earned",cur(walletAnalytics.totalBonusEarned)],
+                ].map(([k,v])=>(
+                  <div key={k}><div style={{fontSize:11,color:"var(--text3)"}}>{k}</div><div style={{fontSize:16,fontWeight:800,marginTop:2}}>{v}</div></div>
+                ))}
+              </div>
+              {walletAnalytics.failedWithdrawalAttempts>0&&<div style={{fontSize:11,color:"var(--text3)",marginTop:14,paddingTop:12,borderTop:"1px solid var(--border)"}}>{walletAnalytics.failedWithdrawalAttempts} failed withdrawal attempt{walletAnalytics.failedWithdrawalAttempts===1?"":"s"} on record.</div>}
+            </div>}
+
+            <div className="tgrid">
+              <div className="gcard tcrd">
+                <div className="ttabs">
+                  {(["deposit","withdraw"] as const).map(t=>(
+                    <button key={t} className={`ttab ${ttype===t?`active ${t==="deposit"?"buy":"sell"}`:""}`} onClick={()=>{setTtype(t);setTamt("");}}>
+                      {t.charAt(0).toUpperCase()+t.slice(1)}
+                    </button>
+                  ))}
+                </div>
+                {(ttype==="deposit"||ttype==="withdraw")&&<>
+                  <div className="tlab">Amount (USD){ttype==="deposit"&&<span style={{color:"var(--text3)",fontWeight:400}}> — $100 minimum</span>}</div>
+                  <div className="tiwrap"><input className="tinp" type="number" placeholder="0.00" inputMode="decimal" autoComplete="off" value={tamt} onChange={e=>setTamt(e.target.value)}/><span className="tsfx">USD</span></div>
+                  <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
+                    {(ttype==="deposit"?["100","250","500","1000"]:["50","100","500","1000"]).map(v=><button key={v} className={`qpill ${tamt===v?"act":""}`} onClick={()=>setTamt(v)}>${v}</button>)}
+                  </div>
+                  {ttype==="withdraw"&&<div className="tsum">
+                    <div className="trow"><span className="trl">Fee (0.5%)</span><span className="trv">${tamt?(parseFloat(tamt)*0.005).toFixed(2):"0.00"}</span></div>
+                    <div className="trow"><span className="trl">You'll be charged</span><span className="trt">${tamt?(parseFloat(tamt)*1.005).toFixed(2):"0.00"}</span></div>
+                  </div>}
+                  <button className="btn btn-primary btn-lg" style={{width:"100%",background:ttype==="deposit"?"linear-gradient(135deg,#10B981,#059669)":"linear-gradient(135deg,#EF4444,#DC2626)"}} onClick={doTrade} disabled={loading}>
+                    {loading?"Processing…":`${ttype==="deposit"?"Deposit":"Withdraw"}`}
+                  </button>
+                  <div className="tbal">Available cash: <span>{cur(port.cashBalance)}</span></div>
+                  {ttype==="withdraw"&&tierInfo&&tierInfo.lockedBonus>0&&<div style={{fontSize:11,color:"var(--text3)",marginTop:6}}>🔒 {cur(tierInfo.lockedBonus)} of this is locked bonus funds, not yet withdrawable.</div>}
+                </>}
+              </div>
+
+              <div className="gcard" style={{padding:0,overflow:"hidden"}}>
+                <div style={{padding:mob?"14px 16px 12px":"22px 24px 16px",borderBottom:"1px solid var(--border)"}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,flexWrap:"wrap",gap:8}}>
+                    <div className="stitle" style={{marginBottom:0}}>Deposits & withdrawals</div>
+                  </div>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                    <input className="inp" placeholder="Search reference or amount…" value={txSearch} onChange={e=>{setTxSearch(e.target.value);setTxPage(1);}} style={{flex:"1 1 200px",minWidth:0}}/>
+                    <select className="sel" value={txTypeFilter} onChange={e=>{setTxTypeFilter(e.target.value as any);setTxPage(1);}} style={{flex:"0 0 auto"}}>
+                      <option value="all">All types</option>
+                      <option value="deposit">Deposits</option>
+                      <option value="withdraw">Withdrawals</option>
+                    </select>
+                    <select className="sel" value={txSort} onChange={e=>setTxSort(e.target.value as any)} style={{flex:"0 0 auto"}}>
+                      <option value="date_desc">Newest first</option>
+                      <option value="date_asc">Oldest first</option>
+                      <option value="amount_desc">Amount: high to low</option>
+                      <option value="amount_asc">Amount: low to high</option>
+                    </select>
+                  </div>
+                </div>
+                {(()=>{
+                  let dw=txs.filter(tx=>tx.type==="deposit"||tx.type==="withdraw");
+                  if(txTypeFilter!=="all") dw=dw.filter(tx=>tx.type===txTypeFilter);
+                  const q=txSearch.trim().toLowerCase();
+                  if(q) dw=dw.filter(tx=>(tx.reference_id||"").toLowerCase().includes(q)||String(tx.total||"").includes(q));
+                  dw=[...dw].sort((a,b)=>{
+                    if(txSort==="date_desc") return (b.created_at||"").localeCompare(a.created_at||"");
+                    if(txSort==="date_asc")  return (a.created_at||"").localeCompare(b.created_at||"");
+                    if(txSort==="amount_desc") return (b.total||0)-(a.total||0);
+                    return (a.total||0)-(b.total||0);
+                  });
+                  const totalPages=Math.max(1,Math.ceil(dw.length/TX_PAGE_SIZE));
+                  const pageSafe=Math.min(txPage,totalPages);
+                  const pageRows=dw.slice((pageSafe-1)*TX_PAGE_SIZE,pageSafe*TX_PAGE_SIZE);
+                  const exportCsv=()=>{
+                    const header="Type,Amount,Fee,Reference,Date,Status\n";
+                    const rows=dw.map(tx=>[tx.type,(tx.total||0).toFixed(2),"",tx.reference_id||"",tx.created_at||"",tx.status].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+                    const blob=new Blob([header+rows],{type:"text/csv"});
+                    const url=URL.createObjectURL(blob);
+                    const a=document.createElement("a");a.href=url;a.download="wave-transactions.csv";a.click();URL.revokeObjectURL(url);
+                  };
+                  return dw.length===0?<div style={{padding:"30px 20px",textAlign:"center",color:"var(--text3)",fontSize:13}}>No deposits or withdrawals match your filters.</div>:<>
+                    <div style={{padding:"10px 16px",display:"flex",justifyContent:"flex-end"}}>
+                      <button className="btn btn-ghost btn-sm" onClick={exportCsv}>⬇ Export CSV ({dw.length})</button>
+                    </div>
+                    <div className="txwrap"><table className="txt">
+                      <thead><tr><th>Type</th><th>Amount</th><th>Reference</th><th>Date</th><th>Status</th></tr></thead>
+                      <tbody>{pageRows.map(tx=>(
+                        <tr key={tx.id} onClick={()=>setTxDetail(tx)} style={{cursor:"pointer"}}>
+                          <td><span className={`tbadge ${tx.type==="deposit"?"badge-blue":"badge-purple"}`}>{tx.type}</span></td>
+                          <td style={{color:tx.type==="withdraw"?"var(--red)":"var(--green)",fontWeight:700}}>{tx.type==="withdraw"?"-":"+"}${(tx.total||0).toLocaleString()}</td>
+                          <td style={{fontFamily:"monospace",fontSize:12,color:"var(--text3)"}}>{tx.reference_id||"—"}</td>
+                          <td>{(tx.created_at||"").slice(0,10)}</td>
+                          <td><span className={`badge ${tx.status==="failed"?"badge-red":tx.status==="pending"?"badge-gray":"badge-green"}`}>{tx.status==="failed"?"✕":tx.status==="pending"?"⏳":"✓"} {tx.status}</span></td>
+                        </tr>
+                      ))}</tbody>
+                    </table></div>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",borderTop:"1px solid var(--border)"}}>
+                      <span style={{fontSize:11,color:"var(--text3)"}}>Page {pageSafe} of {totalPages} · {dw.length} total</span>
+                      <div style={{display:"flex",gap:6}}>
+                        <button className="btn btn-ghost btn-sm" disabled={pageSafe<=1} onClick={()=>setTxPage(p=>Math.max(1,p-1))}>← Prev</button>
+                        <button className="btn btn-ghost btn-sm" disabled={pageSafe>=totalPages} onClick={()=>setTxPage(p=>Math.min(totalPages,p+1))}>Next →</button>
+                      </div>
+                    </div>
+                  </>;
+                })()}
+              </div>
+            </div>
+
+            <Modal open={!!txDetail} onClose={()=>setTxDetail(null)} title="Transaction receipt">
+              {txDetail&&<div style={{fontSize:13}}>
+                <div style={{textAlign:"center",padding:"10px 0 20px",borderBottom:"1px dashed var(--border)",marginBottom:16}}>
+                  <div style={{fontSize:11,color:"var(--text3)",textTransform:"uppercase",letterSpacing:1}}>{txDetail.type}</div>
+                  <div style={{fontSize:28,fontWeight:900,color:txDetail.type==="withdraw"?"var(--red)":"var(--green)",margin:"6px 0"}}>{txDetail.type==="withdraw"?"-":"+"}${(txDetail.total||0).toLocaleString()}</div>
+                  <span className="badge badge-green">✓ {txDetail.status}</span>
+                </div>
+                {[["Reference",txDetail.reference_id||"—"],["Date",new Date(txDetail.created_at).toLocaleString()],["Type",txDetail.type],["Amount",`$${(txDetail.amount||0).toLocaleString()}`],...(txDetail.fee?[["Fee",`$${txDetail.fee.toLocaleString()}`]]:[]),["Total",`$${(txDetail.total||0).toLocaleString()}`]].map(([k,v])=>(
+                  <div key={k} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid var(--border)"}}>
+                    <span style={{color:"var(--text3)"}}>{k}</span><span style={{fontWeight:600,color:"var(--text)"}}>{v}</span>
+                  </div>
+                ))}
+              </div>}
+            </Modal>
+
+            <Modal open={!!depositReceipt} onClose={()=>setDepositReceipt(null)} title="Deposit receipt">
+              {depositReceipt&&<div style={{fontSize:13}}>
+                <div style={{textAlign:"center",padding:"10px 0 20px",borderBottom:"1px dashed var(--border)",marginBottom:16}}>
+                  <div style={{fontSize:32,marginBottom:6}}>✅</div>
+                  <div style={{fontSize:11,color:"var(--text3)",textTransform:"uppercase",letterSpacing:1}}>Deposit completed</div>
+                  <div style={{fontSize:28,fontWeight:900,color:"var(--green)",margin:"6px 0"}}>+{cur(depositReceipt.amount)}</div>
+                  <span className="badge badge-green">✓ completed</span>
+                </div>
+                <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Account</div>
+                <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0 14px"}}>
+                  <div style={{width:36,height:36,borderRadius:"50%",background:"var(--surface2)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13,color:"var(--text2)",overflow:"hidden",flexShrink:0}}>
+                    {user?.avatarUrl?<img src={user.avatarUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:user?.initials}
+                  </div>
+                  <div><div style={{fontWeight:700,color:"var(--text)"}}>{user?.name}</div><div style={{fontSize:12,color:"var(--text3)"}}>{user?.email}</div></div>
+                </div>
+                {[["Reference ID",depositReceipt.referenceId],["Date",new Date(depositReceipt.timestamp).toLocaleString()],["Amount",cur(depositReceipt.amount)],...(depositReceipt.bonus?[["Bonus",`+${cur(depositReceipt.bonus.bonusAmount)} (${depositReceipt.bonus.promotionName})`],["Bonus unlocks",new Date(depositReceipt.bonus.unlockAt).toLocaleDateString()]]:[]),["New balance",cur(depositReceipt.cashBalance)]].map(([k,v])=>(
+                  <div key={k} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid var(--border)"}}>
+                    <span style={{color:"var(--text3)"}}>{k}</span><span style={{fontWeight:600,color:"var(--text)",fontFamily:k==="Reference ID"?"monospace":undefined}}>{v}</span>
+                  </div>
+                ))}
+                <div style={{fontSize:11,color:"var(--text3)",textAlign:"center",marginTop:16}}>Keep this reference ID for your records.</div>
+              </div>}
+            </Modal>
+          </div>
+        )}
         {(page==="invest"||page==="copy"||page==="managed")&&(
           <div className="page-wrap">
             {page==="invest"&&<>
@@ -1368,8 +1896,91 @@ export default function App(){
               <div className="stitle">Featured investment plans</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(230px,1fr))",gap:16,marginBottom:24}}>{[["Foundation","$250","Conservative","Diversified income, bonds & global ETFs.","#22c55e"],["Momentum","$1,000","Balanced","Growth-focused stocks, crypto & alternatives.","#818cf8"],["Legacy","$10,000","Growth","Bespoke multi-asset strategy with advisor access.","#f59e0b"]].map(x=><div key={x[0]} className="gcard" style={{borderTop:`3px solid ${x[4]}`}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}><b style={{fontSize:18}}>{x[0]}</b><span style={{fontSize:11,color:x[4]}}>{x[2]}</span></div><p style={{fontSize:13,color:"var(--text2)",lineHeight:1.6}}>{x[3]}</p><div style={{fontSize:13,fontWeight:700,margin:"18px 0"}}>Minimum {x[1]}</div><button className="btn btn-primary" style={{width:"100%"}} onClick={()=>chargeCashBalance(`${x[0]} plan`, FEATURED_PLAN_PRICES[x[0]] || 0)}>Choose plan</button></div>)}</div>
               <div className="stitle">Investment categories</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(155px,1fr))",gap:10}}>{["Stocks","ETFs","Mutual Funds","Bonds & Commodities","Options International","Precious Metals","Crypto","DeFi","NFTs","Real Estate","Oil & Gas","Renewable Energy","Web3","Medical Cannabis","Loans & Grants","Financial Planning","Retirement Planning"].map((x,i)=><button key={x} onClick={()=>toast2(`${x} added to your investment interests.`)} style={{textAlign:"left",padding:15,borderRadius:14,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text)",cursor:"pointer",fontSize:12,fontWeight:700}}><span style={{color:["#818cf8","#22c55e","#f59e0b"][i%3],marginRight:7}}>●</span>{x}</button>)}</div>
             </>}
-            {page==="copy"&&<><div className="gcard" style={{padding:28,marginBottom:18,background:"linear-gradient(135deg,var(--bg2),rgba(99,102,241,.16))"}}><div style={{fontSize:11,color:"var(--indigo2)",fontWeight:800,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Wave Signal Copier</div><div className="stitle" style={{fontSize:28,marginBottom:8}}>Copy strategies. Stay in control.</div><p style={{color:"var(--text2)",fontSize:13}}>Mirror selected signals with clear risk limits and full trade visibility.</p><button className="btn btn-primary" style={{marginTop:18}} onClick={()=>chargeCashBalance("Signal copier", SIGNAL_COPIER_FEE)}>Connect strategy</button></div><div className="stats" style={{marginBottom:18}}>{[["Copier balance","$24,850.00"],["Realized profit","+$3,420.60"],["Win rate","68.4%"],["Risk level","Moderate"]].map((x,i)=><div className="stat" key={x[0]}><div className="stat-label">{x[0]}</div><div className="stat-value" style={{fontSize:21,color:i===1?"var(--green)":"var(--text)"}}>{x[1]}</div></div>)}</div><div className="gcard" style={{padding:0,overflow:"hidden"}}><div style={{padding:"18px 22px",fontWeight:800}}>Copied trades & profits</div><div className="txwrap"><table className="txt"><thead><tr><th>Strategy</th><th>Instrument</th><th>Direction</th><th>Opened</th><th>Profit</th><th>Status</th></tr></thead><tbody>{[["Apex Momentum","BTCUSD","Buy","Today, 09:42","+$482.10","Open"],["Atlas FX","EURUSD","Sell","Yesterday, 14:10","+$236.40","Closed"],["Apex Momentum","XAUUSD","Buy","Jul 10, 11:25","+$611.80","Closed"]].map((r,i)=><tr key={i}>{r.map((c,j)=><td key={j} style={{color:j===4?"var(--green)":undefined,fontWeight:j===4?800:undefined}}>{c}</td>)}</tr>)}</tbody></table></div></div></>}
-            {page==="managed"&&<><div style={{display:"grid",gridTemplateColumns:tab?"1fr":"1.2fr .8fr",gap:18}}><div className="gcard" style={{padding:30,background:"linear-gradient(135deg,#10212b,#13243e)"}}><div style={{fontSize:11,color:"#67e8f9",fontWeight:800,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>Private account management</div><div style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:30,fontWeight:900,lineHeight:1.2}}>Your ambitions, professionally managed.</div><p style={{color:"#bfdbfe",fontSize:14,lineHeight:1.6,marginTop:12}}>A tailored allocation across traditional, alternative and digital assets.</p><button className="btn btn-primary" style={{marginTop:20}} onClick={()=>toast2("Consultation request sent.")}>Request a consultation</button></div><div className="gcard"><div className="stitle">Account snapshot</div>{[["Managed value","$128,450.00"],["This month","+$4,821.28"],["Allocation","9 asset classes"],["Next review","July 24"]].map(x=><div key={x[0]} style={{display:"flex",justifyContent:"space-between",padding:"12px 0",borderBottom:"1px solid var(--border)",fontSize:13}}><span style={{color:"var(--text3)"}}>{x[0]}</span><b style={{color:x[0]==="This month"?"var(--green)":"var(--text)"}}>{x[1]}</b></div>)}</div></div><div className="stitle" style={{marginTop:24}}>Managed portfolio allocation</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:12}}>{[["Global Equities","36%","#818cf8"],["Fixed Income","22%","#22c55e"],["Real Assets","18%","#f59e0b"],["Digital Assets","14%","#a78bfa"],["Cash & Alternatives","10%","#38bdf8"]].map(x=><div className="gcard" key={x[0]}><div style={{fontSize:12,color:"var(--text3)"}}>{x[0]}</div><div style={{fontSize:24,fontWeight:900,margin:"9px 0"}}>{x[1]}</div><div style={{height:5,borderRadius:5,background:"var(--surface)"}}><div style={{height:"100%",width:x[1],background:x[2],borderRadius:5}}/></div></div>)}</div><div className="gcard" style={{marginTop:18}}><div className="stitle">VIP & Inner Circle</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))",gap:14}}>{[["VIP Monthly","$149 / month"],["VIP Lifetime","$1,499 once"],["Inner Circle","By invitation"]].map(x=><div key={x[0]} style={{border:"1px solid var(--border)",borderRadius:14,padding:16}}><b>{x[0]}</b><div style={{fontSize:18,fontWeight:900,margin:"10px 0"}}>{x[1]}</div><p style={{fontSize:12,color:"var(--text2)"}}>Premium signals, market briefings and priority support.</p><button className="btn btn-ghost btn-sm" style={{marginTop:12}} onClick={()=>toast2(`${x[0]} interest registered.`)}>Register interest</button></div>)}</div></div></>}
+            {page==="copy"&&<>
+              <div className="gcard" style={{padding:28,marginBottom:18,background:"linear-gradient(135deg,var(--bg2),rgba(99,102,241,.16))"}}>
+                <div style={{fontSize:11,color:"var(--indigo2)",fontWeight:800,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Wave Signal Copier</div>
+                <div className="stitle" style={{fontSize:28,marginBottom:8}}>Copy strategies. Stay in control.</div>
+                <p style={{color:"var(--text2)",fontSize:13}}>Mirror admin-managed strategies proportionally into your own account — every trade you see here is real, not simulated.</p>
+              </div>
+
+              {copierLoading?<div className="gcard skeleton" style={{minHeight:120,marginBottom:18}}/>:<>
+
+              {/* Available strategies not yet connected to */}
+              {strategies.filter(s=>!myCopiers.some(c=>c.strategyId===s.id)).length>0&&(
+                <div className="gcard" style={{marginBottom:18}}>
+                  <div style={{fontWeight:800,marginBottom:14}}>Available strategies</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:14}}>
+                    {strategies.filter(s=>!myCopiers.some(c=>c.strategyId===s.id)).map(s=>(
+                      <div key={s.id} className="gcard" style={{padding:16}}>
+                        <b>{s.name}</b>
+                        <p style={{fontSize:12,color:"var(--text2)",lineHeight:1.5,margin:"6px 0 12px"}}>{s.description}</p>
+                        <button className="btn btn-primary btn-sm" style={{width:"100%"}} onClick={()=>handleConnectStrategy(s.id,s.name)}>Connect — ${s.fee.toLocaleString()}</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {strategies.length===0&&myCopiers.length===0&&(
+                <div className="gcard" style={{marginBottom:18,textAlign:"center",color:"var(--text3)",fontSize:13}}>No strategies available yet — check back soon.</div>
+              )}
+
+              {/* Each connected strategy gets its own real balance + trade history */}
+              {myCopiers.map(c=>(
+                <div key={c.portfolioId} style={{marginBottom:18}}>
+                  <div className="stats" style={{marginBottom:12}}>
+                    {[
+                      ["Balance",cur(c.totalValue),"var(--text)"],
+                      ["Contributed",cur(c.contributed),"var(--text)"],
+                      [c.unrealizedPnl>=0?"Unrealized gain":"Unrealized loss",`${c.unrealizedPnl>=0?"+":""}${cur(c.unrealizedPnl)}`,c.unrealizedPnl>=0?"var(--green)":"var(--red)"],
+                      ["Open positions",String(c.holdings.length),"var(--text)"],
+                    ].map((x,i)=><div className="stat" key={i}><div className="stat-label">{c.strategyName} — {x[0]}</div><div className="stat-value" style={{fontSize:21,color:x[2]}}>{x[1]}</div></div>)}
+                  </div>
+                  <div className="gcard" style={{padding:0,overflow:"hidden"}}>
+                    <div style={{padding:"18px 22px",fontWeight:800}}>{c.strategyName} — mirrored trades</div>
+                    <div className="txwrap"><table className="txt"><thead><tr><th>Instrument</th><th>Direction</th><th>Amount</th><th>Value</th><th>Opened</th></tr></thead><tbody>
+                      {c.trades.length===0
+                        ?<tr><td colSpan={5} style={{color:"var(--text3)",textAlign:"center",padding:20}}>No trades mirrored yet — trades appear here once the strategy makes a move.</td></tr>
+                        :c.trades.map((t,i)=>(
+                          <tr key={i}>
+                            <td>{t.symbol}</td>
+                            <td style={{color:t.side==="buy"?"var(--green)":"var(--red)",fontWeight:700,textTransform:"capitalize"}}>{t.side}</td>
+                            <td>{t.amount}</td>
+                            <td>{cur(t.value)}</td>
+                            <td>{new Date(t.createdAt).toLocaleString()}</td>
+                          </tr>
+                        ))}
+                    </tbody></table></div>
+                  </div>
+                </div>
+              ))}
+              </>}
+            </>}
+            {page==="managed"&&<><div style={{display:"grid",gridTemplateColumns:tab?"1fr":"1.2fr .8fr",gap:18}}><div className="gcard" style={{padding:30,background:"linear-gradient(135deg,#10212b,#13243e)"}}><div style={{fontSize:11,color:"#67e8f9",fontWeight:800,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>Private account management</div><div style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:30,fontWeight:900,lineHeight:1.2}}>Your ambitions, professionally managed.</div><p style={{color:"#bfdbfe",fontSize:14,lineHeight:1.6,marginTop:12}}>A tailored allocation across traditional, alternative and digital assets.</p><button className="btn btn-primary" style={{marginTop:20}} onClick={()=>toast2("Consultation request sent.")}>Request a consultation</button></div><div className="gcard">
+              <div className="stitle">Account snapshot</div>
+              {managedLoading?<div style={{padding:"20px 0",color:"var(--text3)",fontSize:13}}>Loading…</div>
+              :myManaged.length===0?<div style={{padding:"20px 0",color:"var(--text3)",fontSize:13}}>No managed account yet — request a consultation to get started.</div>
+              :myManaged.map(m=>[
+                ["Managed value",cur(m.totalValue)],
+                ["Cash",cur(m.cashBalance)],
+                ["Allocation",`${m.allocation.length} asset${m.allocation.length===1?"":"s"}`],
+              ].map(x=><div key={x[0]} style={{display:"flex",justifyContent:"space-between",padding:"12px 0",borderBottom:"1px solid var(--border)",fontSize:13}}><span style={{color:"var(--text3)"}}>{x[0]}</span><b style={{color:"var(--text)"}}>{x[1]}</b></div>))}
+            </div></div>
+            {myManaged.length>0&&myManaged.map(m=>(
+              <React.Fragment key={m.portfolioId}>
+                <div className="stitle" style={{marginTop:24}}>Managed portfolio allocation</div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:12}}>
+                  {m.allocation.map((a,i)=>(
+                    <div className="gcard" key={a.symbol}>
+                      <div style={{fontSize:12,color:"var(--text3)"}}>{a.symbol}</div>
+                      <div style={{fontSize:24,fontWeight:900,margin:"9px 0"}}>{a.pct.toFixed(1)}%</div>
+                      <div style={{fontSize:11,color:"var(--text3)",marginBottom:8}}>{cur(a.value)}</div>
+                      <div style={{height:5,borderRadius:5,background:"var(--surface)"}}><div style={{height:"100%",width:`${a.pct}%`,background:["#818cf8","#22c55e","#f59e0b","#a78bfa","#38bdf8","#f472b6"][i%6],borderRadius:5}}/></div>
+                    </div>
+                  ))}
+                </div>
+              </React.Fragment>
+            ))}
+            <div className="gcard" style={{marginTop:18}}><div className="stitle">VIP & Inner Circle</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))",gap:14}}>{[["VIP Monthly","$149 / month"],["VIP Lifetime","$1,499 once"],["Inner Circle","By invitation"]].map(x=><div key={x[0]} style={{border:"1px solid var(--border)",borderRadius:14,padding:16}}><b>{x[0]}</b><div style={{fontSize:18,fontWeight:900,margin:"10px 0"}}>{x[1]}</div><p style={{fontSize:12,color:"var(--text2)"}}>Premium signals, market briefings and priority support.</p><button className="btn btn-ghost btn-sm" style={{marginTop:12}} onClick={()=>toast2(`${x[0]} interest registered.`)}>Register interest</button></div>)}</div></div></>}
           </div>
         )}
 
@@ -1448,7 +2059,7 @@ export default function App(){
                       <td>${(tx.price||0).toLocaleString()}</td>
                       <td style={{color:tx.type==="buy"||tx.type==="withdraw"?"var(--red)":"var(--green)",fontWeight:700}}>{tx.type==="buy"||tx.type==="withdraw"?"-":"+"}${(tx.total||0).toLocaleString()}</td>
                       <td>{(tx.created_at||"").slice(0,10)}</td>
-                      <td><span className="badge badge-green">✓ {tx.status}</span></td>
+                      <td><span className={`badge ${tx.status==="failed"?"badge-red":tx.status==="pending"?"badge-gray":"badge-green"}`}>{tx.status==="failed"?"✕":tx.status==="pending"?"⏳":"✓"} {tx.status}</span></td>
                     </tr>
                   ))}
                 </tbody>
@@ -1491,6 +2102,7 @@ export default function App(){
                     <span className="badge badge-green">✓ Verified</span>
                     {kycStatus.phone==="verified"&&<span className="badge badge-green"> Phone</span>}
                     {kycStatus.id==="verified"&&<span className="badge badge-green"> ID</span>}
+                    {tierInfo&&tierInfo.tier&&<span className={`badge ${tierInfo.tier==="platinum"?"badge-vip":""}`} style={tierInfo.tier==="platinum"?undefined:{background:TIER_COLORS[tierInfo.tier]?.bg,color:TIER_COLORS[tierInfo.tier]?.fg,border:`1px solid ${TIER_COLORS[tierInfo.tier]?.fg}33`}}>{TIER_COLORS[tierInfo.tier]?.icon} {tierInfo.tierName}{tierInfo.tier==="platinum"?" · VIP":""}</span>}
                   </div>
                 </div>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -1499,6 +2111,28 @@ export default function App(){
                 </div>
               </div>
             </div>
+
+            {tierInfo&&<div className="gcard" style={{marginBottom:18}}>
+              <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14}}>
+                <span style={{fontSize:28}}>{tierInfo.tier?TIER_COLORS[tierInfo.tier]?.icon:"🔓"}</span>
+                <div>
+                  <div style={{fontSize:16,fontWeight:800,color:tierInfo.tier?TIER_COLORS[tierInfo.tier]?.fg:"var(--text)"}}>{tierInfo.tier?`${tierInfo.tierName} member`:"Not yet ranked"}</div>
+                  <div style={{fontSize:12,color:"var(--text3)"}}>Based on ${tierInfo.lifetimeDeposits.toLocaleString()} in lifetime deposits</div>
+                </div>
+              </div>
+              {tierInfo.next?<>
+                <div style={{height:8,borderRadius:8,background:"var(--surface)",marginBottom:8,overflow:"hidden"}}>
+                  <div style={{height:"100%",width:`${Math.min(100,(tierInfo.lifetimeDeposits/tierInfo.next.min)*100)}%`,background:tierInfo.tier?TIER_COLORS[tierInfo.tier]?.fg:TIER_COLORS.bronze.fg,borderRadius:8}}/>
+                </div>
+                <div style={{fontSize:12,color:"var(--text3)"}}>${tierInfo.next.remaining.toLocaleString()} more in deposits to reach <b style={{color:TIER_COLORS[tierInfo.next.tier]?.fg}}>{tierInfo.next.tierName}</b></div>
+              </>:<div style={{fontSize:12,color:"var(--text3)"}}>You've reached the highest tier.</div>}
+              {tierInfo.tier==="platinum"&&<div style={{marginTop:14,paddingTop:14,borderTop:"1px solid var(--border)",fontSize:12,color:"var(--text2)",lineHeight:1.6}}>
+                ✨ <b>VIP benefits active:</b> zero deposit/withdrawal fees, and a 12% bonus on every future deposit.
+              </div>}
+              {tierInfo.lockedBonus>0&&<div style={{marginTop:14,paddingTop:14,borderTop:"1px solid var(--border)"}}>
+                <div style={{fontSize:12,color:"var(--text2)"}}>🔒 <b>{cur(tierInfo.lockedBonus)}</b> in bonus funds — usable for trading now, available to withdraw on {new Date(tierInfo.bonusGrants[tierInfo.bonusGrants.length-1]?.unlock_at).toLocaleDateString()}</div>
+              </div>}
+            </div>}
 
             <div className="settings-grid">
               {/* Security */}
@@ -1642,9 +2276,13 @@ export default function App(){
                 <div><div className="setting-label">Trade Alerts</div><div className="setting-desc">Notify when a buy/sell order is completed</div></div>
                 <Toggle on={true} onToggle={()=>toast2("Trade alerts always on for security","🔒")}/>
               </div>
-              <div className="setting-row" style={{borderBottom:isAdmin?undefined:"none"}}>
+              <div className="setting-row">
                 <div><div className="setting-label">Price Alerts</div><div className="setting-desc">Get notified on major price movements</div></div>
                 <Toggle on={false} onToggle={()=>toast2("Price alerts coming soon","📈")}/>
+              </div>
+              <div className="setting-row" style={{borderBottom:isAdmin?undefined:"none"}}>
+                <div><div className="setting-label">Live Balance Updates</div><div className="setting-desc">See your balance update on this device the moment a deposit is confirmed, even if you're already on the page</div></div>
+                <Toggle label="Toggle live balance updates" on={!!balancePushSubscribed} onToggle={()=>balancePushBusy?null:(balancePushSubscribed?disableBalancePush():enableBalancePush())}/>
               </div>
               {isAdmin&&<div className="setting-row" style={{borderBottom:"none"}}>
                 <div><div className="setting-label">Admin Device Alerts</div><div className="setting-desc">Push notification on this device for new pending requests</div></div>
@@ -1727,7 +2365,7 @@ export default function App(){
             </div>
           ))}
           <div className="bnav-fab" onClick={()=>nav("trade")} onKeyDown={e=>onActivate(e,()=>nav("trade"))} role="button" tabIndex={0} aria-label="Quick trade">+</div>
-          {NAV.slice(2).map(n=>(
+          {NAV.filter(n=>n.id==="portfolio"||n.id==="history").map(n=>(
             <div key={n.id} className={`bni ${page===n.id?"active":""}`} onClick={()=>nav(n.id)} onKeyDown={e=>onActivate(e,()=>nav(n.id))} role="button" tabIndex={0} aria-current={page===n.id?"page":undefined}>
               <span className="bni-icon"><AppIcon name={n.icon} size={19}/></span><span>{n.short}</span>
             </div>

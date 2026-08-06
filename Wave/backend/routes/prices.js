@@ -70,6 +70,7 @@ router.get("/", async (req, res) => {
         price:     r.price,
         change24h: parseFloat((r.change_24h || 0).toFixed(2)),
         updatedAt: r.updated_at,
+        assetType: r.asset_type || "crypto",
       };
     });
     res.json(prices);
@@ -89,6 +90,19 @@ router.get("/:symbol", async (req, res) => {
       change24h: row.change_24h,
       updatedAt: row.updated_at,
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get("/:symbol/history", async (req, res) => {
+  try {
+    const symbol = req.params.symbol.toUpperCase();
+    const points = await queryAll(
+      "SELECT price, change_24h, recorded_at FROM price_history WHERE symbol = ? ORDER BY recorded_at ASC",
+      [symbol]
+    );
+    res.json({ symbol, points });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

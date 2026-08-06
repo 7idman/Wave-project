@@ -6,9 +6,13 @@
 const router = require("express").Router();
 const { queryOne, execute } = require("../db");
 const { createAdminRequest } = require("../services/adminRequests");
+const { generateReferenceId } = require("../utils/referenceId");
+const { applyDepositBonus, getLockedBonusTotal } = require("../services/promotions");
+const { getUserTier } = require("../services/tier");
 
 const FEE_RATE     = 0.001; // 0.1% buy/sell
 const WITHDRAW_FEE = 0.005; // 0.5% withdrawal
+const MIN_DEPOSIT = 100; // matches the Bronze tier threshold
 
 router.post("/", async (req, res) => {
   try {
@@ -21,6 +25,9 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ error: "amount must be a positive number" });
 
     const qty = parseFloat(amount);
+
+    if (type === "deposit" && qty < MIN_DEPOSIT)
+      return res.status(400).json({ error: `Minimum deposit is $${MIN_DEPOSIT}` });
 
     // A plan activation reduces available cash, but it is not a withdrawal.
     // Keep it in a dedicated activity log so its notification is accurate.
@@ -40,18 +47,34 @@ router.post("/", async (req, res) => {
     // No race condition risk here — adding money can never overdraw an account,
     // so a simple update is safe as-is.
     if (type === "deposit") {
+      const referenceId = generateReferenceId("DEP");
       await execute(
         "UPDATE users SET cash_balance = cash_balance + ?, updated_at = datetime('now') WHERE id = ?",
         [qty, userId]
       );
-      await execute(
-        "INSERT INTO transactions (user_id, type, symbol, amount, price, fee, total, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'completed')",
-        [userId, "deposit", "USD", qty, 1, 0, qty]
+      const inserted = await execute(
+        "INSERT INTO transactions (user_id, type, symbol, amount, price, fee, total, status, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', ?)",
+        [userId, "deposit", "USD", qty, 1, 0, qty, referenceId]
       );
+
+      // Ranking-tier deposit bonus, if an active promotion applies. Failure
+      // here must never fail the deposit itself — the deposit already
+      // succeeded above; a bonus-check error just means no bonus this time.
+      let bonus = null;
+      try {
+        bonus = await applyDepositBonus(userId, qty, inserted.lastInsertRowid);
+      } catch (bonusErr) {
+        console.error("Deposit bonus check failed (deposit itself still succeeded):", bonusErr.message);
+      }
+
       const user = await queryOne("SELECT cash_balance FROM users WHERE id = ?", [userId]);
       return res.status(201).json({
-        message: `Deposited $${qty.toLocaleString()}`,
+        message: bonus
+          ? `Deposited $${qty.toLocaleString()} — plus a $${bonus.bonusAmount.toLocaleString()} ${bonus.promotionName} bonus (unlocks ${bonus.unlockAt.slice(0,10)})`
+          : `Deposited $${qty.toLocaleString()}`,
         cashBalance: user.cash_balance,
+        referenceId,
+        bonus,
       });
     }
 
@@ -61,26 +84,49 @@ router.post("/", async (req, res) => {
     // only one can succeed — the second will see cash_balance already reduced
     // and its WHERE condition will fail, so rowsAffected comes back as 0.
     if (type === "withdraw") {
-      const fee   = parseFloat((qty * WITHDRAW_FEE).toFixed(2));
+      const { tier } = await getUserTier(userId);
+      const isVip = tier === "platinum";
+      const fee   = isVip ? 0 : parseFloat((qty * WITHDRAW_FEE).toFixed(2));
       const total = parseFloat((qty + fee).toFixed(2));
+      const referenceId = generateReferenceId("WD");
 
+      // The locked-bonus check is folded into this single UPDATE's WHERE
+      // clause (the subquery), not done as a separate SELECT beforehand.
+      // Doing it as a separate pre-check would leave a gap where two
+      // simultaneous withdrawals could each pass the check individually but
+      // together dip into locked bonus money — same class of race this
+      // codebase already guards against with cash_balance >= ?.
       const result = await execute(
-        "UPDATE users SET cash_balance = cash_balance - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance >= ?",
-        [total, userId, total]
+        `UPDATE users SET cash_balance = cash_balance - ?, updated_at = datetime('now')
+         WHERE id = ?
+           AND cash_balance >= ?
+           AND (cash_balance - (SELECT COALESCE(SUM(amount),0) FROM bonus_grants WHERE user_id = ? AND unlock_at > datetime('now'))) >= ?`,
+        [total, userId, total, userId, total]
       );
 
       if (result.rowsAffected === 0) {
-        return res.status(400).json({ error: "Insufficient balance" });
+        const lockedBonus = await getLockedBonusTotal(userId);
+        await execute(
+          "INSERT INTO transactions (user_id, type, symbol, amount, price, fee, total, status, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'failed', ?)",
+          [userId, "withdraw", "USD", qty, 1, fee, total, referenceId]
+        );
+        return res.status(400).json({
+          error: lockedBonus > 0
+            ? `Insufficient available balance — $${lockedBonus.toLocaleString()} is locked bonus funds not yet available to withdraw`
+            : "Insufficient balance",
+          referenceId,
+        });
       }
 
       await execute(
-        "INSERT INTO transactions (user_id, type, symbol, amount, price, fee, total, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'completed')",
-        [userId, "withdraw", "USD", qty, 1, fee, total]
+        "INSERT INTO transactions (user_id, type, symbol, amount, price, fee, total, status, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', ?)",
+        [userId, "withdraw", "USD", qty, 1, fee, total, referenceId]
       );
       const updated = await queryOne("SELECT cash_balance FROM users WHERE id = ?", [userId]);
       return res.status(201).json({
         message: `Withdrawn $${qty.toLocaleString()}`,
         cashBalance: updated.cash_balance,
+        referenceId,
       });
     }
 
