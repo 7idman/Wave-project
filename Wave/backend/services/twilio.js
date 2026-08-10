@@ -50,13 +50,14 @@ async function lookupLineType(phoneE164) {
   }
 }
 
-async function sendVerificationCode(phoneE164) {
+async function sendVerificationCode(phoneE164, channel = "sms") {
   const client = getClient();
   const serviceSid = process.env.TWILIO_VERIFY_SERVICE_SID;
   if (!client || !serviceSid) return { success: false, reason: "twilio_not_configured" };
+  const verifyChannel = channel === "call" || channel === "voice" ? "call" : "sms";
 
   try {
-    const verification = await client.verify.v2.services(serviceSid).verifications.create({ to: phoneE164, channel: "sms" });
+    const verification = await client.verify.v2.services(serviceSid).verifications.create({ to: phoneE164, channel: verifyChannel });
     return { success: true, status: verification.status };
   } catch (err) {
     console.error("Twilio Verify send failed:", err.message);

@@ -1,10 +1,7 @@
 /**
  * components/Turnstile.tsx
- * Thin wrapper around Cloudflare's Turnstile script. Renders a widget,
- * calls onVerify(token) when the visitor passes the challenge. The token
- * itself proves nothing on its own — the backend re-verifies it against
- * Cloudflare on every submit. VITE_TURNSTILE_SITE_KEY is the PUBLIC site
- * key; the secret key lives only in the backend's env vars, never here.
+ * Thin wrapper around Cloudflare's Turnstile script. The frontend receives a
+ * token, then the backend verifies it with Cloudflare before trusting it.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -36,10 +33,11 @@ function loadTurnstileScript(): Promise<void> {
   return window.__turnstileScriptLoading;
 }
 
-export function Turnstile({ onVerify, onError }: { onVerify: (token: string) => void; onError?: () => void }) {
+export function Turnstile({ onVerify, onError, onLoad }: { onVerify: (token: string) => void; onError?: () => void; onLoad?: () => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const widgetIdRef   = useRef<string | null>(null);
+  const widgetIdRef = useRef<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -55,6 +53,8 @@ export function Turnstile({ onVerify, onError }: { onVerify: (token: string) => 
           "error-callback": () => onError?.(),
           "expired-callback": () => onError?.(),
         });
+        setReady(true);
+        onLoad?.();
       })
       .catch(() => { if (!cancelled) setLoadFailed(true); });
 
@@ -65,6 +65,14 @@ export function Turnstile({ onVerify, onError }: { onVerify: (token: string) => 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (loadFailed) return <div style={{fontSize:12,color:"var(--red)"}}>Verification widget failed to load — please refresh the page.</div>;
-  return <div ref={containerRef} style={{marginBottom:16}}/>;
+  if (loadFailed) {
+    return <div className="turnstile-frame" style={{fontSize:12,color:"var(--red)"}}>Verification widget failed to load - please refresh the page.</div>;
+  }
+
+  return (
+    <div className="turnstile-frame">
+      {!ready&&<div className="turnstile-skeleton"><span className="btn-spinner"/> Loading verification...</div>}
+      <div ref={containerRef} style={{minHeight:65,visibility:ready?"visible":"hidden"}}/>
+    </div>
+  );
 }

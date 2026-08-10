@@ -503,3 +503,258 @@
   }
 
 .admin-grid{display:grid;grid-template-columns:1.25fr .75fr;gap:16px;align-items:start}.admin-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}.admin-table{width:100%;border-collapse:collapse}.admin-table th{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.9px;text-align:left;padding:0 10px 10px}.admin-table td{border-top:1px solid var(--border);padding:12px 10px;font-size:13px;color:var(--text2);vertical-align:top}.admin-card-list{display:flex;flex-direction:column;gap:10px}.admin-form-grid{display:grid;grid-template-columns:1fr 160px 48px;gap:10px}.admin-perms{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}.admin-perm{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2);padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--surface)}.admin-plus{width:42px;height:42px;border-radius:50%;font-size:22px;padding:0}.admin-note{color:var(--text3);font-size:12px;line-height:1.5}.admin-banner{border:1px solid rgba(129,140,248,.25);background:rgba(99,102,241,.1);border-radius:var(--r);padding:16px;margin-bottom:16px}.admin-denied{max-width:560px;margin:80px auto;text-align:center}.admin-status{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px}.admin-status.pending{background:rgba(245,158,11,.12);color:#f59e0b}.admin-status.approved,.admin-status.active{background:rgba(16,185,129,.12);color:#10b981}.admin-status.rejected,.admin-status.banned{background:rgba(239,68,68,.12);color:#ef4444}@media(max-width:900px){.admin-grid,.admin-form-grid{grid-template-columns:1fr}.admin-perms{grid-template-columns:1fr}.admin-table{min-width:720px}.admin-table-wrap{overflow-x:auto}}
+
+/* Approved Wave visual overhaul. Keep this final in the cascade: it creates
+   one shared fintech system for dashboard, auth, admin, and mobile surfaces. */
+:root{
+  --bg:#070A0F;
+  --bg2:#10141D;
+  --bg3:#171D2A;
+  --surface:rgba(255,255,255,.045);
+  --surface2:rgba(255,255,255,.075);
+  --border:rgba(226,232,240,.085);
+  --border2:rgba(226,232,240,.14);
+  --text:#F7F8FB;
+  --text2:#B2B8C7;
+  --text3:#747D92;
+  --indigo:#5B6CFF;
+  --indigo2:#93A4FF;
+  --green:#14C88A;
+  --red:#F05252;
+  --yellow:#F6B642;
+  --purple:#8B7CF6;
+  --r:14px;
+  --r2:10px;
+  --wave-panel:rgba(16,20,29,.86);
+  --wave-panel-strong:rgba(19,24,35,.96);
+  --wave-line:rgba(226,232,240,.1);
+  --wave-line-strong:rgba(147,164,255,.28);
+  --wave-shadow:0 18px 52px rgba(0,0,0,.26);
+  --wave-shadow-soft:0 10px 28px rgba(0,0,0,.18);
+}
+.theme-light{
+  --bg:#F5F7FB;
+  --bg2:#FFFFFF;
+  --bg3:#EEF2F7;
+  --surface:rgba(15,23,42,.035);
+  --surface2:rgba(15,23,42,.06);
+  --border:rgba(15,23,42,.08);
+  --border2:rgba(15,23,42,.13);
+  --text:#0B1120;
+  --text2:#445066;
+  --text3:#748095;
+  --indigo:#3346D3;
+  --indigo2:#5264F6;
+}
+.app *{letter-spacing:0!important;}
+.app{font-feature-settings:"tnum" 1,"cv02" 1,"cv03" 1;}
+.dashboard-shell{
+  background:
+    linear-gradient(180deg,rgba(11,17,28,.96),rgba(7,10,15,1) 42%),
+    radial-gradient(780px 420px at 82% -14%,rgba(55,75,255,.18),transparent 62%),
+    radial-gradient(620px 360px at 4% 76%,rgba(20,200,138,.08),transparent 67%),
+    #070A0F;
+}
+.dashboard-shell::before{opacity:.11;background-size:12px 12px;}
+.dashboard-shell.theme-light{
+  background:
+    linear-gradient(180deg,#F8FAFC,#EEF2F7),
+    radial-gradient(760px 420px at 80% -12%,rgba(79,97,255,.11),transparent 63%);
+}
+.dashboard-shell .gcard,
+.dashboard-shell .stat,
+.dashboard-shell .hi,
+.dashboard-shell .tcrd{
+  border:1px solid var(--wave-line);
+  border-radius:var(--r);
+  background:linear-gradient(145deg,rgba(23,29,42,.9),rgba(11,15,23,.96));
+  box-shadow:var(--wave-shadow-soft);
+}
+.dashboard-shell.theme-light .gcard,
+.dashboard-shell.theme-light .stat,
+.dashboard-shell.theme-light .hi,
+.dashboard-shell.theme-light .tcrd{
+  background:#fff!important;
+  border-color:rgba(15,23,42,.08);
+  box-shadow:0 12px 32px rgba(15,23,42,.07);
+}
+.dashboard-shell .product-sidebar{
+  border-radius:18px;
+  background:linear-gradient(160deg,rgba(17,23,35,.97),rgba(8,11,18,.98));
+  box-shadow:0 24px 70px rgba(0,0,0,.34),inset 0 1px rgba(255,255,255,.05);
+}
+.dashboard-shell .sitem{border-radius:10px;min-height:42px;font-size:13px;}
+.dashboard-shell .sitem.active{
+  background:linear-gradient(95deg,rgba(91,108,255,.26),rgba(20,200,138,.08));
+  border-color:rgba(147,164,255,.22);
+}
+.dashboard-shell .product-main{padding-top:32px;}
+.dashboard-shell .product-topbar{
+  min-height:74px;
+  border-radius:16px;
+  margin-bottom:24px;
+  background:rgba(13,17,26,.78);
+  border-color:var(--wave-line);
+  box-shadow:var(--wave-shadow-soft);
+}
+.dashboard-shell.theme-light .product-topbar{background:rgba(255,255,255,.86);}
+.dashboard-shell .ttl{font-size:28px;line-height:1.14;}
+.dashboard-shell .tdate{font-size:12px;color:var(--text3);}
+.dashboard-shell .btn{border-radius:10px;min-height:40px;}
+.dashboard-shell .btn-primary{
+  background:linear-gradient(135deg,#14C88A,#0EA371);
+  box-shadow:0 12px 28px rgba(20,200,138,.25);
+}
+.dashboard-shell .btn-primary:hover{box-shadow:0 16px 34px rgba(20,200,138,.34);}
+.dashboard-shell .btn-ghost{background:rgba(255,255,255,.05);border-color:var(--wave-line);}
+.dashboard-shell .dashboard-stats{
+  grid-template-columns:minmax(250px,1.35fr) repeat(3,minmax(168px,1fr));
+  gap:16px;
+}
+.dashboard-shell .dashboard-stats .stat{min-height:138px;padding:22px;}
+.dashboard-shell .dashboard-stats .stat-value{font-size:27px;line-height:1.08;}
+.dashboard-shell .dashboard-stats .stat:first-child .stat-value{font-size:36px;}
+.dashboard-shell .stat-label,
+.dashboard-shell .tlab,
+.dashboard-shell .admin-table th{
+  font-size:11px;
+  color:var(--text3);
+}
+.dashboard-shell .dashboard-actions{
+  border-radius:14px;
+  background:rgba(255,255,255,.035);
+  border:1px solid var(--wave-line);
+}
+.dashboard-shell .dashboard-market-layout{grid-template-columns:minmax(0,1.55fr) minmax(300px,.75fr);gap:18px;}
+.dashboard-shell .dashboard-market-chart,
+.dashboard-shell .dashboard-market-list{border-radius:16px;}
+.dashboard-shell .mitem,
+.dashboard-shell .setting-row,
+.dashboard-shell .txc{
+  border-radius:10px;
+}
+.dashboard-shell .mitem{min-height:60px;background:rgba(255,255,255,.038);}
+.dashboard-shell .hgrid{gap:16px;}
+.dashboard-shell .hi{min-height:164px;}
+.dashboard-shell .tgrid{grid-template-columns:minmax(300px,.82fr) minmax(0,1.18fr);gap:18px;}
+.dashboard-shell .product-stocks-page .tgrid{grid-template-columns:minmax(0,1.18fr) minmax(300px,.72fr);}
+.dashboard-shell .product-transactions-page>div:first-child+.gcard,
+.dashboard-shell .history-ledger-card,
+.dashboard-shell .product-page>.gcard{border-radius:16px;}
+.dashboard-shell .inp,
+.dashboard-shell .sel,
+.dashboard-shell .tinp{
+  min-height:46px;
+  border-radius:10px!important;
+  background:rgba(6,10,18,.58);
+}
+.dashboard-shell.theme-light .inp,
+.dashboard-shell.theme-light .sel,
+.dashboard-shell.theme-light .tinp{background:#F8FAFC;}
+.dashboard-shell .chip{
+  border-radius:9px;
+  min-height:31px;
+}
+.dashboard-shell .badge,
+.dashboard-shell .tbadge,
+.dashboard-shell .dbadge,
+.admin-status{border-radius:8px;}
+.landing-main,
+.landing-nav,
+.landing-footer{width:min(1160px,calc(100% - 36px));}
+.landing-auth-card .inp{
+  min-height:46px;
+  border-radius:10px!important;
+}
+.landing-auth-tabs,
+.landing-auth-tab,
+.landing-social .btn{border-radius:10px!important;}
+.landing-auth-card .btn-primary{
+  background:linear-gradient(135deg,#14C88A,#0EA371);
+  box-shadow:0 12px 28px rgba(20,200,138,.26);
+}
+.admin-tabs{gap:10px;margin:0 0 18px;}
+.admin-banner{
+  border-radius:12px;
+  background:linear-gradient(135deg,rgba(91,108,255,.14),rgba(20,200,138,.06));
+  border-color:rgba(147,164,255,.24);
+}
+.admin-table{border-spacing:0 8px;border-collapse:separate;}
+.admin-table th{padding:0 12px 4px;}
+.admin-table td{
+  padding:14px 12px;
+  border-top:1px solid var(--wave-line);
+  border-bottom:1px solid var(--wave-line);
+  background:rgba(255,255,255,.025);
+}
+.admin-table td:first-child{border-left:1px solid var(--wave-line);border-radius:10px 0 0 10px;}
+.admin-table td:last-child{border-right:1px solid var(--wave-line);border-radius:0 10px 10px 0;}
+.theme-light .admin-table td{background:#fff;border-color:rgba(15,23,42,.08);}
+@media(max-width:1100px){
+  .dashboard-shell .dashboard-stats{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .dashboard-shell .dashboard-stats .stat:first-child{grid-column:span 2;}
+  .dashboard-shell .dashboard-market-layout,
+  .dashboard-shell .tgrid,
+  .dashboard-shell .product-stocks-page .tgrid{grid-template-columns:1fr;}
+}
+@media(max-width:640px){
+  .landing-main,.landing-nav,.landing-footer{width:min(100% - 28px,520px);}
+  .landing-access-inner{border-radius:18px;}
+  .landing-access .gcard.landing-auth-card{padding:20px!important;}
+  .landing-social-row{grid-template-columns:1fr;}
+  .dashboard-shell .product-main{padding:0 16px calc(124px + env(safe-area-inset-bottom,16px));}
+  .dashboard-shell .product-mobile-topbar{
+    min-height:64px;
+    background:rgba(7,10,15,.9);
+    border-bottom:1px solid var(--wave-line);
+  }
+  .dashboard-shell.theme-light .product-mobile-topbar{background:rgba(255,255,255,.92);}
+  .product-mobile-page-intro,
+  .product-mobile-greeting>div:first-child{font-size:22px!important;line-height:1.18;}
+  .dashboard-shell .dashboard-page,
+  .dashboard-shell .product-page{gap:18px;}
+  .dashboard-shell .dashboard-ticker{margin-top:0;}
+  .dashboard-shell .dashboard-stats,
+  .dashboard-shell .product-portfolio-page .portfolio-stats{
+    grid-template-columns:1fr;
+    gap:14px;
+  }
+  .dashboard-shell .dashboard-stats .stat:first-child{grid-column:auto;}
+  .dashboard-shell .dashboard-stats .stat,
+  .dashboard-shell .product-portfolio-page .stat{
+    min-height:128px;
+    padding:20px;
+  }
+  .dashboard-shell .dashboard-stats .stat:first-child .stat-value,
+  .dashboard-shell .dashboard-stats .stat-value,
+  .dashboard-shell .product-portfolio-page .stat-value{
+    font-size:29px;
+    white-space:nowrap;
+  }
+  .dashboard-shell .dashboard-actions{grid-template-columns:1fr 1fr;}
+  .dashboard-shell .dashboard-actions .btn:first-of-type{grid-column:span 2;}
+  .dashboard-shell .dashboard-market-layout,
+  .dashboard-shell .dashboard-bottom-grid,
+  .dashboard-shell .tgrid,
+  .dashboard-shell .product-stocks-page .tgrid{grid-template-columns:1fr;}
+  .dashboard-shell .dashboard-holdings-grid,
+  .dashboard-shell .product-portfolio-page .hgrid{grid-template-columns:1fr;}
+  .dashboard-shell .gcard,
+  .dashboard-shell .stat,
+  .dashboard-shell .hi,
+  .dashboard-shell .tcrd{border-radius:14px;}
+  .dashboard-shell .txt{min-width:680px;}
+  .dashboard-shell .txwrap{overflow-x:auto;}
+  .dashboard-shell .bnav{
+    left:12px;
+    right:12px;
+    bottom:calc(10px + env(safe-area-inset-bottom,0px));
+    border-radius:18px;
+  }
+}
+@media(max-width:380px){
+  .dashboard-shell .product-mobile-topbar .mchip{max-width:96px;}
+  .dashboard-shell .dashboard-stats .stat-value,
+  .dashboard-shell .product-portfolio-page .stat-value{font-size:27px;}
+  .dashboard-shell .bni span:last-child{font-size:8px;}
+}

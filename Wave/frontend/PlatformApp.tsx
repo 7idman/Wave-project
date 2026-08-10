@@ -20,6 +20,22 @@ const fontLink = document.createElement("link");
 fontLink.rel = "stylesheet";
 fontLink.href = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800;900&display=swap";
 document.head.appendChild(fontLink);
+const PHONE_COUNTRIES=[
+  {code:"US",name:"United States",dial:"+1"},{code:"CA",name:"Canada",dial:"+1"},{code:"GB",name:"United Kingdom",dial:"+44"},
+  {code:"NG",name:"Nigeria",dial:"+234"},{code:"GH",name:"Ghana",dial:"+233"},{code:"KE",name:"Kenya",dial:"+254"},
+  {code:"ZA",name:"South Africa",dial:"+27"},{code:"UG",name:"Uganda",dial:"+256"},{code:"TZ",name:"Tanzania",dial:"+255"},
+  {code:"AE",name:"United Arab Emirates",dial:"+971"},{code:"SA",name:"Saudi Arabia",dial:"+966"},{code:"QA",name:"Qatar",dial:"+974"},
+  {code:"IN",name:"India",dial:"+91"},{code:"PK",name:"Pakistan",dial:"+92"},{code:"BD",name:"Bangladesh",dial:"+880"},
+  {code:"PH",name:"Philippines",dial:"+63"},{code:"SG",name:"Singapore",dial:"+65"},{code:"MY",name:"Malaysia",dial:"+60"},
+  {code:"ID",name:"Indonesia",dial:"+62"},{code:"CN",name:"China",dial:"+86"},{code:"JP",name:"Japan",dial:"+81"},
+  {code:"KR",name:"South Korea",dial:"+82"},{code:"AU",name:"Australia",dial:"+61"},{code:"NZ",name:"New Zealand",dial:"+64"},
+  {code:"DE",name:"Germany",dial:"+49"},{code:"FR",name:"France",dial:"+33"},{code:"IT",name:"Italy",dial:"+39"},
+  {code:"ES",name:"Spain",dial:"+34"},{code:"NL",name:"Netherlands",dial:"+31"},{code:"BE",name:"Belgium",dial:"+32"},
+  {code:"CH",name:"Switzerland",dial:"+41"},{code:"SE",name:"Sweden",dial:"+46"},{code:"NO",name:"Norway",dial:"+47"},
+  {code:"DK",name:"Denmark",dial:"+45"},{code:"IE",name:"Ireland",dial:"+353"},{code:"BR",name:"Brazil",dial:"+55"},
+  {code:"MX",name:"Mexico",dial:"+52"},{code:"AR",name:"Argentina",dial:"+54"},{code:"CL",name:"Chile",dial:"+56"},
+  {code:"CO",name:"Colombia",dial:"+57"},{code:"TR",name:"Turkey",dial:"+90"},{code:"EG",name:"Egypt",dial:"+20"},
+] as const;
 const keyToBytes=(key:string)=>{const pad="=".repeat((4-key.length%4)%4);const raw=atob((key+pad).replace(/-/g,"+").replace(/_/g,"/"));return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));};
 
 /* Count-up animation for stat values. Ramps from its previous value to `value`
@@ -95,12 +111,20 @@ export default function App(){
   const[landingRange,setLandingRange]=useState<LandingRange>("1M");
   const[landingHover,setLandingHover]=useState<number|null>(null);
   // Registration form fields
-  const[regName,setRegName]   =useState("");
+  const[regFirstName,setRegFirstName]=useState("");
+  const[regLastName,setRegLastName]=useState("");
   const[regEmail,setRegEmail] =useState("");
   const[regPw,setRegPw]       =useState("");
   const[regPw2,setRegPw2]     =useState("");
   const[regDob,setRegDob]     =useState("");
   const[regCountry,setRegCountry]=useState("");
+  const[regPhoneCountry,setRegPhoneCountry]=useState("US");
+  const[regPhone,setRegPhone]=useState("");
+  const[regPhoneCode,setRegPhoneCode]=useState("");
+  const[regPhoneChannel,setRegPhoneChannel]=useState<"sms"|"voice">("sms");
+  const[regPhoneToken,setRegPhoneToken]=useState("");
+  const[regVerifiedPhone,setRegVerifiedPhone]=useState("");
+  const[phoneVerifyBusy,setPhoneVerifyBusy]=useState(false);
   const[regAgree,setRegAgree] =useState(false);
   const[regReferralCode,setRegReferralCode]=useState("");
   const[regTurnstileToken,setRegTurnstileToken]=useState("");
@@ -195,6 +219,9 @@ export default function App(){
   };
   const onSidebarTouchEnd=()=>{ sidebarTouchRef.current=null; };
   const[loginErr,setLoginErr] =useState("");
+  const[authNotice,setAuthNotice]=useState("");
+  const[showResendVerification,setShowResendVerification]=useState(false);
+  const[resendBusy,setResendBusy]=useState(false);
   const[pending2FAToken,setPending2FAToken]=useState<string|null>(null);
   const[pendingRiskOtpToken,setPendingRiskOtpToken]=useState<string|null>(null);
   const[twoFACode,setTwoFACode]=useState("");
@@ -480,7 +507,7 @@ export default function App(){
     if(!email)return setLoginErr("Please enter your email.");
     if(!pw)   return setLoginErr("Please enter your password.");
     if(loginTurnstileRequired&&!loginTurnstileToken)return setLoginErr("Please complete the verification challenge.");
-    setLoginErr("");setLoading(true);
+    setLoginErr("");setAuthNotice("");setShowResendVerification(false);setLoading(true);
     try{
       const d=await api.post("/auth/login",{email,password:pw,turnstileToken:loginTurnstileToken||undefined});
       if(d.requires2FA){
@@ -509,6 +536,9 @@ export default function App(){
         setLoginTurnstileRequired(true);
         setLoginTurnstileToken("");setLoginTurnstileKey(k=>k+1);
         setLoginErr(loginTurnstileToken?"Verification failed — please try again.":"Please complete the verification challenge below, then sign in again.");
+      }else if(err.code==="EMAIL_VERIFICATION_REQUIRED"){
+        setShowResendVerification(true);
+        setLoginErr(err.message||"Please verify your email before signing in.");
       }else{
         setLoginErr(err.message||"Login failed. Check your email and password.");
       }
@@ -518,7 +548,7 @@ export default function App(){
   const doTwoFAVerify=async()=>{
     if(!pending2FAToken&&!pendingRiskOtpToken)return;
     if(!twoFACode.trim())return setLoginErr("Enter the 6-digit code.");
-    setLoginErr("");setLoading(true);
+    setLoginErr("");setAuthNotice("");setLoading(true);
     try{
       const endpoint=pending2FAToken?"/auth/2fa/verify":"/auth/risk-otp/verify";
       const tempToken=pending2FAToken||pendingRiskOtpToken;
