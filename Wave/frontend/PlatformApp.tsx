@@ -1587,7 +1587,7 @@ export default function App(){
         {/* Mobile: greeting on dashboard, spacing only on other pages */}
         {mob&&(
           page==="dashboard"?(
-            <div style={{padding:"18px 0 8px"}}>
+            <div className="product-mobile-greeting">
               <div style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontWeight:800,fontSize:20,color:"var(--text)"}}>
                 Good {new Date().getHours()<12?t("morning"):new Date().getHours()<17?t("afternoon"):t("evening")}, {user.name.split(" ")[0]} 👋
               </div>
@@ -1596,7 +1596,7 @@ export default function App(){
               </div>
             </div>
           ):(
-            <div style={{height:16}}/>
+            <div className="product-mobile-page-spacer"/>
           )
         )}
 
