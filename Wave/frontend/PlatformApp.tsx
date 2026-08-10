@@ -1072,12 +1072,12 @@ export default function App(){
       document.addEventListener("mousedown",h);
       return()=>document.removeEventListener("mousedown",h);
     },[]);
-    return <div ref={profileRef} style={{position:"relative"}}>
-      <div onClick={()=>setProfileOpen(o=>!o)} onKeyDown={e=>onActivate(e,()=>setProfileOpen(o=>!o))} style={{cursor:"pointer",borderRadius:"50%",border:"2px solid var(--border2)",lineHeight:0,transition:"border-color .15s"}} title={user?.name} role="button" tabIndex={0} aria-label="Profile menu" aria-expanded={profileOpen}>
+    return <div ref={profileRef} className="product-profile" style={{position:"relative"}}>
+      <div className="product-profile-trigger" onClick={()=>setProfileOpen(o=>!o)} onKeyDown={e=>onActivate(e,()=>setProfileOpen(o=>!o))} style={{cursor:"pointer",borderRadius:"50%",border:"2px solid var(--border2)",lineHeight:0,transition:"border-color .15s"}} title={user?.name} role="button" tabIndex={0} aria-label="Profile menu" aria-expanded={profileOpen}>
         <AvatarDisplay size={size} fontSize={fontSize}/>
       </div>
       {profileOpen&&(
-        <div style={{position:"absolute",top:"calc(100% + 10px)",right:0,minWidth:190,background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:14,padding:6,boxShadow:"0 16px 40px rgba(0,0,0,.35)",}}>
+        <div className="product-profile-popover" style={{position:"absolute",top:"calc(100% + 10px)",right:0,minWidth:190,background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:14,padding:6,boxShadow:"0 16px 40px rgba(0,0,0,.35)",}}>
           <div style={{padding:"8px 10px",marginBottom:2}}>
             <div style={{fontSize:12,fontWeight:700,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{user?.name}</div>
             <div style={{fontSize:10,color:"var(--text3)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{user?.email}</div>
@@ -1511,7 +1511,7 @@ export default function App(){
       </Modal>
 
       {/* Sidebar */}
-      <div ref={sidebarRef} tabIndex={0} role="navigation" aria-label="Sidebar navigation" className={`sidebar ${sbOpen?"open":""} ${sbCollapsed?"collapsed":""}`} onKeyDown={onSidebarKeyDown} onTouchStart={onSidebarTouchStart} onTouchMove={onSidebarTouchMove} onTouchEnd={onSidebarTouchEnd}>
+      <div ref={sidebarRef} tabIndex={0} role="navigation" aria-label="Sidebar navigation" className={`sidebar product-sidebar ${sbOpen?"open":""} ${sbCollapsed?"collapsed":""}`} onKeyDown={onSidebarKeyDown} onTouchStart={onSidebarTouchStart} onTouchMove={onSidebarTouchMove} onTouchEnd={onSidebarTouchEnd}>
         <div className="shead" style={{paddingBottom:22}}>
           <div style={{background:"linear-gradient(135deg,rgba(99,102,241,.25),rgba(139,92,246,.18))",borderRadius:11,padding:"7px 8px",border:"1px solid rgba(99,102,241,.3)",boxShadow:"0 0 16px rgba(99,102,241,.25)",flexShrink:0}}>
             <WaveLogo size={22}/>
@@ -1569,9 +1569,9 @@ export default function App(){
 
      
       {/* Main */}
-      <div className={`main ${sbCollapsed?"sb-collapsed":""}`}>
+      <div className={`main product-main ${sbCollapsed?"sb-collapsed":""}`}>
         {/* Mobile topbar */}
-        <div className="mtop">
+        <div className="mtop product-mobile-topbar">
           <div className="mlogo-row">
             <div className="mmenu" onClick={()=>setSbOpen(true)} onKeyDown={e=>onActivate(e,()=>setSbOpen(true))} role="button" tabIndex={0} aria-label="Open navigation menu">
               <svg width="22" height="16" viewBox="0 0 22 16" fill="none"><rect y="0" width="22" height="2.5" rx="1.25" fill="currentColor"/><rect y="6.75" width="16" height="2.5" rx="1.25" fill="currentColor"/><rect y="13.5" width="22" height="2.5" rx="1.25" fill="currentColor"/></svg>
@@ -1602,8 +1602,8 @@ export default function App(){
 
         
         {/* Desktop topbar */}
-<div className="topbar">
-  <div style={{display:"flex",alignItems:"center",gap:14}}>
+<div className="topbar product-topbar">
+  <div className="product-topbar-intro" style={{display:"flex",alignItems:"center",gap:14}}>
     <div className="sb-open" style={{visibility:sbCollapsed?"visible":"hidden"}} onClick={()=>setSbCollapsed(false)} onKeyDown={e=>onActivate(e,()=>setSbCollapsed(false))} title="Open sidebar" role="button" tabIndex={0} aria-label="Open sidebar">
       <svg width="18" height="14" viewBox="0 0 22 16" fill="none"><rect y="0" width="22" height="2.5" rx="1.25" fill="currentColor"/><rect y="6.75" width="16" height="2.5" rx="1.25" fill="currentColor"/><rect y="13.5" width="22" height="2.5" rx="1.25" fill="currentColor"/></svg>
     </div>
@@ -1619,7 +1619,7 @@ export default function App(){
       <div className="tdate">{new Date().toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div>
     </div>
   </div>
-  <div style={{display:"flex",alignItems:"center",gap:12}}>
+  <div className="product-topbar-actions" style={{display:"flex",alignItems:"center",gap:12}}>
     <button type="button" className="tchip balance-chip" onClick={goToDeposit} title="Add funds">{cur(port.cashBalance)}</button>
     <ProfileMenu/>
   </div>
@@ -1643,9 +1643,9 @@ export default function App(){
           <button className="btn btn-primary" style={{width:"100%",marginTop:18}} onClick={dismissTour}>Got it</button>
         </Modal>
 
-        {page==="dashboard"&&<>
-          <div style={{marginBottom:mob?12:16}}><ErrorBoundary boundaryName="tradingview-ticker" fallback={null}><TradingViewTicker/></ErrorBoundary></div>
-          <div className="stats" style={{marginTop:mob?12:0}}>
+        {page==="dashboard"&&<div className="dashboard-page">
+          <div className="dashboard-ticker" style={{marginBottom:mob?12:16}}><ErrorBoundary boundaryName="tradingview-ticker" fallback={null}><TradingViewTicker/></ErrorBoundary></div>
+          <div className="stats dashboard-stats" style={{marginTop:mob?12:0}}>
             {accountLoading?[0,1,2,3].map(i=>(
               <div key={i} className="stat skeleton" style={{minHeight:88}}/>
             )):[
@@ -1666,15 +1666,15 @@ export default function App(){
             ))}
           </div>
 
-          <div className="quick-actions" style={{display:"flex",gap:10,flexWrap:"wrap",margin:"16px 0"}}>
+          <div className="quick-actions dashboard-actions" style={{display:"flex",gap:10,flexWrap:"wrap",margin:"16px 0"}}>
             <button className="btn btn-primary btn-sm" onClick={()=>{setTtype("buy");nav("trade");}} title="Buy crypto">+ Buy</button>
             <button className="btn btn-ghost btn-sm" onClick={goToDeposit} title="Add funds to your cash balance">Deposit</button>
             <button className="btn btn-ghost btn-sm" onClick={()=>{setTtype("withdraw");nav("transactions");}} title="Withdraw cash">Withdraw</button>
             <button className="btn btn-ghost btn-sm" onClick={()=>nav("portfolio")} title="View full portfolio">Portfolio</button>
           </div>
 
-          <div className="crow">
-            <div className="gcard" style={{padding:26}}>
+          <div className="crow dashboard-market-layout">
+            <div className="gcard dashboard-market-chart" style={{padding:26}}>
               <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:10}}>
                 <div>
                   <div style={{fontSize:12,color:"var(--text3)",fontWeight:500,marginBottom:4}}>{COINS[selCoin]?.name} / USD</div>
@@ -1712,7 +1712,7 @@ export default function App(){
               </ResponsiveContainer>
             </div>
 
-            <div className="gcard" style={{padding:mob?"14px":"20px"}}>
+            <div className="gcard dashboard-market-list" style={{padding:mob?"14px":"20px"}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:14}}>
                 <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,letterSpacing:".8px",textTransform:"uppercase"}}>Live Markets</div>
                 <button className="btn btn-ghost btn-sm" onClick={()=>setShowWatchlist(v=>!v)} style={{padding:"5px 9px",fontSize:10}}>{showWatchlist?"All markets":"★ Watchlist"}</button>
@@ -1733,11 +1733,11 @@ export default function App(){
             </div>
           </div>
 
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"nowrap",gap:8}}>
+          <div className="dashboard-section-head" style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"nowrap",gap:8}}>
             <div className="stitle" style={{marginBottom:0,flexShrink:0}}>My Holdings</div>
             <button className="btn btn-ghost btn-sm" style={{borderRadius:100,padding:"7px 14px",fontSize:11,fontWeight:700,whiteSpace:"nowrap",flexShrink:0,border:"1px solid var(--border2)"}} onClick={()=>nav("portfolio")}>View all →</button>
           </div>
-          <div className="hgrid">
+          <div className="hgrid dashboard-holdings-grid">
             {port.holdings.filter(h=>h.amount>0).map(h=>{
               const m=COINS[h.symbol];const pct=port.totalPortfolioValue>0?(h.value/port.totalPortfolioValue*100).toFixed(1):"0";const isPos=(h.change24h||0)>=0;
               return(
@@ -1752,7 +1752,8 @@ export default function App(){
             })}
           </div>
 
-          <div className="gcard" style={{marginTop:20}}>
+          <div className="dashboard-bottom-grid">
+          <div className="gcard dashboard-activity-card" style={{marginTop:20}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
               <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)"}}>⚡ Recent Activity</div>
               <button className="btn btn-ghost btn-sm" style={{padding:"5px 9px",fontSize:10}} onClick={()=>nav("notifications")}>View all →</button>
@@ -1788,7 +1789,7 @@ export default function App(){
               cashPct>40?{icon:"💰",text:<><b>{cashPct.toFixed(0)}%</b> of your account is sitting in cash — consider putting it to work.</>}:{icon:"⚖️",text:<>{cashPct.toFixed(0)}% of your account is in cash — the rest is invested.</>},
             ];
             return(
-              <div className="gcard" style={{marginTop:20}}>
+              <div className="gcard dashboard-insights-card" style={{marginTop:20}}>
                 <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:16}}>💡 Insights</div>
                 {insights.map((ins,i)=>(
                   <div key={i} style={{display:"flex",alignItems:"flex-start",gap:12,padding:"10px 0",borderBottom:i<insights.length-1?"1px solid var(--border)":"none"}}>
@@ -1800,7 +1801,7 @@ export default function App(){
             );
           })()}
 
-          <div className="gcard" style={{marginTop:20}}>
+          <div className="gcard dashboard-notifications-card" style={{marginTop:20}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
               <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)"}}>🔔 Notifications</div>
               <button className="btn btn-ghost btn-sm" style={{padding:"5px 9px",fontSize:10}} onClick={()=>nav("notifications")}>View all →</button>
@@ -1814,11 +1815,12 @@ export default function App(){
               </div>
             ))}
           </div>
-        </>}
+          </div>
+        </div>}
 
         {/* ══ TRADE ══ */}
         {page==="coin"&&(
-          <div className="page-wrap">
+          <div className="page-wrap product-page product-asset-page">
             <button className="btn btn-ghost btn-sm" onClick={()=>nav("dashboard")} style={{marginBottom:22}}>← Back to dashboard</button>
             <div className="coin-detail-head gcard">
               <div style={{display:"flex",alignItems:"center",gap:15,minWidth:0}}>
@@ -1853,7 +1855,7 @@ export default function App(){
         )}
 
         {page==="trade"&&(
-          <div className="page-wrap">
+          <div className="page-wrap product-page product-trade-page">
           <div className="tgrid">
             <div className="gcard tcrd">
               <div className="ttabs">
@@ -1936,7 +1938,7 @@ export default function App(){
 
         {/* ══ STOCKS ══ */}
         {page==="stocks"&&(
-          <div className="page-wrap">
+          <div className="page-wrap product-page product-stocks-page">
             <div className="stitle">Stocks</div>
             <div style={{fontSize:12,color:"var(--text3)",marginBottom:14}}>Real quotes via Finnhub. Same paper-trading engine as crypto — buy/sell instantly, no real brokerage involved.</div>
             <input className="inp" placeholder="Search by ticker or company name…" value={stockSearch} onChange={e=>setStockSearch(e.target.value)} style={{marginBottom:18,maxWidth:360}}/>
@@ -2046,7 +2048,7 @@ export default function App(){
 
         {/* ══ TRANSACTIONS ══ (deposit / withdraw — split out of Trade per the original request) */}
         {page==="transactions"&&(
-          <div className="page-wrap">
+          <div className="page-wrap product-page product-transactions-page">
             <div className="stitle">Your wallets</div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:14,marginBottom:22}}>
               <div className="gcard" style={{borderLeft:"3px solid #6366F1"}}>
@@ -2239,7 +2241,7 @@ export default function App(){
           </div>
         )}
         {(page==="invest"||page==="copy"||page==="managed")&&(
-          <div className="page-wrap">
+          <div className="page-wrap product-page product-services-page">
             {page==="invest"&&<>
               <div style={{padding:mob?22:34,borderRadius:24,marginBottom:20,background:"linear-gradient(120deg,#172554,#4c1d95 55%,#111827)",border:"1px solid rgba(129,140,248,.4)"}}>
                 <div style={{fontSize:11,fontWeight:800,color:"#c4b5fd",letterSpacing:1.5,textTransform:"uppercase",marginBottom:10}}>Wave Wealth</div>
@@ -2402,7 +2404,7 @@ export default function App(){
 
         {/* ══ REFERRALS ══ */}
         {page==="referrals"&&(
-          <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1.1fr .9fr",gap:18}}>
+          <div className="product-referrals-page" style={{display:"grid",gridTemplateColumns:mob?"1fr":"1.1fr .9fr",gap:18}}>
             <div className="gcard" style={{padding:30,background:"linear-gradient(135deg,#1a1035,#2a1245)"}}>
               <div style={{fontSize:11,color:"#d8b4fe",fontWeight:800,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>Refer a friend</div>
               <div style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:26,fontWeight:900,lineHeight:1.2,color:"#fff"}}>Give ${referralData?.refereeBonus??5}, get ${referralData?.referrerBonus??10}.</div>
@@ -2447,7 +2449,7 @@ export default function App(){
 
         {/* ══ HISTORY ══ */}
         {page==="history"&&(
-          <div className="gcard" style={{padding:0,overflow:"hidden"}}>
+          <div className="gcard history-ledger-card" style={{padding:0,overflow:"hidden"}}>
             <div style={{padding:mob?"14px 16px 12px":"22px 24px 16px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"10px"}}>
               <div className="stitle" style={{marginBottom:0}}>All Transactions</div>
               <span style={{fontSize:11,color:"var(--text3)",fontWeight:600}}>{txs.length} total</span>
@@ -2492,7 +2494,7 @@ export default function App(){
 
         {/* ══ SETTINGS ══ */}
         {page==="settings"&&(
-          <div className="com-styler" style={{}}>
+          <div className="com-styler product-settings-page" style={{}}>
             {/* Profile banner */}
             <div className="gcard" style={{marginBottom:18,background:"linear-gradient(135deg,rgba(99,102,241,.12),rgba(139,92,246,.08))"}}>
               <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
@@ -2668,7 +2670,7 @@ export default function App(){
 
         {/* ══ NOTIFICATIONS ══ */}
         {page==="notifications"&&(
-          <div style={{maxWidth:600}}>
+          <div className="product-notifications-page" style={{maxWidth:600}}>
             <div className="gcard" style={{marginBottom:14}}>
               <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:4}}>🔔 Notification Preferences</div>
               <div style={{fontSize:12,color:"var(--text3)",marginBottom:16}}>Control what alerts you receive</div>
