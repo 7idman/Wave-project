@@ -995,6 +995,21 @@ export default function App(){
     if(appSettings.currency==="BTC") return `${sym}${val.toFixed(6)}`;
     return `${sym}${val.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
   };
+  // Full precision belongs in detail views, but a phone header or compact stat
+  // card cannot safely fit a long currency string. Use familiar financial
+  // notation there while retaining the exact value in the accessible label.
+  const compactCur=(usd:number)=>{
+    const sym=CURRENCY_SYMBOLS[appSettings.currency]||"$";
+    const val=usd*(CURRENCY_RATES[appSettings.currency]||1);
+    if(appSettings.currency==="BTC") return cur(usd);
+    const abs=Math.abs(val);
+    const units:[[number,string],[number,string],[number,string]]=[[1_000_000_000,"B"],[1_000_000,"M"],[1_000,"K"]];
+    const unit=units.find(([threshold])=>abs>=threshold);
+    if(!unit) return cur(usd);
+    const [threshold,suffix]=unit;
+    const short=(val/threshold).toLocaleString("en-US",{maximumFractionDigits:abs>=threshold*100?0:1});
+    return `${sym}${short}${suffix}`;
+  };
 
   // Real 24h P&L, derived from each holding's price-feed change24h — reverses the
   // percentage to get the dollar move: value * r / (100 + r). Reflects unrealized
@@ -1579,7 +1594,7 @@ export default function App(){
             <WaveLogo size={24}/><div className="mlogo">Wave</div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <button type="button" className="mchip balance-chip" onClick={goToDeposit} title="Add funds">{cur(port.cashBalance)}</button>
+            <button type="button" className="mchip balance-chip" onClick={goToDeposit} title={`Cash balance: ${cur(port.cashBalance)}. Add funds.`} aria-label={`Cash balance: ${cur(port.cashBalance)}. Add funds.`}>{compactCur(port.cashBalance)}</button>
             <ProfileMenu size={30} fontSize={12}/>
           </div>
         </div>
@@ -1596,7 +1611,12 @@ export default function App(){
               </div>
             </div>
           ):(
-            <div className="product-mobile-page-spacer"/>
+            <div className="product-mobile-page-intro">
+              {page==="coin"
+                ? `${COINS[selCoin]?.name||selCoin} (${selCoin})`
+                : (LANG[appSettings.language]?.[page]||LABELS[page]||pageTitle[page]||page)
+              }
+            </div>
           )
         )}
 
@@ -1654,12 +1674,12 @@ export default function App(){
               {l:"Cash Balance",   raw:port.cashBalance,          s:"Available",  pos:null,  glow:"#10B981",tip:"Uninvested cash available to trade or withdraw"},
               {l:"24h P&L",        raw:dayPnl,                    s:`${dayPnl>=0?"+":""}${dayPnlPct.toFixed(2)}%`, pos:dayPnl>=0,  glow:"#8B5CF6",tip:"Unrealized 24h price movement on your current holdings. Doesn't separate out trades made earlier today — cash isn't included since it doesn't move in price.",signed:true},
             ].map((s,i)=>(
-              <div key={i} className={`stat ${s.l==="Total Balance"||s.l==="Cash Balance"?"balance-link":""}`} onClick={s.l==="Total Balance"||s.l==="Cash Balance"?goToDeposit:undefined} title={s.tip}>
+              <div key={i} className={`stat ${s.l==="Total Balance"||s.l==="Cash Balance"?"balance-link":""}`} onClick={s.l==="Total Balance"||s.l==="Cash Balance"?goToDeposit:undefined} title={`${s.tip} (${cur(s.raw)})`} aria-label={`${s.l}: ${cur(s.raw)}. ${s.tip}`}>
                 <div className="stat-glow" style={{background:s.glow}}/>
                 <div className="stat-label">{s.l}</div>
                 <div className="stat-value">
                   {s.signed&&s.raw<0?"-":s.signed?"+":""}
-                  <AnimatedStat value={Math.abs(s.raw)} format={cur}/>
+                  <AnimatedStat value={Math.abs(s.raw)} format={mob?compactCur:cur}/>
                 </div>
                 <div className="stat-sub" style={{color:s.pos===true?"var(--green)":s.pos===false?"var(--red)":"var(--text3)"}}>{s.pos===true&&"▲ "}{s.s}</div>
               </div>
@@ -2346,15 +2366,15 @@ export default function App(){
           </div>
         )}
 
-        {page==="portfolio"&&<>
-          <div className="stats" style={{marginBottom:mob?14:24}}>
+        {page==="portfolio"&&<div className="page-wrap product-portfolio-page">
+          <div className="stats portfolio-stats" style={{marginBottom:mob?14:24}}>
             {[
-              {l:"Total Value",  v:cur(port.totalValue),                  glow:"#6366F1"},
-              {l:"Invested",     v:cur(port.totalPortfolioValue),          glow:"#06B6D4"},
-              {l:"Cash",         v:cur(port.cashBalance),                  glow:"#10B981"},
-              {l:"Assets Held",  v:port.holdings.filter(h=>h.amount>0).length,                                      glow:"#8B5CF6"},
+              {l:"Total Value",  v:mob?compactCur(port.totalValue):cur(port.totalValue),                  full:cur(port.totalValue), glow:"#6366F1"},
+              {l:"Invested",     v:mob?compactCur(port.totalPortfolioValue):cur(port.totalPortfolioValue),  full:cur(port.totalPortfolioValue), glow:"#06B6D4"},
+              {l:"Cash",         v:mob?compactCur(port.cashBalance):cur(port.cashBalance),                  full:cur(port.cashBalance), glow:"#10B981"},
+              {l:"Assets Held",  v:port.holdings.filter(h=>h.amount>0).length,                 full:undefined,       glow:"#8B5CF6"},
             ].map((s,i)=>(
-              <div key={i} className="stat"><div className="stat-glow" style={{background:s.glow}}/><div className="stat-label">{s.l}</div><div className="stat-value">{s.v}</div></div>
+              <div key={i} className="stat" title={s.full?`${s.l}: ${s.full}`:undefined} aria-label={s.full?`${s.l}: ${s.full}`:undefined}><div className="stat-glow" style={{background:s.glow}}/><div className="stat-label">{s.l}</div><div className="stat-value">{s.v}</div></div>
             ))}
           </div>
           <div style={{display:"grid",gridTemplateColumns:tab?"1fr":"1.8fr 1fr",gap:18,marginBottom:22}}>
@@ -2400,7 +2420,7 @@ export default function App(){
               </div>
             )}
           </div>
-        </>}
+        </div>}
 
         {/* ══ REFERRALS ══ */}
         {page==="referrals"&&(
