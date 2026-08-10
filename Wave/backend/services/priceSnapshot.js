@@ -6,6 +6,7 @@
  */
 
 const { queryAll, execute } = require("../db");
+const { checkAlerts } = require("./priceAlerts");
 
 async function takeSnapshot() {
   const prices = await queryAll("SELECT symbol, price, change_24h FROM price_cache");
@@ -15,6 +16,17 @@ async function takeSnapshot() {
       [p.symbol, p.price, p.change_24h]
     );
   }
+
+  // Price alerts are checked on this same cadence, right after the fresh
+  // snapshot — one scheduled job instead of a second independent interval
+  // doing largely the same "look at price_cache" work.
+  try {
+    const alertResult = await checkAlerts();
+    if (alertResult.triggered > 0) console.log(`Price alerts: ${alertResult.triggered} triggered`);
+  } catch (err) {
+    console.error("Price alert check failed (snapshot itself still succeeded):", err.message);
+  }
+
   return prices.length;
 }
 

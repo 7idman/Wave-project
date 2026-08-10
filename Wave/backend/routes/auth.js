@@ -8,7 +8,7 @@
  * GET  /api/auth/google/callback   — Google OAuth callback
  * GET  /api/auth/me                — Get current user
  * GET  /api/auth/sessions          — List login/device history for current user
- * PATCH /api/auth/profile          — Update name / phone / avatar
+ * PATCH /api/auth/profile          — Update name (phone goes through /api/phone; avatar through /api/account/avatar — both real-verification/real-upload flows, see routes/phone.js and routes/account.js)
  * PATCH /api/auth/password         — Change password
  */
 
@@ -17,8 +17,18 @@ const bcrypt   = require("bcryptjs");
 const passport = require("passport");
 const GoogleStrategy = require("passport-google-oauth20").Strategy;
 const jwt      = require("jsonwebtoken");
+const crypto   = require("crypto");
+const { authenticator } = require("otplib");
+const QRCode   = require("qrcode");
 const { queryOne, queryAll, execute } = require("../db");
 const { signAccessToken, signRefreshToken, JWT_SECRET, authenticate, TERMINATED_MESSAGE } = require("../middleware/auth");
+const { generateReferralCode, linkReferral } = require("../services/referrals");
+const { checkAndRecord: recordRate, peek: peekRate } = require("../services/rateLimit");
+const { verifyTurnstileToken } = require("../services/turnstile");
+const { logSecurityEvent } = require("../middleware/security");
+const { getOrSetDeviceId, isDeviceTrusted, trustDevice } = require("../services/deviceTrust");
+const { assessLoginRisk, assessSignupRisk } = require("../services/riskEngine");
+const { sendVerificationCode, checkVerificationCode } = require("../services/twilio");
 
 // ── Safe user shape returned to frontend ────────────────────────────────────
 // async — looks up real permissions from the `roles` table (users.role ->
@@ -40,6 +50,7 @@ const safeUser = async (u) => {
     kycAddrStatus: u.kyc_addr_status|| "pending",
     createdAt:     u.created_at,
     role:          u.role           || "user",
+    totpEnabled:   Boolean(u.totp_enabled),
     permissions,
   };
 };
@@ -70,12 +81,12 @@ function parseDevice(ua = "") {
 }
 
 /** Creates a session row for this login and returns its id */
-async function createSession(userId, req) {
+async function createSession(userId, req, deviceId) {
   const device = parseDevice(req.headers["user-agent"]);
   const ip     = req.ip;
   const r = await execute(
-    "INSERT INTO sessions (user_id, device, ip) VALUES (?, ?, ?)",
-    [userId, device, ip]
+    "INSERT INTO sessions (user_id, device, ip, device_id) VALUES (?, ?, ?, ?)",
+    [userId, device, ip, deviceId || null]
   );
   return r.lastInsertRowid;
 }
@@ -107,6 +118,7 @@ passport.use(new GoogleStrategy(
   if (ownerEmail && email?.trim().toLowerCase() === ownerEmail) {
     await execute("UPDATE users SET role = 'owner' WHERE id = ?", [r.lastInsertRowid]);
   }
+  try { await generateReferralCode(r.lastInsertRowid); } catch (e) { console.error("Referral code generation failed:", e.message); }
   user = await queryOne("SELECT * FROM users WHERE id = ?", [r.lastInsertRowid]);
 }
       return done(null, user);
@@ -129,7 +141,7 @@ passport.deserializeUser(async (id, done) => {
 // ── Register ─────────────────────────────────────────────────────────────────
 router.post("/register", async (req, res) => {
   try {
-    let { email, name, password, date_of_birth, country } = req.body;
+    let { email, name, password, date_of_birth, country, referralCode, turnstileToken } = req.body;
     if (!email || !name || !password)
       return res.status(400).json({ error: "email, name and password are required" });
 
@@ -138,6 +150,39 @@ router.post("/register", async (req, res) => {
     // case-sensitive by default), and a returning user typing a different
     // case than they signed up with would fail to log in.
     email = email.trim().toLowerCase();
+
+    // Signup rate limiting — separate IP and email limits, checked BEFORE
+    // Turnstile so a flooded IP/email gets a cheap 429 without spending a
+    // Cloudflare verification call on a request we're going to reject anyway.
+    const ipLimit    = await recordRate("signup", `ip:${req.ip}`, { max: 5, windowMinutes: 30 });
+    const emailLimit = await recordRate("signup", `email:${email}`, { max: 5, windowMinutes: 30 });
+    if (!ipLimit.allowed || !emailLimit.allowed) {
+      await logSecurityEvent("SIGNUP_BLOCKED", { ip: req.ip, metadata: { reason: "rate_limit", email } });
+      return res.status(429).json({ error: "Too many signup attempts. Please try again later." });
+    }
+
+    // Turnstile — required on every signup, no progressive exception (unlike
+    // login, there's no "trusted returning account" concept for a brand new
+    // signup, so there's nothing to condition it on).
+    const turnstileResult = await verifyTurnstileToken(turnstileToken, req.ip);
+    if (!turnstileResult.success) {
+      await logSecurityEvent("TURNSTILE_FAILED", { ip: req.ip, metadata: { route: "/register", reason: turnstileResult.reason } });
+      return res.status(400).json({ error: "Verification failed — please try again.", code: "TURNSTILE_REQUIRED" });
+    }
+
+    // Risk engine — HIGH signup risk (e.g. many signups from this IP in a
+    // short window, on top of repeated Turnstile failures) gets rejected
+    // outright, matching the security architecture's "High Risk -> Reject
+    // / manual review." MEDIUM isn't blocked here — Turnstile is already
+    // mandatory for every signup regardless, so there's nothing further to
+    // step up to short of rejecting, which per the doc should stay
+    // reserved for HIGH to avoid blocking legitimate signups.
+    const signupRisk = await assessSignupRisk({ ip: req.ip });
+    await logSecurityEvent("RISK_ASSESSED", { ip: req.ip, metadata: { context: "signup", score: signupRisk.score, level: signupRisk.level, reasons: signupRisk.reasons, email } });
+    if (signupRisk.level === "HIGH") {
+      await logSecurityEvent("SIGNUP_BLOCKED", { ip: req.ip, metadata: { reason: "risk_high", email } });
+      return res.status(403).json({ error: "We couldn't create your account right now. Please try again later or contact support." });
+    }
 
     // Age check — must be 18+
     if (date_of_birth) {
@@ -157,8 +202,19 @@ router.post("/register", async (req, res) => {
    if (ownerEmail && email === ownerEmail) {
    await execute("UPDATE users SET role=? WHERE id=?", ["owner", r.lastInsertRowid]);
     }
+
+    // Every user gets their own referral code, and — if they signed up with
+    // a friend's code — gets linked to that friend. Neither failure should
+    // ever block account creation; the account itself already succeeded.
+    try { await generateReferralCode(r.lastInsertRowid); } catch (e) { console.error("Referral code generation failed:", e.message); }
+    try { await linkReferral(r.lastInsertRowid, referralCode); } catch (e) { console.error("Referral link failed:", e.message); }
+
+    await logSecurityEvent("SIGNUP_SUCCESS", { userId: r.lastInsertRowid, ip: req.ip });
+
     const user = await queryOne("SELECT * FROM users WHERE id = ?", [r.lastInsertRowid]);
-    const sessionId     = await createSession(user.id, req);
+    const { deviceId } = getOrSetDeviceId(req, res);
+    await trustDevice(user.id, deviceId, parseDevice(req.headers["user-agent"])); // first device on a brand-new account
+    const sessionId     = await createSession(user.id, req, deviceId);
     const accessToken   = signAccessToken(user.id, sessionId);
     const refreshToken  = await signRefreshToken(user.id, sessionId);
     res.status(201).json({ accessToken, refreshToken, user: await safeUser(user) });
@@ -168,24 +224,118 @@ router.post("/register", async (req, res) => {
 });
 
 // ── Login ─────────────────────────────────────────────────────────────────────
+// Progressive login protection thresholds — configurable via env rather
+// than hardcoded, per the security architecture's own requirement.
+const LOGIN_HARD_LIMIT          = parseInt(process.env.LOGIN_HARD_LIMIT || "10", 10);
+const LOGIN_WINDOW_MINUTES      = parseInt(process.env.LOGIN_WINDOW_MINUTES || "15", 10);
+
 router.post("/login", async (req, res) => {
   try {
-    let { email, password } = req.body;
+    let { email, password, turnstileToken } = req.body;
     if (!email || !password)
       return res.status(400).json({ error: "email and password are required" });
 
     email = email.trim().toLowerCase(); // same normalization as register — see note above
 
+    const { deviceId } = getOrSetDeviceId(req, res);
+
+    // Progressive protection ladder:
+    //   normal attempt -> repeated failures -> Turnstile required -> cooldown
+    // Checked against BOTH ip and email (an attacker credential-stuffing
+    // rotates IPs; a targeted attacker on one account might not) — either
+    // one tripping the threshold is enough to step up requirements.
+    const [ipFails, emailFails] = await Promise.all([
+      peekRate("login_fail", `ip:${req.ip}`,       { windowMinutes: LOGIN_WINDOW_MINUTES }),
+      peekRate("login_fail", `email:${email}`,     { windowMinutes: LOGIN_WINDOW_MINUTES }),
+    ]);
+    const recentFails = Math.max(ipFails.count, emailFails.count);
+
+    if (recentFails >= LOGIN_HARD_LIMIT) {
+      await logSecurityEvent("LOGIN_BLOCKED", { ip: req.ip, metadata: { reason: "cooldown", email } });
+      return res.status(429).json({ error: "Too many failed attempts. Please try again in a few minutes." });
+    }
+
+    // Look up the user BEFORE assessing risk, so device trust (per-user)
+    // factors into the score — but the response never reveals whether this
+    // changed anything, so it can't be used to probe whether an email
+    // exists. Risk computes the same way (userId: null) either way.
     const user = await queryOne("SELECT * FROM users WHERE email = ?", [email]);
-    if (!user || !user.password_hash)
-      return res.status(401).json({ error: "Invalid credentials" });
+    const deviceTrusted = user ? await isDeviceTrusted(user.id, deviceId) : false;
+
+    const risk = await assessLoginRisk({
+      userId: user?.id ?? null,
+      ip: req.ip,
+      deviceTrusted,
+      recentFailedLogins: recentFails,
+      accountCreatedAt: user?.created_at,
+    });
+    await logSecurityEvent("RISK_ASSESSED", { userId: user?.id ?? null, ip: req.ip, metadata: { context: "login", score: risk.score, level: risk.level, reasons: risk.reasons } });
+
+    if (risk.actions.includes("REQUIRE_TURNSTILE")) {
+      const turnstileResult = await verifyTurnstileToken(turnstileToken, req.ip);
+      if (!turnstileResult.success) {
+        await logSecurityEvent("TURNSTILE_FAILED", { ip: req.ip, metadata: { route: "/login", reason: turnstileResult.reason, riskLevel: risk.level } });
+        return res.status(428).json({ error: "Additional verification required.", code: "TURNSTILE_REQUIRED" });
+      }
+    }
+
+    if (!user || !user.password_hash) {
+      await recordRate("login_fail", `ip:${req.ip}`,   { max: LOGIN_HARD_LIMIT, windowMinutes: LOGIN_WINDOW_MINUTES });
+      await recordRate("login_fail", `email:${email}`, { max: LOGIN_HARD_LIMIT, windowMinutes: LOGIN_WINDOW_MINUTES });
+      await logSecurityEvent("LOGIN_FAILED", { ip: req.ip, metadata: { email } });
+      return res.status(401).json({ error: "Invalid credentials" }); // never reveal whether the email exists
+    }
 
     if (user.account_status === "banned") return res.status(403).json({ error: user.ban_reason || TERMINATED_MESSAGE, code: "ACCOUNT_TERMINATED" });
 
     const valid = await bcrypt.compare(password, user.password_hash);
-    if (!valid) return res.status(401).json({ error: "Invalid credentials" });
+    if (!valid) {
+      await recordRate("login_fail", `ip:${req.ip}`,   { max: LOGIN_HARD_LIMIT, windowMinutes: LOGIN_WINDOW_MINUTES });
+      await recordRate("login_fail", `email:${email}`, { max: LOGIN_HARD_LIMIT, windowMinutes: LOGIN_WINDOW_MINUTES });
+      await logSecurityEvent("LOGIN_FAILED", { userId: user.id, ip: req.ip, metadata: { email } });
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
 
-    const sessionId    = await createSession(user.id, req);
+    if (!deviceTrusted) await logSecurityEvent("NEW_DEVICE_LOGIN", { userId: user.id, ip: req.ip, metadata: { device: parseDevice(req.headers["user-agent"]) } });
+    await logSecurityEvent("LOGIN_SUCCESS", { userId: user.id, ip: req.ip });
+
+    // 2FA gate — password was correct, but don't issue real session tokens
+    // yet. A short-lived (5 min) pending token carries just enough to prove
+    // "this request already passed the password check" through to
+    // POST /api/auth/2fa/verify, without creating a session or refresh
+    // token until the TOTP code is confirmed too.
+    //
+    // Device trust is deferred to the 2FA step for these accounts — a
+    // password alone isn't a full authentication when 2FA is enabled, so
+    // this device shouldn't be marked trusted until the TOTP code clears too.
+    if (user.totp_enabled) {
+      const tempToken = jwt.sign({ sub: user.id, type: "2fa_pending" }, JWT_SECRET, { expiresIn: "5m" });
+      return res.json({ requires2FA: true, tempToken });
+    }
+
+    // HIGH risk with no TOTP 2FA available — step up with a phone OTP
+    // instead, if the account has a verified phone to send one to. If it
+    // doesn't, there's no second factor to fall back on; Turnstile above
+    // already applies, and the event is logged for audit, but the account
+    // isn't hard-blocked with no way through (avoids locking out a
+    // legitimate user who's simply never added a phone).
+    if (risk.level === "HIGH" && user.phone_verified && user.phone) {
+      const otpLimit = await recordRate("login_risk_otp_send", `user:${user.id}`, { max: 5, windowMinutes: 30 });
+      if (!otpLimit.allowed) return res.status(429).json({ error: "Too many verification requests. Please try again later." });
+      const sendResult = await sendVerificationCode(user.phone);
+      if (sendResult.success) {
+        await logSecurityEvent("HIGH_RISK_LOGIN_OTP_SENT", { userId: user.id, ip: req.ip, metadata: { score: risk.score, reasons: risk.reasons } });
+        const tempToken = jwt.sign({ sub: user.id, type: "risk_otp_pending", deviceId }, JWT_SECRET, { expiresIn: "5m" });
+        return res.json({ requiresOTP: true, tempToken });
+      }
+      // If Twilio itself is unreachable, fail through to Turnstile-only
+      // protection rather than blocking a legitimate login entirely on an
+      // external service outage — Turnstile has already been enforced above.
+      console.error("High-risk login OTP send failed — proceeding on Turnstile alone:", user.id);
+    }
+
+    await trustDevice(user.id, deviceId, parseDevice(req.headers["user-agent"]));
+    const sessionId    = await createSession(user.id, req, deviceId);
     const accessToken  = signAccessToken(user.id, sessionId);
     const refreshToken = await signRefreshToken(user.id, sessionId);
     res.json({ accessToken, refreshToken, user: await safeUser(user) });
@@ -239,7 +389,9 @@ router.get("/google/callback",
   passport.authenticate("google", { failureRedirect: "/login" }),
   async (req, res) => {
     if (req.user.account_status === "banned") return res.status(403).json({ error: req.user.ban_reason || TERMINATED_MESSAGE, code: "ACCOUNT_TERMINATED" });
-    const sessionId     = await createSession(req.user.id, req);
+    const { deviceId } = getOrSetDeviceId(req, res);
+    await trustDevice(req.user.id, deviceId, parseDevice(req.headers["user-agent"]));
+    const sessionId     = await createSession(req.user.id, req, deviceId);
     const accessToken   = signAccessToken(req.user.id, sessionId);
     const refreshToken  = await signRefreshToken(req.user.id, sessionId);
     const clientURL     = process.env.CLIENT_URL || "http://localhost:5173";
@@ -256,16 +408,42 @@ router.get("/me", authenticate, async (req, res) => {
 router.get("/sessions", authenticate, async (req, res) => {
   try {
     const rows = await queryAll(
-      "SELECT id, device, ip, login_at FROM sessions WHERE user_id = ? AND logout_at IS NULL ORDER BY login_at DESC LIMIT 20",
+      "SELECT id, device, ip, login_at, device_id FROM sessions WHERE user_id = ? AND logout_at IS NULL ORDER BY login_at DESC LIMIT 20",
       [req.user.id]
     );
+    const trustedRows = await queryAll(
+      "SELECT device_id, expires_at FROM trusted_devices WHERE user_id = ? AND expires_at > datetime('now')",
+      [req.user.id]
+    );
+    const trustedSet = new Set(trustedRows.map(t => t.device_id));
     const sessions = rows.map(s => ({
       id:        s.id,
       device:    s.device,
       login_at:  s.login_at,
       current:   req.sessionId != null && Number(req.sessionId) === Number(s.id),
+      trusted:   Boolean(s.device_id && trustedSet.has(s.device_id)),
     }));
     res.json({ sessions });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Revoke trust for a device WITHOUT necessarily ending the live session on
+// it — the next login from that device will need to earn trust again
+// (Turnstile step-up), even if the current session stays active until it
+// naturally expires or the user signs it out separately.
+router.delete("/trusted-devices/:sessionId", authenticate, async (req, res) => {
+  try {
+    const session = await queryOne(
+      "SELECT device_id FROM sessions WHERE id = ? AND user_id = ?",
+      [req.params.sessionId, req.user.id]
+    );
+    if (!session?.device_id) return res.status(404).json({ error: "Device not found" });
+
+    await execute("DELETE FROM trusted_devices WHERE user_id = ? AND device_id = ?", [req.user.id, session.device_id]);
+    await logSecurityEvent("DEVICE_TRUST_REVOKED", { userId: req.user.id, ip: req.ip });
+    res.json({ message: "Device trust revoked. It'll need to verify again next time." });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -292,14 +470,11 @@ router.post("/sessions/:id/logout", authenticate, async (req, res) => {
 // ── Update profile ─────────────────────────────────────────────────────────────
 router.patch("/profile", authenticate, async (req, res) => {
   try {
-    const { name, phone, avatar_url } = req.body;
+    const { name } = req.body;
     const userId = req.user.id;
     const sets = [], vals = [];
 
     if (name)       { sets.push("name = ?");           vals.push(name.trim()); }
-    if (phone)      { sets.push("phone = ?");           vals.push(phone.trim());
-                      sets.push("phone_verified = 1"); }
-    if (avatar_url) { sets.push("avatar_url = ?");      vals.push(avatar_url); }
     if (sets.length === 0) return res.status(400).json({ error: "Nothing to update" });
 
     sets.push("updated_at = datetime('now')");
@@ -330,10 +505,186 @@ router.patch("/password", authenticate, async (req, res) => {
 
     const hash = await bcrypt.hash(newPassword, 12);
     await execute(
-      "UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?",
+      "UPDATE users SET password_hash = ?, last_sensitive_change_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
       [hash, req.user.id]
     );
+    await logSecurityEvent("PASSWORD_CHANGED", { userId: req.user.id, ip: req.ip });
     res.json({ message: "Password updated successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Two-factor authentication (TOTP) ─────────────────────────────────────────
+// Setup is two-step on purpose: /setup generates a secret but doesn't touch
+// totp_enabled or the real totp_secret yet, so an abandoned setup (user
+// closes the QR modal without entering a code) can never leave the account
+// half-configured or accidentally locked. Only /enable, after a valid code
+// proves the user actually scanned it, promotes the pending secret to real.
+
+function generateBackupCodes(count = 8) {
+  // XXXX-XXXX, easy to read back off a screen or write down.
+  return Array.from({ length: count }, () => {
+    const raw = crypto.randomBytes(5).toString("hex").toUpperCase().slice(0, 8);
+    return `${raw.slice(0, 4)}-${raw.slice(4)}`;
+  });
+}
+
+router.post("/2fa/setup", authenticate, async (req, res) => {
+  try {
+    if (req.user.totp_enabled) return res.status(400).json({ error: "2FA is already enabled" });
+
+    const secret = authenticator.generateSecret();
+    await execute("UPDATE users SET totp_secret_pending = ?, updated_at = datetime('now') WHERE id = ?", [secret, req.user.id]);
+
+    const otpauth = authenticator.keyuri(req.user.email, "Wave", secret);
+    const qrCodeDataUrl = await QRCode.toDataURL(otpauth);
+
+    res.json({ secret, qrCodeDataUrl });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/2fa/enable", authenticate, async (req, res) => {
+  try {
+    const { code } = req.body;
+    const user = await queryOne("SELECT * FROM users WHERE id = ?", [req.user.id]);
+    if (!user.totp_secret_pending) return res.status(400).json({ error: "Start setup first" });
+    if (!code || !authenticator.check(String(code).trim(), user.totp_secret_pending))
+      return res.status(400).json({ error: "Invalid code — check your authenticator app and try again" });
+
+    const backupCodes = generateBackupCodes();
+    const hashedCodes = await Promise.all(backupCodes.map(c => bcrypt.hash(c, 10)));
+
+    await execute(
+      "UPDATE users SET totp_secret = ?, totp_secret_pending = NULL, totp_enabled = 1, totp_backup_codes = ?, updated_at = datetime('now') WHERE id = ?",
+      [user.totp_secret_pending, JSON.stringify(hashedCodes), req.user.id]
+    );
+
+    // Backup codes are shown once, in plaintext, right now — only the
+    // bcrypt hashes are ever stored, same as the account password.
+    res.json({ message: "Two-factor authentication enabled", backupCodes });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/2fa/disable", authenticate, async (req, res) => {
+  try {
+    const { password, code } = req.body;
+    const user = await queryOne("SELECT * FROM users WHERE id = ?", [req.user.id]);
+    if (!user.totp_enabled) return res.status(400).json({ error: "2FA is not enabled" });
+    if (!user.password_hash) return res.status(400).json({ error: "Account uses Google login — no password set" });
+
+    const validPassword = password && await bcrypt.compare(password, user.password_hash);
+    if (!validPassword) return res.status(401).json({ error: "Incorrect password" });
+
+    const validCode = code && authenticator.check(String(code).trim(), user.totp_secret);
+    if (!validCode) return res.status(401).json({ error: "Invalid authenticator code" });
+
+    await execute(
+      "UPDATE users SET totp_secret = NULL, totp_secret_pending = NULL, totp_enabled = 0, totp_backup_codes = NULL, last_sensitive_change_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
+      [req.user.id]
+    );
+    await logSecurityEvent("TWOFA_DISABLED", { userId: req.user.id, ip: req.ip });
+    res.json({ message: "Two-factor authentication disabled" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Step 2 of login when totp_enabled — takes the tempToken from /login and a
+// 6-digit code (or a one-time backup code), then finally issues real
+// session + tokens, same shape as a normal login response.
+router.post("/2fa/verify", async (req, res) => {
+  try {
+    const { tempToken, code } = req.body;
+    if (!tempToken || !code) return res.status(400).json({ error: "tempToken and code are required" });
+
+    let payload;
+    try {
+      payload = jwt.verify(tempToken, JWT_SECRET);
+    } catch {
+      return res.status(401).json({ error: "Login session expired — please sign in again" });
+    }
+    if (payload.type !== "2fa_pending") return res.status(401).json({ error: "Invalid token" });
+
+    const user = await queryOne("SELECT * FROM users WHERE id = ?", [payload.sub]);
+    if (!user || !user.totp_enabled) return res.status(401).json({ error: "Invalid token" });
+    if (user.account_status === "banned") return res.status(403).json({ error: user.ban_reason || TERMINATED_MESSAGE, code: "ACCOUNT_TERMINATED" });
+
+    const trimmedCode = String(code).trim();
+    let usedBackupCode = false;
+
+    let ok = authenticator.check(trimmedCode, user.totp_secret);
+    if (!ok) {
+      // Fall back to backup codes — each one works exactly once.
+      const backupCodes = JSON.parse(user.totp_backup_codes || "[]");
+      for (let i = 0; i < backupCodes.length; i++) {
+        if (await bcrypt.compare(trimmedCode.toUpperCase(), backupCodes[i])) {
+          ok = true;
+          usedBackupCode = true;
+          backupCodes.splice(i, 1);
+          await execute("UPDATE users SET totp_backup_codes = ? WHERE id = ?", [JSON.stringify(backupCodes), user.id]);
+          break;
+        }
+      }
+    }
+    if (!ok) return res.status(401).json({ error: "Invalid code" });
+
+    // Full authentication now complete (password + TOTP) — this is the
+    // point where a device earns trust for a 2FA-enabled account.
+    const { deviceId } = getOrSetDeviceId(req, res);
+    await trustDevice(user.id, deviceId, parseDevice(req.headers["user-agent"]));
+
+    const sessionId    = await createSession(user.id, req, deviceId);
+    const accessToken  = signAccessToken(user.id, sessionId);
+    const refreshToken = await signRefreshToken(user.id, sessionId);
+    res.json({ accessToken, refreshToken, user: await safeUser(user), usedBackupCode });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Step 2 of login for a HIGH-risk sign-in on an account WITHOUT TOTP 2FA
+// enabled — a phone OTP step-up instead. Same shape and same rule as
+// every other verification endpoint in this file: the backend asks Twilio
+// directly whether phone+code check out, never trusts a client claim.
+router.post("/risk-otp/verify", async (req, res) => {
+  try {
+    const { tempToken, code } = req.body;
+    if (!tempToken || !code) return res.status(400).json({ error: "tempToken and code are required" });
+
+    let payload;
+    try {
+      payload = jwt.verify(tempToken, JWT_SECRET);
+    } catch {
+      return res.status(401).json({ error: "Login session expired — please sign in again" });
+    }
+    if (payload.type !== "risk_otp_pending") return res.status(401).json({ error: "Invalid token" });
+
+    const user = await queryOne("SELECT * FROM users WHERE id = ?", [payload.sub]);
+    if (!user || !user.phone_verified || !user.phone) return res.status(401).json({ error: "Invalid token" });
+    if (user.account_status === "banned") return res.status(403).json({ error: user.ban_reason || TERMINATED_MESSAGE, code: "ACCOUNT_TERMINATED" });
+
+    const verifyLimit = await recordRate("login_risk_otp_verify", `user:${user.id}`, { max: 5, windowMinutes: 15 });
+    if (!verifyLimit.allowed) return res.status(429).json({ error: "Too many attempts. Please try again later." });
+
+    const check = await checkVerificationCode(user.phone, code);
+    if (!check.approved) {
+      await logSecurityEvent("HIGH_RISK_LOGIN_OTP_FAILED", { userId: user.id, ip: req.ip });
+      return res.status(401).json({ error: "Invalid or expired code." });
+    }
+
+    const deviceId = payload.deviceId || getOrSetDeviceId(req, res).deviceId;
+    await trustDevice(user.id, deviceId, parseDevice(req.headers["user-agent"]));
+    await logSecurityEvent("HIGH_RISK_LOGIN_OTP_VERIFIED", { userId: user.id, ip: req.ip });
+
+    const sessionId    = await createSession(user.id, req, deviceId);
+    const accessToken  = signAccessToken(user.id, sessionId);
+    const refreshToken = await signRefreshToken(user.id, sessionId);
+    res.json({ accessToken, refreshToken, user: await safeUser(user) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -30,6 +30,12 @@ const transferRoutes = require("./routes/transfers");
 const strategyRoutes = require("./routes/strategies");
 const managedRoutes = require("./routes/managed");
 const accountRoutes = require("./routes/account");
+const referralRoutes = require("./routes/referrals");
+const phoneRoutes = require("./routes/phone");
+const clientErrorRoutes = require("./routes/clientErrors");
+const autoInvestRoutes = require("./routes/autoInvest");
+const priceAlertRoutes = require("./routes/priceAlerts");
+const { startAutoInvestSchedule } = require("./services/autoInvest");
 const { startPriceSnapshotSchedule } = require("./services/priceSnapshot");
 const { fetchStockPrices } = require("./services/stocks");
 
@@ -74,6 +80,7 @@ app.use(cors({
 
 // ── Body parser ───────────────────────────────────────────────────────────────
 app.use(express.json({ limit: "10mb" }));
+app.use(require("cookie-parser")());
 
 // ── Session ───────────────────────────────────────────────────────────────────
 // Concept: memorystore keeps sessions in RAM like the default MemoryStore,
@@ -103,6 +110,10 @@ app.use(passport.session());
 // triggers the lockout.
 app.use("/api/auth/login",    authLimiter);
 app.use("/api/auth/register", authLimiter);
+app.use("/api/auth/2fa/verify", authLimiter);
+app.use("/api/phone/send-code", authLimiter);
+app.use("/api/phone/verify-code", authLimiter);
+app.use("/api/auth/risk-otp/verify", authLimiter);
 app.use("/api/auth",          authRoutes);
 app.use("/api/prices",        priceRoutes);
 app.use("/api/trades",        authenticate, tradeRoutes);
@@ -115,6 +126,11 @@ app.use("/api/transfers", authenticate, transferRoutes);
 app.use("/api/strategies", authenticate, strategyRoutes);
 app.use("/api/managed", authenticate, managedRoutes);
 app.use("/api/account", authenticate, accountRoutes);
+app.use("/api/referrals", authenticate, referralRoutes);
+app.use("/api/phone", authenticate, phoneRoutes);
+app.use("/api/client-errors", clientErrorRoutes); // no `authenticate` — see routes/clientErrors.js for why
+app.use("/api/auto-invest", authenticate, autoInvestRoutes);
+app.use("/api/price-alerts", authenticate, priceAlertRoutes);
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/health", (_, res) => res.json({ status: "ok", time: new Date().toISOString() }));
@@ -141,6 +157,7 @@ if (cleanup.rowsAffected > 0) {
     fetchStockPrices().then(r=>console.log(`Stocks: ${r.updated} updated, ${r.skipped} skipped`)).catch(console.warn);
     setInterval(() => { fetchStockPrices().catch(console.warn); }, 5 * 60 * 1000);
     startPriceSnapshotSchedule();
+    startAutoInvestSchedule();
     app.listen(PORT, () => {
       console.log(`🚀 Wave API running on http://localhost:${PORT}`);
       console.log(`📦 Database: ${process.env.LIBSQL_URL || "file:wave.db"}`);

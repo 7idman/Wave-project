@@ -3,7 +3,7 @@ import { api } from "../api/client";
 import { Modal } from "../components/PlatformPrimitives";
 import type { User } from "../types";
 
-type Tab="requests"|"members"|"roles"|"violations"|"updates"|"search"|"strategies"|"managed"|"promotions";
+type Tab="requests"|"members"|"roles"|"violations"|"updates"|"search"|"strategies"|"managed"|"promotions"|"security"|"activity";
 type AdminRequest={id:number;type:string;status:string;amount?:number;title:string;details?:string;user_email:string;user_name:string;created_at:string;reviewed_by_email?:string;reviewed_at?:string;admin_note?:string};
 type Role={role_key:string;name:string;permissions:Record<string,boolean>;is_owner?:number};
 type Member={id:number;email:string;name:string;avatar_url?:string;role:string;account_status:string;created_at:string};
@@ -15,6 +15,10 @@ type AdminStrategy={id:number;name:string;description:string;fee:number;status:s
 type StrategyTrade={id:number;symbol:string;side:string;amount:number;price:number;created_at:string};
 type AdminManagedAccount={portfolioId:number;userId:number;email:string;name:string;cashBalance:number;holdingsValue:number;totalValue:number;createdAt:string};
 type Promotion={id:number;name:string;bonus_pct:number;min_tier:string;min_deposit:number;lock_days:number;start_at:string;end_at:string};
+type SecurityEvent={id:number;type:string;user_id?:number;user_email?:string;ip?:string;metadata:Record<string,any>;created_at:string};
+type ClientError={id:number;user_id?:number;user_email?:string;message:string;stack?:string;boundary?:string;url?:string;created_at:string};
+type AdminReferral={id:number;status:string;threshold_amount:number;completed_at?:string;created_at:string;referrer_email:string;referrer_name:string;referee_email:string;referee_name:string};
+type AdminAutoInvestPlan={id:number;symbol:string;weekly_amount:number;status:string;last_run_at?:string;next_run_at:string;user_email:string};
 
 function AdminAvatar({name,avatarUrl}:{name:string;avatarUrl?:string}){
   const initials=(name||"?").trim().split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
@@ -45,6 +49,9 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
   const[managedAllocTarget,setManagedAllocTarget]=useState<AdminManagedAccount|null>(null),[managedAllocSymbol,setManagedAllocSymbol]=useState(""),[managedAllocAmount,setManagedAllocAmount]=useState(""),[managedAllocBusy,setManagedAllocBusy]=useState(false);
   const[promotions,setPromotions]=useState<Promotion[]>([]),[promotionsLoading,setPromotionsLoading]=useState(false);
   const[promoName,setPromoName]=useState(""),[promoBonusPct,setPromoBonusPct]=useState(""),[promoMinTier,setPromoMinTier]=useState("bronze"),[promoMinDeposit,setPromoMinDeposit]=useState(""),[promoLockDays,setPromoLockDays]=useState("7"),[promoStart,setPromoStart]=useState(""),[promoEnd,setPromoEnd]=useState("");
+  const[securityEvents,setSecurityEvents]=useState<SecurityEvent[]>([]),[securityLoading,setSecurityLoading]=useState(false),[securityTypeFilter,setSecurityTypeFilter]=useState("");
+  const[clientErrors,setClientErrors]=useState<ClientError[]>([]),[clientErrorsLoading,setClientErrorsLoading]=useState(false);
+  const[adminReferrals,setAdminReferrals]=useState<AdminReferral[]>([]),[adminAutoInvest,setAdminAutoInvest]=useState<AdminAutoInvestPlan[]>([]),[activityLoading,setActivityLoading]=useState(false);
   const canOwner=currentUser?.role==="owner";
   const can=(perm:string)=>canOwner||!!currentUser?.permissions?.[perm];
   const pendingCount=useMemo(()=>requests.filter(r=>r.status==="pending").length,[requests]);
@@ -133,6 +140,17 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
 
   const refreshPromotions=async()=>{setPromotionsLoading(true);try{const d=await api.get("/admin/promotions");setPromotions(d.promotions||[]);}catch(e:any){notify(e.message,"!",false);}finally{setPromotionsLoading(false);}};
   useEffect(()=>{if(tab==="promotions")refreshPromotions();},[tab]);
+  const refreshSecurityEvents=async(type=securityTypeFilter)=>{setSecurityLoading(true);try{const d=await api.get(`/admin/security-events${type?`?type=${encodeURIComponent(type)}`:""}`);setSecurityEvents(d.events||[]);}catch(e:any){notify(e.message,"!",false);}finally{setSecurityLoading(false);}};
+  useEffect(()=>{if(tab==="security")refreshSecurityEvents();},[tab]);
+  useEffect(()=>{if(tab==="security"){setClientErrorsLoading(true);api.get("/admin/client-errors").then(d=>setClientErrors(d.errors||[])).catch(e=>notify(e.message,"!",false)).finally(()=>setClientErrorsLoading(false));}},[tab]);
+  useEffect(()=>{
+    if(tab!=="activity")return;
+    setActivityLoading(true);
+    Promise.all([
+      api.get("/admin/referrals").then(d=>setAdminReferrals(d.referrals||[])),
+      api.get("/admin/auto-invest-plans").then(d=>setAdminAutoInvest(d.plans||[])),
+    ]).catch(e=>notify(e.message,"!",false)).finally(()=>setActivityLoading(false));
+  },[tab]);
   const createPromotion=async()=>{
     const bonusPct=Number(promoBonusPct)/100;
     const minDeposit=Number(promoMinDeposit);
@@ -188,7 +206,7 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
 
     <div className="admin-banner"><b>{pendingCount}</b> pending request(s). Manage device alerts in Settings → Notifications.</div>
 
-    <div className="admin-tabs">{(["requests","members","roles","violations","updates","search","strategies","managed","promotions"] as Tab[]).map(x=><button key={x} className={`chip ${tab===x?"active":""}`} onClick={()=>setTab(x)}>{x}</button>)}</div>
+    <div className="admin-tabs">{(["requests","members","roles","violations","updates","search","strategies","managed","promotions","security","activity"] as Tab[]).map(x=><button key={x} className={`chip ${tab===x?"active":""}`} onClick={()=>setTab(x)}>{x}</button>)}</div>
 
     {loading?<div className="gcard">Loading admin data...</div>:<>
       {tab==="requests"&&<>
@@ -337,6 +355,79 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
           <div className="tlab">End</div>
           <input className="inp" type="datetime-local" value={promoEnd} onChange={e=>setPromoEnd(e.target.value)} style={{marginBottom:12}}/>
           <button className="btn btn-primary" style={{width:"100%"}} onClick={createPromotion}>Create promotion</button>
+        </div>
+      </div>}
+
+      {tab==="security"&&<div className="admin-grid">
+        <div className="gcard admin-table-wrap">
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+            <div className="stitle" style={{marginBottom:0}}>Security Events</div>
+            <select className="sel" value={securityTypeFilter} onChange={e=>{setSecurityTypeFilter(e.target.value);refreshSecurityEvents(e.target.value);}} style={{width:220}}>
+              <option value="">All types</option>
+              {["LOGIN_SUCCESS","LOGIN_FAILED","LOGIN_BLOCKED","TURNSTILE_FAILED","SIGNUP_SUCCESS","SIGNUP_BLOCKED","NEW_DEVICE_LOGIN","RISK_ASSESSED","WITHDRAWAL_COMPLETED","WITHDRAWAL_BLOCKED","PASSWORD_CHANGED","TWOFA_DISABLED","PHONE_VERIFIED","DEVICE_TRUST_REVOKED"].map(t=><option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          {securityLoading?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>Loading…</div>:
+          securityEvents.length===0?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>No events yet.</div>:
+          <table className="admin-table"><thead><tr><th>Type</th><th>User</th><th>IP</th><th>Details</th><th>When</th></tr></thead><tbody>
+            {securityEvents.map(ev=>(
+              <tr key={ev.id}>
+                <td><b style={{color:"var(--text)"}}>{ev.type}</b></td>
+                <td className="admin-note">{ev.user_email||"—"}</td>
+                <td className="admin-note">{ev.ip||"—"}</td>
+                <td className="admin-note" style={{maxWidth:280,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{Object.keys(ev.metadata||{}).length?JSON.stringify(ev.metadata):"—"}</td>
+                <td className="admin-note">{new Date(ev.created_at).toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody></table>}
+        </div>
+        <div className="gcard admin-table-wrap">
+          <div className="stitle">Frontend Crash Reports</div>
+          {clientErrorsLoading?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>Loading…</div>:
+          clientErrors.length===0?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>No crashes reported — good sign.</div>:
+          <table className="admin-table"><thead><tr><th>Message</th><th>Boundary</th><th>User</th><th>When</th></tr></thead><tbody>
+            {clientErrors.map(ce=>(
+              <tr key={ce.id}>
+                <td style={{maxWidth:260,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ce.message||"—"}</td>
+                <td className="admin-note">{ce.boundary||"—"}</td>
+                <td className="admin-note">{ce.user_email||"—"}</td>
+                <td className="admin-note">{new Date(ce.created_at).toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody></table>}
+        </div>
+      </div>}
+
+      {tab==="activity"&&<div className="admin-grid">
+        <div className="gcard admin-table-wrap">
+          <div className="stitle">Referrals</div>
+          {activityLoading?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>Loading…</div>:
+          adminReferrals.length===0?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>No referrals yet.</div>:
+          <table className="admin-table"><thead><tr><th>Referrer</th><th>Referee</th><th>Status</th><th>When</th></tr></thead><tbody>
+            {adminReferrals.map(r=>(
+              <tr key={r.id}>
+                <td>{r.referrer_name}<div className="admin-note">{r.referrer_email}</div></td>
+                <td>{r.referee_name}<div className="admin-note">{r.referee_email}</div></td>
+                <td><span className={`admin-status ${r.status==="completed"?"active":""}`}>{r.status}</span></td>
+                <td className="admin-note">{new Date(r.created_at).toLocaleDateString()}</td>
+              </tr>
+            ))}
+          </tbody></table>}
+        </div>
+        <div className="gcard admin-table-wrap">
+          <div className="stitle">Auto-Invest Plans</div>
+          {activityLoading?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>Loading…</div>:
+          adminAutoInvest.length===0?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>No plans yet.</div>:
+          <table className="admin-table"><thead><tr><th>User</th><th>Plan</th><th>Status</th><th>Next run</th></tr></thead><tbody>
+            {adminAutoInvest.map(p=>(
+              <tr key={p.id}>
+                <td className="admin-note">{p.user_email}</td>
+                <td><b style={{color:"var(--text)"}}>${p.weekly_amount}/week</b><div className="admin-note">{p.symbol}</div></td>
+                <td><span className={`admin-status ${p.status==="active"?"active":""}`}>{p.status}</span></td>
+                <td className="admin-note">{new Date(p.next_run_at).toLocaleDateString()}</td>
+              </tr>
+            ))}
+          </tbody></table>}
         </div>
       </div>}
     </>}

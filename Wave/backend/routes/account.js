@@ -6,7 +6,9 @@
 const router = require("express").Router();
 const { getUserTier } = require("../services/tier");
 const { getLockedBonusTotal } = require("../services/promotions");
-const { queryAll, queryOne } = require("../db");
+const { queryAll, queryOne, execute } = require("../db");
+const { uploadAvatar } = require("../services/cloudinaryUpload");
+const { checkAndRecord } = require("../services/rateLimit");
 
 router.get("/tier", async (req, res) => {
   try {
@@ -92,6 +94,39 @@ router.get("/wallet-analytics", async (req, res) => {
       totalBonusEarned: bonusTotal.total,
       netFlow: deposits.total - withdrawals.total,
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/account/avatar — replaces the old flow that saved raw base64
+// image data straight into users.avatar_url. Uploads to Cloudinary,
+// stores only the short returned URL. Size/type are validated server-side
+// in cloudinaryUpload.js — the client's own 5MB check is a UX nicety, not
+// something this endpoint trusts on its own.
+router.post("/avatar", async (req, res) => {
+  try {
+    const limit = await checkAndRecord("avatar_upload", `user:${req.user.id}`, { max: 10, windowMinutes: 60 });
+    if (!limit.allowed) return res.status(429).json({ error: "Too many upload attempts. Please try again later." });
+
+    const { image } = req.body;
+    const result = await uploadAvatar(image, req.user.id);
+    if (!result.success) {
+      if (result.reason === "not_configured") {
+        console.error("Cloudinary is not configured — avatar upload unavailable.");
+        return res.status(503).json({ error: "Photo uploads are temporarily unavailable. Please try again later." });
+      }
+      const messages = {
+        invalid_image:    "That doesn't look like a valid image.",
+        unsupported_type: "Please upload a JPEG, PNG, WebP, or GIF image.",
+        too_large:        "Image must be under 5MB.",
+        upload_failed:    "Upload failed. Please try again.",
+      };
+      return res.status(400).json({ error: messages[result.reason] || "Upload failed." });
+    }
+
+    await execute("UPDATE users SET avatar_url = ?, updated_at = datetime('now') WHERE id = ?", [result.url, req.user.id]);
+    res.json({ avatarUrl: result.url });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

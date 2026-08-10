@@ -127,8 +127,7 @@ async function initSchema() {
       total      REAL    NOT NULL,
       status     TEXT    NOT NULL DEFAULT 'completed',
       created_at TEXT    NOT NULL DEFAULT (datetime('now'))
-    )`,
-    `CREATE TABLE IF NOT EXISTS price_cache (
+    )`,    `CREATE TABLE IF NOT EXISTS price_cache (
       symbol     TEXT PRIMARY KEY,
       price      REAL NOT NULL,
       change_24h REAL NOT NULL DEFAULT 0,
@@ -259,6 +258,17 @@ async function initSchema() {
     // ── Ranking-tier deposit bonuses ────────────────────────────────────────
     // An admin-configured promotion: users at/above min_tier who deposit at
     // least min_deposit while the promotion is active get bonus_pct credited.
+    // Admin-editable security thresholds. A DB override here takes
+    // priority over the env-var default (see services/settings.js) — lets
+    // an admin tune values like the withdrawal verification threshold from
+    // the admin panel instead of needing a Railway redeploy. Falls back to
+    // the env var, then a hardcoded default, if no row exists for a key.
+    `CREATE TABLE IF NOT EXISTS platform_settings (
+      key         TEXT PRIMARY KEY,
+      value       TEXT NOT NULL,
+      updated_by  INTEGER REFERENCES users(id),
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
     `CREATE TABLE IF NOT EXISTS promotions (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       name        TEXT    NOT NULL,
@@ -283,6 +293,115 @@ async function initSchema() {
       unlock_at      TEXT    NOT NULL,
       created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
     )`,
+    // Referral bonuses live in their own grants table rather than reusing
+    // bonus_grants, since bonus_grants.promotion_id is NOT NULL and a
+    // referral isn't a promotions-table row. The withdrawal-lock check
+    // (trades.js + promotions.js getLockedBonusTotal) sums BOTH tables —
+    // keep them in sync if a third bonus source is ever added.
+    `CREATE TABLE IF NOT EXISTS referral_bonus_grants (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      referral_id INTEGER NOT NULL REFERENCES referrals(id),
+      role        TEXT    NOT NULL, -- 'referrer' | 'referee'
+      amount      REAL    NOT NULL,
+      unlock_at   TEXT    NOT NULL,
+      created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
+    // One row per successful referral link (referrer's code used at referee's
+    // signup). status flips pending -> completed once the referee's lifetime
+    // completed deposits cross threshold_amount — checked after every
+    // completed deposit, in both the self-service and admin-approved paths.
+    `CREATE TABLE IF NOT EXISTS referrals (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      referrer_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      referee_id       INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+      status           TEXT    NOT NULL DEFAULT 'pending', -- 'pending' | 'completed'
+      threshold_amount REAL    NOT NULL DEFAULT 100,
+      completed_at     TEXT,
+      created_at       TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
+    // One row per rate-limited attempt (signup, login-failure, OTP send,
+    // etc). scope+identifier is e.g. ("login_fail","email:user@x.com") or
+    // ("signup","ip:1.2.3.4"). Checked by COUNT(*) WHERE scope=? AND
+    // identifier=? AND created_at > now-window — DB-backed so it survives
+    // restarts/redeploys and works across multiple dimensions, unlike the
+    // original in-memory IP-only limiter it complements (not replaces).
+    `CREATE TABLE IF NOT EXISTS rate_limit_entries (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      scope       TEXT    NOT NULL,
+      identifier  TEXT    NOT NULL,
+      created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
+    // Structured security audit trail. Never store passwords, raw OTP
+    // codes, or third-party secrets/tokens here — metadata only.
+    `CREATE TABLE IF NOT EXISTS security_events (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      type        TEXT    NOT NULL,
+      user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      ip          TEXT,
+      metadata    TEXT,
+      created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
+    // Device trust is per (user, device_id) — the same browser used to log
+    // into two different accounts gets two independent trust records, on
+    // purpose (shared/family computers are a normal case). device_id
+    // itself is a random, unguessable cookie value (see
+    // services/deviceTrust.js) — never derived from anything client-
+    // supplied like a "trusted" boolean. expires_at enforces rotation:
+    // trust isn't permanent, it lapses and has to be re-earned.
+    `CREATE TABLE IF NOT EXISTS trusted_devices (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      device_id    TEXT    NOT NULL,
+      label        TEXT,
+      first_seen_at TEXT   NOT NULL DEFAULT (datetime('now')),
+      last_seen_at TEXT    NOT NULL DEFAULT (datetime('now')),
+      expires_at   TEXT    NOT NULL,
+      UNIQUE(user_id, device_id)
+    )`,
+    // Frontend crash reports from ErrorBoundary components — user_id is
+    // self-reported by the client (not verified, since the app may be in a
+    // broken/unauthenticated state when this fires) and is for triage
+    // context only, never treated as an authenticated claim.
+    `CREATE TABLE IF NOT EXISTS client_errors (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id          INTEGER,
+      message          TEXT,
+      stack            TEXT,
+      component_stack  TEXT,
+      boundary         TEXT,
+      url              TEXT,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    // Recurring weekly stock purchases. next_run_at is checked against
+    // "now" by the scheduler (services/autoInvest.js) rather than a naive
+    // fixed setInterval offset, so a Railway restart never causes a missed
+    // or double-counted week — the due-check is always against real wall-
+    // clock time, not "how long has this process been running."
+    `CREATE TABLE IF NOT EXISTS auto_invest_plans (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      symbol        TEXT    NOT NULL,
+      weekly_amount REAL    NOT NULL,
+      status        TEXT    NOT NULL DEFAULT 'active', -- 'active' | 'paused' | 'cancelled'
+      last_run_at   TEXT,
+      next_run_at   TEXT    NOT NULL,
+      created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
+    // Checked on the same 15-min cadence as price snapshotting (see
+    // services/priceAlerts.js) — a triggered alert flips to 'triggered'
+    // and stays that way (one notification per alert, not repeated every
+    // cycle the price stays past the target).
+    `CREATE TABLE IF NOT EXISTS price_alerts (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      symbol       TEXT    NOT NULL,
+      condition    TEXT    NOT NULL, -- 'above' | 'below'
+      target_price REAL    NOT NULL,
+      status       TEXT    NOT NULL DEFAULT 'active', -- 'active' | 'triggered' | 'cancelled'
+      triggered_at TEXT,
+      created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
     // Periodic price snapshots, captured going forward from whenever this
     // table first gets rows — there's no way to reconstruct prices from
     // before snapshotting started, so history begins exactly at "now".
@@ -303,6 +422,9 @@ async function initSchema() {
   const migrations = [
     "ALTER TABLE users ADD COLUMN phone            TEXT",
     "ALTER TABLE users ADD COLUMN phone_verified   INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN phone_pending    TEXT",
+    "ALTER TABLE users ADD COLUMN last_sensitive_change_at TEXT",
+    "ALTER TABLE sessions ADD COLUMN device_id TEXT",
     "ALTER TABLE users ADD COLUMN avatar_url       TEXT",
     "ALTER TABLE users ADD COLUMN date_of_birth    TEXT",
     "ALTER TABLE users ADD COLUMN country          TEXT",
@@ -311,10 +433,23 @@ async function initSchema() {
     "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'",
     "ALTER TABLE users ADD COLUMN account_status TEXT NOT NULL DEFAULT 'active'",
     "ALTER TABLE users ADD COLUMN ban_reason TEXT",
+    "ALTER TABLE users ADD COLUMN totp_secret TEXT",
+    "ALTER TABLE users ADD COLUMN totp_secret_pending TEXT",
+    "ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN totp_backup_codes TEXT",
+    "ALTER TABLE users ADD COLUMN referral_code TEXT",
+    "ALTER TABLE users ADD COLUMN referred_by INTEGER REFERENCES users(id)",
     "ALTER TABLE refresh_tokens ADD COLUMN session_id INTEGER",
     "CREATE INDEX IF NOT EXISTS idx_price_history_symbol_time ON price_history(symbol, recorded_at)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code)",
+    "CREATE INDEX IF NOT EXISTS idx_rate_limit_scope_id_time ON rate_limit_entries(scope, identifier, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_security_events_type_time ON security_events(type, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_trusted_devices_user_device ON trusted_devices(user_id, device_id)",
+    "CREATE INDEX IF NOT EXISTS idx_auto_invest_status_next_run ON auto_invest_plans(status, next_run_at)",
+    "CREATE INDEX IF NOT EXISTS idx_price_alerts_status_symbol ON price_alerts(status, symbol)",
     "ALTER TABLE price_cache ADD COLUMN asset_type TEXT NOT NULL DEFAULT 'crypto'",
     "ALTER TABLE transactions ADD COLUMN reference_id TEXT",
+    "ALTER TABLE transactions ADD COLUMN source TEXT",
   ];
   for (const sql of migrations) {
     try { await db.execute(sql); } catch (_) { /* column already exists — skip */ }

@@ -3,6 +3,7 @@ const { queryOne, queryAll, execute }=require("../db");
 const { requirePermission, requireOwner }=require("../middleware/auth");
 const { notifyAdmins, configured, notifyUserPush }=require("../services/push");
 const { valuePortfolio }=require("../services/portfolioValuation");
+const { checkReferralBonus }=require("../services/referrals");
 const slug=s=>String(s||"").trim().toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"").slice(0,40)||"role";
 const parse=v=>{try{return JSON.parse(v||"{}");}catch{return {};}};
 // Writes a row the user will see in Notifications > Recent Activity. Reuses
@@ -11,7 +12,7 @@ async function notifyUser(userId,type,label){await execute("INSERT INTO activity
 // Audit trail for admin actions that had nowhere to log a reason (revoke had none;
 // ban/reject already partly persisted theirs but weren't in one queryable place).
 async function logAdminAction(admin,action,targetUserId,reason){await execute("INSERT INTO admin_actions (admin_id,admin_email,action,target_user_id,reason) VALUES (?,?,?,?,?)",[admin.id,admin.email,action,targetUserId,reason||null]);}
-async function applyRequest(r,admin,action,note){if(r.status!=="pending")throw new Error("Request already reviewed");if(action==="approve"){if(r.type==="deposit"){const amt=Number(r.amount||0);await execute("UPDATE users SET cash_balance=cash_balance+?,updated_at=datetime('now') WHERE id=?",[amt,r.user_id]);await execute("INSERT INTO transactions (user_id,type,symbol,amount,price,fee,total,status) VALUES (?,?,?,?,?,?,?,'completed')",[r.user_id,"deposit","USD",amt,1,0,amt]);try{const updated=await queryOne("SELECT cash_balance FROM users WHERE id=?",[r.user_id]);await notifyUserPush(r.user_id,{type:"balance_update",title:"Deposit confirmed",body:`$${amt.toLocaleString()} was added to your balance`,cashBalance:updated.cash_balance});}catch(pushErr){console.error("Deposit approved but balance push failed:",pushErr.message);}}else if(r.type==="kyc"){const p=parse(r.payload);if(p.kind==="id")await execute("UPDATE users SET kyc_id_status='verified',updated_at=datetime('now') WHERE id=?",[r.user_id]);if(p.kind==="address")await execute("UPDATE users SET kyc_addr_status='verified',updated_at=datetime('now') WHERE id=?",[r.user_id]);}else if(r.type==="account_deletion"){await execute("DELETE FROM refresh_tokens WHERE user_id=?",[r.user_id]);await execute("DELETE FROM sessions WHERE user_id=?",[r.user_id]);await execute("DELETE FROM push_subscriptions WHERE user_id=?",[r.user_id]);await execute("DELETE FROM users WHERE id=?",[r.user_id]);}}if(action==="reject")await notifyUser(r.user_id,"request_rejected",`Your ${r.type.replace(/_/g," ")} request was rejected${note?`: ${note}`:""}`);await execute("UPDATE admin_requests SET status=?,reviewed_by=?,reviewed_by_email=?,reviewed_at=datetime('now'),admin_note=? WHERE id=?",[action==="approve"?"approved":"rejected",admin.id,admin.email,note||null,r.id]);}
+async function applyRequest(r,admin,action,note){if(r.status!=="pending")throw new Error("Request already reviewed");if(action==="approve"){if(r.type==="deposit"){const amt=Number(r.amount||0);await execute("UPDATE users SET cash_balance=cash_balance+?,updated_at=datetime('now') WHERE id=?",[amt,r.user_id]);await execute("INSERT INTO transactions (user_id,type,symbol,amount,price,fee,total,status) VALUES (?,?,?,?,?,?,?,'completed')",[r.user_id,"deposit","USD",amt,1,0,amt]);try{const updated=await queryOne("SELECT cash_balance FROM users WHERE id=?",[r.user_id]);await notifyUserPush(r.user_id,{type:"balance_update",title:"Deposit confirmed",body:`$${amt.toLocaleString()} was added to your balance`,cashBalance:updated.cash_balance});}catch(pushErr){console.error("Deposit approved but balance push failed:",pushErr.message);}try{await checkReferralBonus(r.user_id);}catch(refErr){console.error("Referral bonus check failed (deposit itself still succeeded):",refErr.message);}}else if(r.type==="kyc"){const p=parse(r.payload);if(p.kind==="id")await execute("UPDATE users SET kyc_id_status='verified',updated_at=datetime('now') WHERE id=?",[r.user_id]);if(p.kind==="address")await execute("UPDATE users SET kyc_addr_status='verified',updated_at=datetime('now') WHERE id=?",[r.user_id]);}else if(r.type==="account_deletion"){await execute("DELETE FROM refresh_tokens WHERE user_id=?",[r.user_id]);await execute("DELETE FROM sessions WHERE user_id=?",[r.user_id]);await execute("DELETE FROM push_subscriptions WHERE user_id=?",[r.user_id]);await execute("DELETE FROM users WHERE id=?",[r.user_id]);}}if(action==="reject")await notifyUser(r.user_id,"request_rejected",`Your ${r.type.replace(/_/g," ")} request was rejected${note?`: ${note}`:""}`);await execute("UPDATE admin_requests SET status=?,reviewed_by=?,reviewed_by_email=?,reviewed_at=datetime('now'),admin_note=? WHERE id=?",[action==="approve"?"approved":"rejected",admin.id,admin.email,note||null,r.id]);}
 
 // ── Strategy trade mirroring ────────────────────────────────────────────
 // One admin-logged trade against the strategy's own account gets mirrored,
@@ -223,6 +224,42 @@ router.post("/stocks/refresh",requirePermission("access_admin"),async(req,res)=>
     catch(err){results.push({symbol,ok:false,error:err.message});}
   }
   res.json({results,updated:results.filter(r=>r.ok).length,failed:results.filter(r=>!r.ok).length});
+}catch(err){res.status(500).json({error:err.message});}});
+
+// ── Monitoring tabs: security events, client crash reports, referrals, auto-invest ──
+router.get("/security-events",requirePermission("access_admin"),async(req,res)=>{try{
+  const type=String(req.query.type||"").trim();
+  const rows=type
+    ? await queryAll("SELECT se.*, u.email AS user_email FROM security_events se LEFT JOIN users u ON u.id=se.user_id WHERE se.type=? ORDER BY se.created_at DESC LIMIT 100",[type])
+    : await queryAll("SELECT se.*, u.email AS user_email FROM security_events se LEFT JOIN users u ON u.id=se.user_id ORDER BY se.created_at DESC LIMIT 100");
+  res.json({events:rows.map(r=>({...r,metadata:parse(r.metadata)}))});
+}catch(err){res.status(500).json({error:err.message});}});
+
+router.get("/client-errors",requirePermission("access_admin"),async(req,res)=>{try{
+  const rows=await queryAll("SELECT ce.*, u.email AS user_email FROM client_errors ce LEFT JOIN users u ON u.id=ce.user_id ORDER BY ce.created_at DESC LIMIT 100");
+  res.json({errors:rows});
+}catch(err){res.status(500).json({error:err.message});}});
+
+router.get("/referrals",requirePermission("access_admin"),async(req,res)=>{try{
+  const rows=await queryAll(
+    `SELECT r.id, r.status, r.threshold_amount, r.completed_at, r.created_at,
+            ref.email AS referrer_email, ref.name AS referrer_name,
+            ree.email AS referee_email, ree.name AS referee_name
+     FROM referrals r
+     JOIN users ref ON ref.id=r.referrer_id
+     JOIN users ree ON ree.id=r.referee_id
+     ORDER BY r.created_at DESC LIMIT 100`
+  );
+  res.json({referrals:rows});
+}catch(err){res.status(500).json({error:err.message});}});
+
+router.get("/auto-invest-plans",requirePermission("access_admin"),async(req,res)=>{try{
+  const rows=await queryAll(
+    `SELECT aip.*, u.email AS user_email FROM auto_invest_plans aip
+     JOIN users u ON u.id=aip.user_id
+     ORDER BY aip.created_at DESC LIMIT 100`
+  );
+  res.json({plans:rows});
 }catch(err){res.status(500).json({error:err.message});}});
 
 module.exports=router;

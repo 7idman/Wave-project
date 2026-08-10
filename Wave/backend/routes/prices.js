@@ -3,7 +3,8 @@
  * GET /api/prices         — All coin prices (cached, refreshed every 60s)
  * GET /api/prices/:symbol — Single coin price
  *
- * Uses CoinGecko free API — no key required for basic usage.
+ * Uses CoinGecko API. Set COINGECKO_API_KEY on Railway to use your real key
+ * (demo-tier header shown below — see note if you're on Pro tier instead).
  */
 
 const router = require("express").Router();

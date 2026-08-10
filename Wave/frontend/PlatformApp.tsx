@@ -2,7 +2,7 @@ import React, { Suspense, lazy, useState, useEffect, useCallback, useRef } from 
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 import "./styles/platform.css";
 import { api } from "./api/client";
-import type { User, Price, Holding, Portfolio, Tx, Strategy, CopierPortfolio, ManagedPortfolio, TierInfo, BalancePoint, WalletAnalytics } from "./types";
+import type { User, Price, Portfolio, Tx, Strategy, CopierPortfolio, ManagedPortfolio, TierInfo, BalancePoint, WalletAnalytics } from "./types";
 import type { AppSettings, SiteUpdate, LoginEvent, Activity, ChartPt } from "./types/platform";
 import { LANG, LANGUAGE_OPTIONS } from "./data/languages";
 import { COINS, RANGE_POINTS, RANGE_VOL, FB_PRICES, LANDING_CHARTS, LANDING_META, COIN_STATS, COIN_DETAILS } from "./data/market";
@@ -10,6 +10,9 @@ import type { Range, LandingRange } from "./data/market";
 import { generateChart as genChart } from "./utils/charts";
 import { useWindowWidth as useWW } from "./hooks/useWindowWidth";
 import { CoinIcon, WaveLogo, AppIcon, CT, Toggle, Modal } from "./components/PlatformPrimitives";
+import { Turnstile } from "./components/Turnstile";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { TradingViewTicker } from "./components/TradingViewTicker";
 
 const AdminPanel=lazy(()=>import("./admin/AdminPanel"));
 
@@ -70,7 +73,7 @@ export default function App(){
       const nm=u.name||"User";
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
       setAccountLoading(true);
-      setUser({id:u.id,name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined,role:u.role,permissions:u.permissions});
+      setUser({id:u.id,name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined,role:u.role,permissions:u.permissions,totpEnabled:u.totpEnabled});
       // right default currency one time only, and never again once the user (or this logic)
       // has set a currency, so it can never silently overwrite a manual choice.
       if(u.country&&!localStorage.getItem("wave_currency_auto")){
@@ -99,6 +102,17 @@ export default function App(){
   const[regDob,setRegDob]     =useState("");
   const[regCountry,setRegCountry]=useState("");
   const[regAgree,setRegAgree] =useState(false);
+  const[regReferralCode,setRegReferralCode]=useState("");
+  const[regTurnstileToken,setRegTurnstileToken]=useState("");
+  const[regTurnstileKey,setRegTurnstileKey]=useState(0); // bumped to force a fresh widget after a failed/used token
+  // A referral link (?ref=CODE) pre-fills the signup field so a friend
+  // doesn't have to type the code by hand.
+  useEffect(()=>{
+    try{
+      const ref=new URLSearchParams(window.location.search).get("ref");
+      if(ref)setRegReferralCode(ref.trim().toUpperCase());
+    }catch{}
+  },[]);
   const[showTerms,setShowTerms]=useState<string>(""); // "terms"|"privacy"|"" — inline on login page
   const[prices,setPrices]     =useState<Record<string,Price>>(FB_PRICES);
   const[priceDir,setPriceDir] =useState<Record<string,boolean>>(Object.fromEntries(Object.keys(FB_PRICES).map(s=>[s,(FB_PRICES[s].change24h||0)>=0])));
@@ -111,6 +125,8 @@ export default function App(){
   // is loaded before the dashboard is shown.
   const[port,setPort]         =useState<Portfolio>({cashBalance:0,totalPortfolioValue:0,totalValue:0,holdings:[]});
   const[txs,setTxs]           =useState<Tx[]>([]);
+  const[referralData,setReferralData]=useState<{code:string|null;totalEarned:number;referrerBonus:number;refereeBonus:number;depositThreshold:number;referrals:{id:number;refereeName:string;status:string;thresholdAmount:number;completedAt:string|null;createdAt:string}[]}|null>(null);
+  const[referralLoading,setReferralLoading]=useState(false);
   const[charts,setCharts]     =useState<Record<string,ChartPt[]>>({});
   const[selCoin,setSelCoin]   =useState("BTC");
   const[chartRange,setChartRange]=useState<Range>("1D");
@@ -120,6 +136,16 @@ export default function App(){
   const[tamt,setTamt]         =useState("");
   const[selStock,setSelStock] =useState("AAPL");
   const[stockSide,setStockSide]=useState<"buy"|"sell">("buy");
+  const[autoInvestPlans,setAutoInvestPlans]=useState<{id:number;symbol:string;weekly_amount:number;status:string;next_run_at:string}[]>([]);
+  const[autoInvestSymbol,setAutoInvestSymbol]=useState("AAPL");
+  const[autoInvestAmt,setAutoInvestAmt]=useState("");
+  const[autoInvestLoading,setAutoInvestLoading]=useState(false);
+  const[priceAlerts,setPriceAlerts]=useState<{id:number;symbol:string;condition:string;target_price:number;status:string;created_at:string}[]>([]);
+  const[priceAlertsOpen,setPriceAlertsOpen]=useState(false);
+  const[paSymbol,setPaSymbol]=useState("BTC");
+  const[paCondition,setPaCondition]=useState<"above"|"below">("above");
+  const[paTarget,setPaTarget]=useState("");
+  const[paLoading,setPaLoading]=useState(false);
   const[stockAmt,setStockAmt] =useState("");
   const[stockSearch,setStockSearch]=useState("");
   const[loading,setLoading]   =useState(false);
@@ -169,6 +195,9 @@ export default function App(){
   };
   const onSidebarTouchEnd=()=>{ sidebarTouchRef.current=null; };
   const[loginErr,setLoginErr] =useState("");
+  const[pending2FAToken,setPending2FAToken]=useState<string|null>(null);
+  const[pendingRiskOtpToken,setPendingRiskOtpToken]=useState<string|null>(null);
+  const[twoFACode,setTwoFACode]=useState("");
   const[siteUpdates,setSiteUpdates]=useState<SiteUpdate[]>([]);
   const[loginHistory,setLoginHistory]=useState<LoginEvent[]>([]);
   const[activities,setActivities]=useState<Activity[]>([]);
@@ -195,9 +224,9 @@ export default function App(){
   const[appSettings,setAppSettings]=useState<AppSettings>(()=>{
     try{
       const saved=localStorage.getItem("wave_prefs");
-      if(saved) return {...{twoFA:false,notifications:true,currency:"USD",theme:"Light",language:"English"},...JSON.parse(saved)};
+      if(saved) return {...{notifications:true,currency:"USD",theme:"Light",language:"English"},...JSON.parse(saved)};
     }catch{}
-    return {twoFA:false,notifications:true,currency:"USD",theme:"Light",language:"English"};
+    return {notifications:true,currency:"USD",theme:"Light",language:"English"};
   });
   // Persist preferences whenever they change
   useEffect(()=>{try{localStorage.setItem("wave_prefs",JSON.stringify(appSettings));}catch{}},[appSettings]);
@@ -210,12 +239,22 @@ export default function App(){
   const[addrOpen,setAddrOpen]     =useState(false);
   const[pwOpen,setPwOpen]         =useState(false);
   const[deleteOpen,setDeleteOpen] =useState(false);
+  const[twoFASetupOpen,setTwoFASetupOpen]=useState(false);
+  const[twoFADisableOpen,setTwoFADisableOpen]=useState(false);
+  const[twoFAStage,setTwoFAStage]=useState<"qr"|"backupCodes">("qr");
+  const[twoFASecret,setTwoFASecret]=useState("");
+  const[twoFAQr,setTwoFAQr]=useState("");
+  const[twoFASetupCode,setTwoFASetupCode]=useState("");
+  const[twoFABackupCodes,setTwoFABackupCodes]=useState<string[]>([]);
+  const[twoFADisablePw,setTwoFADisablePw]=useState("");
+  const[twoFADisableCode,setTwoFADisableCode]=useState("");
 
   // Edit profile form state
   const[editName,setEditName]     =useState("");
-  const[editPhone,setEditPhone]   =useState("");
   const[avatarPreview,setAvatarPreview]=useState<string|null>(null);
   const[phoneInput,setPhoneInput] =useState("");
+  const[phoneStage,setPhoneStage] =useState<"enter"|"code">("enter");
+  const[phoneCode,setPhoneCode]   =useState("");
   const[idFile,setIdFile]         =useState<File|null>(null);
   const[addrFile,setAddrFile]     =useState<File|null>(null);
   const[pwCurrent,setPwCurrent]   =useState("");
@@ -434,24 +473,103 @@ export default function App(){
   const oauthNotReady=(provider:string)=>{
   toast2(`${provider} sign-in isn't connected yet — this will work automatically once ${provider} OAuth is configured on the backend.`,"⚠",false);
 };
+  const[loginTurnstileRequired,setLoginTurnstileRequired]=useState(false);
+  const[loginTurnstileToken,setLoginTurnstileToken]=useState("");
+  const[loginTurnstileKey,setLoginTurnstileKey]=useState(0);
   const doEmail=async()=>{
     if(!email)return setLoginErr("Please enter your email.");
     if(!pw)   return setLoginErr("Please enter your password.");
+    if(loginTurnstileRequired&&!loginTurnstileToken)return setLoginErr("Please complete the verification challenge.");
     setLoginErr("");setLoading(true);
     try{
-      const d=await api.post("/auth/login",{email,password:pw});
+      const d=await api.post("/auth/login",{email,password:pw,turnstileToken:loginTurnstileToken||undefined});
+      if(d.requires2FA){
+        setPending2FAToken(d.tempToken);
+        setLoading(false);
+        return;
+      }
+      if(d.requiresOTP){
+        setPendingRiskOtpToken(d.tempToken);
+        setLoading(false);
+        return;
+      }
       api.setTokens(d.accessToken,d.refreshToken);
       const u=d.user;
       const nm=u.name||email.split("@")[0]||"User";
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
       setAccountLoading(true);
-      setUser({id:u.id,name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined,role:u.role,permissions:u.permissions});
+      setUser({id:u.id,name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined,role:u.role,permissions:u.permissions,totpEnabled:u.totpEnabled});
       if(u.country&&!localStorage.getItem("wave_currency_auto")){
         setAppSettings(p=>({...p,currency:currencyForCountry(u.country)}));
         localStorage.setItem("wave_currency_auto","1");
       }
       toast2(`Welcome back, ${nm.split(" ")[0]}!`,);
-    }catch(err:any){setLoginErr(err.message||"Login failed. Check your email and password.");}
+    }catch(err:any){
+      if(err.code==="TURNSTILE_REQUIRED"){
+        setLoginTurnstileRequired(true);
+        setLoginTurnstileToken("");setLoginTurnstileKey(k=>k+1);
+        setLoginErr(loginTurnstileToken?"Verification failed — please try again.":"Please complete the verification challenge below, then sign in again.");
+      }else{
+        setLoginErr(err.message||"Login failed. Check your email and password.");
+      }
+    }
+    finally{setLoading(false);}
+  };
+  const doTwoFAVerify=async()=>{
+    if(!pending2FAToken&&!pendingRiskOtpToken)return;
+    if(!twoFACode.trim())return setLoginErr("Enter the 6-digit code.");
+    setLoginErr("");setLoading(true);
+    try{
+      const endpoint=pending2FAToken?"/auth/2fa/verify":"/auth/risk-otp/verify";
+      const tempToken=pending2FAToken||pendingRiskOtpToken;
+      const d=await api.post(endpoint,{tempToken,code:twoFACode.trim()});
+      api.setTokens(d.accessToken,d.refreshToken);
+      const u=d.user;
+      const nm=u.name||email.split("@")[0]||"User";
+      const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
+      setAccountLoading(true);
+      setUser({id:u.id,name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined,role:u.role,permissions:u.permissions,totpEnabled:u.totpEnabled});
+      if(u.country&&!localStorage.getItem("wave_currency_auto")){
+        setAppSettings(p=>({...p,currency:currencyForCountry(u.country)}));
+        localStorage.setItem("wave_currency_auto","1");
+      }
+      setPending2FAToken(null);setPendingRiskOtpToken(null);setTwoFACode("");
+      if(d.usedBackupCode) toast2(`Welcome back, ${nm.split(" ")[0]}! You used a backup code — generate new ones from Settings when you get a chance.`,"⚠");
+      else toast2(`Welcome back, ${nm.split(" ")[0]}!`);
+    }catch(err:any){setLoginErr(err.message||"Invalid code. Please try again.");}
+    finally{setLoading(false);}
+  };
+  const startTwoFASetup=async()=>{
+    setTwoFAStage("qr");setTwoFASetupCode("");setTwoFASecret("");setTwoFAQr("");
+    setTwoFASetupOpen(true);
+    try{
+      const d=await api.post("/auth/2fa/setup",{});
+      setTwoFASecret(d.secret);setTwoFAQr(d.qrCodeDataUrl);
+    }catch(err:any){
+      toast2(err.message||"Couldn't start 2FA setup.","⚠",false);
+      setTwoFASetupOpen(false);
+    }
+  };
+  const confirmTwoFASetup=async()=>{
+    if(!twoFASetupCode.trim())return toast2("Enter the 6-digit code from your authenticator app.","⚠",false);
+    setLoading(true);
+    try{
+      const d=await api.post("/auth/2fa/enable",{code:twoFASetupCode.trim()});
+      setTwoFABackupCodes(d.backupCodes||[]);
+      setTwoFAStage("backupCodes");
+      setUser(p=>p?{...p,totpEnabled:true}:p);
+    }catch(err:any){toast2(err.message||"Invalid code.","⚠",false);}
+    finally{setLoading(false);}
+  };
+  const confirmTwoFADisable=async()=>{
+    if(!twoFADisablePw||!twoFADisableCode.trim())return toast2("Enter your password and a code.","⚠",false);
+    setLoading(true);
+    try{
+      await api.post("/auth/2fa/disable",{password:twoFADisablePw,code:twoFADisableCode.trim()});
+      setUser(p=>p?{...p,totpEnabled:false}:p);
+      setTwoFADisableOpen(false);setTwoFADisablePw("");setTwoFADisableCode("");
+      toast2("Two-factor authentication turned off.");
+    }catch(err:any){toast2(err.message||"Couldn't disable 2FA.","⚠",false);}
     finally{setLoading(false);}
   };
   const doRegister=async()=>{
@@ -463,19 +581,20 @@ export default function App(){
     if(!regDob)return setLoginErr("Please enter your date of birth.");
     if(!regCountry)return setLoginErr("Please select your country.");
     if(!regAgree)return setLoginErr("Please accept the Terms & Privacy Policy.");
+    if(!regTurnstileToken)return setLoginErr("Please complete the verification challenge.");
     setLoginErr("");setLoading(true);
     try{
-      const d=await api.post("/auth/register",{email:regEmail,name:regName,password:regPw,date_of_birth:regDob,country:regCountry});
+      const d=await api.post("/auth/register",{email:regEmail,name:regName,password:regPw,date_of_birth:regDob,country:regCountry,referralCode:regReferralCode.trim()||undefined,turnstileToken:regTurnstileToken});
       api.setTokens(d.accessToken,d.refreshToken);
       const u=d.user;
       const nm=u.name||regName||"User";
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
       setAccountLoading(true);
-      setUser({id:u.id,name:nm,email:u.email,initials,role:u.role,permissions:u.permissions});
+      setUser({id:u.id,name:nm,email:u.email,initials,role:u.role,permissions:u.permissions,totpEnabled:u.totpEnabled});
       setAppSettings(p=>({...p,currency:currencyForCountry(regCountry)}));
       localStorage.setItem("wave_currency_auto","1");
       toast2(`Welcome to Wave, ${nm.split(" ")[0]}!`,);
-    }catch(err:any){setLoginErr(err.message||"Registration failed.");}
+    }catch(err:any){setLoginErr(err.message||"Registration failed.");setRegTurnstileToken("");setRegTurnstileKey(k=>k+1);}
     finally{setLoading(false);}
   };
   const doLogout=async()=>{
@@ -495,6 +614,13 @@ export default function App(){
       setLoginHistory(items=>items.filter(item=>item.id!==session.id));
       toast2(`${session.device} signed out`);
     }catch(e:any){toast2(e.message||"Unable to sign out this device","âš ",false);}
+  };
+  const revokeDeviceTrust=async(session:LoginEvent)=>{
+    try{
+      await api.delete(`/auth/trusted-devices/${session.id}`,{});
+      setLoginHistory(items=>items.map(item=>item.id===session.id?{...item,trusted:false}:item));
+      toast2("Device trust revoked");
+    }catch(e:any){toast2(e.message||"Unable to revoke trust","âš ",false);}
   };
 
   const checkPushStatus=async()=>{
@@ -593,30 +719,119 @@ export default function App(){
     return()=>navigator.serviceWorker.removeEventListener("message",handler);
   },[]);
 
+  // Fetch-on-tab-open, same pattern used across the admin panel: only hit
+  // the network when the user actually opens the Referrals page, and only
+  // once per visit (unless they navigate away and back).
+  useEffect(()=>{
+    if(page!=="referrals"||!user)return;
+    setReferralLoading(true);
+    api.get("/referrals/me").then(setReferralData).catch(e=>toast2(e.message||"Couldn't load referrals","⚠",false)).finally(()=>setReferralLoading(false));
+  },[page,user]);
+
+  const loadAutoInvestPlans=useCallback(()=>{
+    api.get("/auto-invest/plans").then(d=>setAutoInvestPlans(d.plans||[])).catch(e=>console.warn("auto-invest plans:",e.message));
+  },[]);
+  useEffect(()=>{
+    if(page!=="stocks"||!user)return;
+    loadAutoInvestPlans();
+  },[page,user,loadAutoInvestPlans]);
+  const doCreateAutoInvest=async()=>{
+    const amt=parseFloat(autoInvestAmt);
+    if(!amt||amt<25)return toast2("Minimum weekly amount is $25","⚠",false);
+    setAutoInvestLoading(true);
+    try{
+      await api.post("/auto-invest/plans",{symbol:autoInvestSymbol,weeklyAmount:amt});
+      setAutoInvestAmt("");
+      loadAutoInvestPlans();
+      toast2(`Auto-invest set up — $${amt}/week into ${autoInvestSymbol}`);
+    }catch(e:any){toast2(e.message,"⚠",false);}
+    finally{setAutoInvestLoading(false);}
+  };
+  const doPauseResumeAutoInvest=async(plan:{id:number;status:string})=>{
+    try{
+      await api.patch(`/auto-invest/plans/${plan.id}`,{status:plan.status==="active"?"paused":"active"});
+      loadAutoInvestPlans();
+    }catch(e:any){toast2(e.message,"⚠",false);}
+  };
+  const doCancelAutoInvest=async(plan:{id:number})=>{
+    try{
+      await api.patch(`/auto-invest/plans/${plan.id}`,{status:"cancelled"});
+      loadAutoInvestPlans();
+      toast2("Auto-invest plan cancelled");
+    }catch(e:any){toast2(e.message,"⚠",false);}
+  };
+
+  const loadPriceAlerts=useCallback(()=>{
+    api.get("/price-alerts").then(d=>setPriceAlerts(d.alerts||[])).catch(e=>console.warn("price alerts:",e.message));
+  },[]);
+  useEffect(()=>{
+    if(!priceAlertsOpen)return;
+    loadPriceAlerts();
+  },[priceAlertsOpen,loadPriceAlerts]);
+  const doCreatePriceAlert=async()=>{
+    const target=parseFloat(paTarget);
+    if(!target||target<=0)return toast2("Enter a valid target price","⚠",false);
+    setPaLoading(true);
+    try{
+      await api.post("/price-alerts",{symbol:paSymbol,condition:paCondition,targetPrice:target});
+      setPaTarget("");
+      loadPriceAlerts();
+      toast2(`Alert set: ${paSymbol} ${paCondition} $${target}`);
+    }catch(e:any){toast2(e.message,"⚠",false);}
+    finally{setPaLoading(false);}
+  };
+  const doCancelPriceAlert=async(id:number)=>{
+    try{
+      await api.patch(`/price-alerts/${id}`,{});
+      loadPriceAlerts();
+    }catch(e:any){toast2(e.message,"⚠",false);}
+  };
+
   /* Save profile */
   const doSaveProfile=async()=>{
     if(!editName.trim()&&!avatarPreview)return toast2("Nothing to update","⚠",false);
     setLoading(true);
     try{
-     const d=await api.patch("/auth/profile",{name:editName||undefined,avatar_url:avatarPreview||undefined});
-      const u=d.user;
-      const nm=u.name||editName||user?.name||"User";
+      let newAvatarUrl:string|undefined;
+      if(avatarPreview){
+        const av=await api.post("/account/avatar",{image:avatarPreview});
+        newAvatarUrl=av.avatarUrl;
+      }
+      let nm=user?.name||"User";
+      if(editName.trim()){
+        const d=await api.patch("/auth/profile",{name:editName});
+        nm=d.user.name||editName;
+      }
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
- setUser(p=>({...p!,name:nm,initials,avatarUrl:u.avatarUrl||p?.avatarUrl}));
+      setUser(p=>({...p!,name:nm,initials,avatarUrl:newAvatarUrl||p?.avatarUrl}));
+      setAvatarPreview(null);
       setEditOpen(false);toast2("Profile updated","✓");
     }catch(e:any){toast2(e.message,"⚠",false);}
     finally{setLoading(false);}
   };
 
-  /* Add phone */
-  const doAddPhone=async()=>{
+  /* Add phone — two real steps: send code, then verify it. Replaces the
+     old flow which claimed to send a code but actually just saved the
+     number and marked it verified with no check at all. */
+  const doSendPhoneCode=async()=>{
     if(!phoneInput.trim())return toast2("Enter a phone number","⚠",false);
     setLoading(true);
     try{
-      await api.patch("/auth/profile",{phone:phoneInput});
-      setUser(p=>({...p!,phone:phoneInput}));
+      await api.post("/phone/send-code",{phone:phoneInput.trim()});
+      setPhoneStage("code");
+      toast2("Verification code sent");
+    }catch(e:any){toast2(e.message,"⚠",false);}
+    finally{setLoading(false);}
+  };
+  const doVerifyPhoneCode=async()=>{
+    if(!phoneCode.trim())return toast2("Enter the code you received","⚠",false);
+    setLoading(true);
+    try{
+      const d=await api.post("/phone/verify-code",{code:phoneCode.trim()});
+      setUser(p=>p?{...p,phone:d.phone}:p);
       setKycStatus(p=>({...p,phone:"verified"}));
-      setPhoneOpen(false);toast2("Phone number added",);
+      setPhoneOpen(false);setPhoneStage("enter");setPhoneInput("");setPhoneCode("");
+      toast2("Phone number verified");
     }catch(e:any){toast2(e.message,"⚠",false);}
     finally{setLoading(false);}
   };
@@ -673,24 +888,50 @@ export default function App(){
   };
 
   /* Trade */
+  const[withdrawTurnstileToken,setWithdrawTurnstileToken]=useState("");
+  const[withdrawTurnstileKey,setWithdrawTurnstileKey]=useState(0);
+  const[withdrawConfirmOpen,setWithdrawConfirmOpen]=useState(false);
+  const[withdrawConfirmTxId,setWithdrawConfirmTxId]=useState<number|null>(null);
+  const[withdrawConfirmCode,setWithdrawConfirmCode]=useState("");
   const doTrade=async()=>{
   const amt=parseFloat(tamt);
   if(!amt||amt<=0)return toast2("Enter a valid amount","⚠",false);
   if(ttype==="deposit"&&amt<100)return toast2("Minimum deposit is $100","⚠",false);
+  if(ttype==="withdraw"&&!withdrawTurnstileToken)return toast2("Please complete the verification challenge.","⚠",false);
   setLoading(true);
   try{
-    const d=await api.post("/trades",{type:ttype,symbol:tcoin,amount:amt});
+    const d=await api.post("/trades",{type:ttype,symbol:tcoin,amount:amt,turnstileToken:ttype==="withdraw"?withdrawTurnstileToken:undefined});
     if(ttype==="deposit"){
       setDepositReceipt({referenceId:d.referenceId,amount:amt,cashBalance:d.cashBalance,bonus:d.bonus||null,timestamp:new Date().toISOString()});
       api.get("/account/tier").then(setTierInfo).catch(()=>{});
+    }else if(d.transactionId){
+      // Large withdrawal — backend needs a phone OTP before any money moves.
+      setWithdrawConfirmTxId(d.transactionId);
+      setWithdrawConfirmOpen(true);
+      toast2(d.message);
     }else{
       toast2(d.message,ttype==="buy"?"🟢":"🔴");
     }
     setTamt("");
+    setWithdrawTurnstileToken("");setWithdrawTurnstileKey(k=>k+1);
     await loadData();
-  }catch(e:any){toast2(e.message,"⚠",false);}
+  }catch(e:any){
+    toast2(e.message,"⚠",false);
+    if(ttype==="withdraw"){setWithdrawTurnstileToken("");setWithdrawTurnstileKey(k=>k+1);}
+  }
   finally{setLoading(false);}
-}; 
+};
+  const doConfirmWithdrawal=async()=>{
+    if(!withdrawConfirmTxId||!withdrawConfirmCode.trim())return toast2("Enter the code you received","⚠",false);
+    setLoading(true);
+    try{
+      const d=await api.post(`/trades/withdraw/${withdrawConfirmTxId}/confirm`,{code:withdrawConfirmCode.trim()});
+      toast2(d.message,"🔴");
+      setWithdrawConfirmOpen(false);setWithdrawConfirmTxId(null);setWithdrawConfirmCode("");
+      await loadData();
+    }catch(e:any){toast2(e.message,"⚠",false);}
+    finally{setLoading(false);}
+  };
 
   const doStockTrade=async()=>{
     const amt=parseFloat(stockAmt);
@@ -795,11 +1036,10 @@ export default function App(){
     {id:"invest",icon:"invest" as const,label:"Investment Plans"},
     {id:"copy",icon:"signal" as const,label:"Signal Copier"},
     {id:"managed",icon:"managed" as const,label:"Account Management"},
+    {id:"referrals",icon:"gift" as const,label:"Referrals"},
   ];
-  const INVESTMENT_PLAN_TIERS:Record<string,number>={Starter:50,Balanced:250,Growth:1000};
   const FEATURED_PLAN_PRICES:Record<string,number>={Foundation:250,Momentum:1000,Legacy:10000};
-  const ACCOUNT_MANAGEMENT_FEE=1500;
-  const pageTitle:Record<string,string>={invest:"Investment Plans",copy:"Signal Copier",managed:"Account Management"};
+  const pageTitle:Record<string,string>={invest:"Investment Plans",copy:"Signal Copier",managed:"Account Management",referrals:"Referrals"};
   const nav=(id:string)=>{setPage(id);setSbOpen(false);};
   const onActivate=(event:React.KeyboardEvent<HTMLElement>,action:()=>void)=>{
     if(event.key==="Enter"||event.key===" "){event.preventDefault();action();}
@@ -855,12 +1095,6 @@ export default function App(){
         </div>
       )}
     </div>;
-  };
-
-  const kycLabel=(status:string)=>{
-    if(status==="verified") return <span className="badge badge-green">Verified</span>;
-    if(status==="review")   return <span className="badge badge-blue">KYC-Unverified</span>;
-    return null;
   };
 
   /* ═══════════ LOGIN ═══════════ */
@@ -938,11 +1172,17 @@ export default function App(){
           <div className="landing-auth-divider">or use email</div>
 
           {/* LOGIN FORM */}
-          {authTab==="login"&&<>
+          {authTab==="login"&&((pending2FAToken||pendingRiskOtpToken)?<>
+            <div style={{fontSize:13,color:"var(--text3)",marginBottom:16,lineHeight:1.6}}>{pending2FAToken?"Enter the 6-digit code from your authenticator app, or one of your backup codes.":"For your security, we texted a code to your verified phone. Enter it below."}</div>
+            <input className="inp" placeholder="123456" inputMode="numeric" autoComplete="one-time-code" style={{marginBottom:16,letterSpacing:2,textAlign:"center",fontSize:18}} value={twoFACode} onChange={e=>{setTwoFACode(e.target.value);setLoginErr("");}} onKeyDown={e=>e.key==="Enter"&&doTwoFAVerify()} autoFocus/>
+            <button className="btn btn-primary btn-lg" style={{width:"100%",borderRadius:12,marginBottom:12}} onClick={doTwoFAVerify} disabled={loading}>{loading?"Verifying…":"Verify"}</button>
+            <button className="btn btn-ghost" style={{width:"100%"}} onClick={()=>{setPending2FAToken(null);setPendingRiskOtpToken(null);setTwoFACode("");setLoginErr("");}}>Back to sign in</button>
+          </>:<>
             <input className="inp" placeholder="Email address" type="email" autoComplete="email" style={{marginBottom:10}} value={email} onChange={e=>{setEmail(e.target.value);setLoginErr("");}}/>
             <input className="inp" placeholder="Password" type="password" autoComplete="current-password" style={{marginBottom:16}} value={pw} onChange={e=>{setPw(e.target.value);setLoginErr("");}} onKeyDown={e=>e.key==="Enter"&&doEmail()}/>
+            {loginTurnstileRequired&&<Turnstile key={loginTurnstileKey} onVerify={setLoginTurnstileToken} onError={()=>setLoginTurnstileToken("")}/>}
             <button className="btn btn-primary btn-lg" style={{width:"100%",borderRadius:12,marginBottom:12}} onClick={doEmail} disabled={loading}>{loading?"Signing in…":"Sign In"}</button>
-          </>}
+          </>)}
 
           
 
@@ -1030,6 +1270,13 @@ export default function App(){
                 <div style={{fontSize:10,color:"var(--text3)"}}>{regPw.length<6?"Too short":regPw.length<8?"Weak":regPw.length<12?"Fair":regPw.length<16?"Good":"Strong Password comrade"}</div>
               </div>
             )}
+            {/* Referral code (optional) */}
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Referral Code (optional)</div>
+              <input className="inp" placeholder="e.g. AL5MFTPN" style={{textTransform:"uppercase"}} value={regReferralCode} onChange={e=>setRegReferralCode(e.target.value.toUpperCase())}/>
+            </div>
+            {/* Cloudflare Turnstile — bot/abuse check, verified again server-side */}
+            <Turnstile key={regTurnstileKey} onVerify={setRegTurnstileToken} onError={()=>setRegTurnstileToken("")}/>
             {/* Terms checkbox */}
             <label style={{display:"flex",alignItems:"flex-start",gap:10,marginBottom:showTerms?8:16,cursor:"pointer"}}>
               <div onClick={()=>setRegAgree(!regAgree)} style={{width:18,height:18,borderRadius:5,border:`2px solid ${regAgree?"var(--indigo2)":"var(--border2)"}`,background:regAgree?"var(--indigo)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1,transition:"all .15s"}}>
@@ -1142,13 +1389,22 @@ export default function App(){
         </button>
       </Modal>
 
-      <Modal open={phoneOpen} onClose={()=>setPhoneOpen(false)} title="Add Phone Number">
-        <div style={{fontSize:13,color:"var(--text3)",marginBottom:16}}>We'll send a verification code to this number.</div>
-        <div className="tlab">Phone Number</div>
-        <input className="inp" placeholder="+1 (555) 000-0000" type="tel" style={{marginBottom:20}} value={phoneInput} onChange={e=>setPhoneInput(e.target.value)}/>
-        <button className="btn btn-primary" style={{width:"100%",justifyContent:"center"}} onClick={doAddPhone} disabled={loading}>
-          {loading?"Sending…":"Send Verification Code"}
-        </button>
+      <Modal open={phoneOpen} onClose={()=>{setPhoneOpen(false);setPhoneStage("enter");setPhoneCode("");}} title="Add Phone Number">
+        {phoneStage==="enter"?<>
+          <div style={{fontSize:13,color:"var(--text3)",marginBottom:16}}>We'll send a verification code to this number.</div>
+          <div className="tlab">Phone Number</div>
+          <input className="inp" placeholder="+1 (555) 000-0000" type="tel" style={{marginBottom:20}} value={phoneInput} onChange={e=>setPhoneInput(e.target.value)}/>
+          <button className="btn btn-primary" style={{width:"100%",justifyContent:"center"}} onClick={doSendPhoneCode} disabled={loading}>
+            {loading?"Sending…":"Send Verification Code"}
+          </button>
+        </>:<>
+          <div style={{fontSize:13,color:"var(--text3)",marginBottom:16}}>Enter the code we texted to {phoneInput}.</div>
+          <input className="inp" placeholder="123456" inputMode="numeric" style={{marginBottom:12,letterSpacing:2,textAlign:"center",fontSize:18}} value={phoneCode} onChange={e=>setPhoneCode(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doVerifyPhoneCode()}/>
+          <button className="btn btn-primary" style={{width:"100%",justifyContent:"center",marginBottom:10}} onClick={doVerifyPhoneCode} disabled={loading}>
+            {loading?"Verifying…":"Verify"}
+          </button>
+          <button className="btn btn-ghost" style={{width:"100%"}} onClick={()=>setPhoneStage("enter")}>Use a different number</button>
+        </>}
       </Modal>
 
       <Modal open={idOpen} onClose={()=>setIdOpen(false)} title="Upload Government ID">
@@ -1191,9 +1447,67 @@ export default function App(){
         <div style={{color:"var(--red)",fontSize:13,marginBottom:16,lineHeight:1.6}}>This is permanent and cannot be undone. All your data, holdings and history will be erased.</div>
         <div className="tlab">Type DELETE to confirm</div>
         <input className="inp" placeholder="DELETE" style={{marginBottom:20}} value={deleteConfirm} onChange={e=>setDeleteConfirm(e.target.value)}/>
-        <button className="btn btn-danger" style={{width:"100%",justifyContent:"center"}} disabled={deleteConfirm!=="DELETE"} onClick={()=>{toast2("Account deletion requested. Our team will contact you.","⚠",false);setDeleteOpen(false);setDeleteConfirm("");}}>
+        <button className="btn btn-danger" style={{width:"100%",justifyContent:"center"}} disabled={deleteConfirm!=="DELETE"||loading} onClick={requestAccountDeletion}>
           Delete My Account
         </button>
+      </Modal>
+
+      <Modal open={twoFASetupOpen} onClose={()=>{setTwoFASetupOpen(false);if(twoFAStage==="backupCodes")setTwoFAStage("qr");}} title={twoFAStage==="qr"?"Set Up Two-Factor Auth":"Save Your Backup Codes"}>
+        {twoFAStage==="qr"?<>
+          <div style={{fontSize:13,color:"var(--text3)",marginBottom:16,lineHeight:1.6}}>Scan this QR code with an authenticator app (Google Authenticator, Authy, 1Password, etc.), then enter the 6-digit code it shows.</div>
+          {twoFAQr?<div style={{display:"flex",justifyContent:"center",marginBottom:16}}><img src={twoFAQr} alt="2FA QR code" style={{width:180,height:180,borderRadius:8,background:"#fff",padding:8}}/></div>
+            :<div style={{textAlign:"center",padding:20,color:"var(--text3)",fontSize:13}}>Generating QR code…</div>}
+          {twoFASecret&&<div style={{fontSize:11,color:"var(--text3)",textAlign:"center",marginBottom:16,wordBreak:"break-all"}}>Can't scan? Enter manually: <b style={{color:"var(--text2)"}}>{twoFASecret}</b></div>}
+          <input className="inp" placeholder="123456" inputMode="numeric" style={{marginBottom:16,letterSpacing:2,textAlign:"center",fontSize:18}} value={twoFASetupCode} onChange={e=>setTwoFASetupCode(e.target.value)} onKeyDown={e=>e.key==="Enter"&&confirmTwoFASetup()}/>
+          <button className="btn btn-primary btn-lg" style={{width:"100%",justifyContent:"center"}} disabled={loading||!twoFASecret} onClick={confirmTwoFASetup}>{loading?"Verifying…":"Enable 2FA"}</button>
+        </>:<>
+          <div style={{fontSize:13,color:"var(--red)",marginBottom:16,lineHeight:1.6}}>Save these backup codes somewhere safe. Each one can be used once to sign in if you lose access to your authenticator app — they won't be shown again.</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:20,fontFamily:"monospace",fontSize:14}}>
+            {twoFABackupCodes.map(c=><div key={c} style={{background:"var(--bg2)",borderRadius:6,padding:"8px 10px",textAlign:"center"}}>{c}</div>)}
+          </div>
+          <button className="btn btn-primary btn-lg" style={{width:"100%",justifyContent:"center"}} onClick={()=>{setTwoFASetupOpen(false);setTwoFAStage("qr");toast2("Two-factor authentication enabled.");}}>I've saved these codes</button>
+        </>}
+      </Modal>
+
+      <Modal open={twoFADisableOpen} onClose={()=>{setTwoFADisableOpen(false);setTwoFADisablePw("");setTwoFADisableCode("");}} title="Turn Off Two-Factor Auth">
+        <div style={{fontSize:13,color:"var(--text3)",marginBottom:16,lineHeight:1.6}}>Confirm your password and a current authenticator code to disable 2FA.</div>
+        <div className="tlab">Password</div>
+        <input className="inp" type="password" style={{marginBottom:12}} value={twoFADisablePw} onChange={e=>setTwoFADisablePw(e.target.value)}/>
+        <div className="tlab">Authenticator code</div>
+        <input className="inp" placeholder="123456" inputMode="numeric" style={{marginBottom:20,letterSpacing:2,textAlign:"center",fontSize:18}} value={twoFADisableCode} onChange={e=>setTwoFADisableCode(e.target.value)} onKeyDown={e=>e.key==="Enter"&&confirmTwoFADisable()}/>
+        <button className="btn btn-danger" style={{width:"100%",justifyContent:"center"}} disabled={loading||!twoFADisablePw||!twoFADisableCode.trim()} onClick={confirmTwoFADisable}>{loading?"Disabling…":"Turn Off 2FA"}</button>
+      </Modal>
+
+      <Modal open={withdrawConfirmOpen} onClose={()=>{setWithdrawConfirmOpen(false);setWithdrawConfirmCode("");}} title="Confirm Withdrawal">
+        <div style={{fontSize:13,color:"var(--text3)",marginBottom:16,lineHeight:1.6}}>For your security, this withdrawal needs a code sent to your verified phone.</div>
+        <input className="inp" placeholder="123456" inputMode="numeric" style={{marginBottom:20,letterSpacing:2,textAlign:"center",fontSize:18}} value={withdrawConfirmCode} onChange={e=>setWithdrawConfirmCode(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doConfirmWithdrawal()}/>
+        <button className="btn btn-danger" style={{width:"100%",justifyContent:"center"}} disabled={loading||!withdrawConfirmCode.trim()} onClick={doConfirmWithdrawal}>{loading?"Confirming…":"Confirm Withdrawal"}</button>
+      </Modal>
+
+      <Modal open={priceAlertsOpen} onClose={()=>setPriceAlertsOpen(false)} title="Price Alerts">
+        <div style={{fontSize:12,color:"var(--text3)",marginBottom:16}}>Get a push notification when a coin or stock crosses a price you set.</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+          <select className="inp" value={paSymbol} onChange={e=>setPaSymbol(e.target.value)}>
+            <optgroup label="Crypto">{Object.keys(COINS).map(sym=><option key={sym} value={sym}>{sym}</option>)}</optgroup>
+            <optgroup label="Stocks">{Object.keys(STOCK_NAMES).map(sym=><option key={sym} value={sym}>{sym}</option>)}</optgroup>
+          </select>
+          <select className="inp" value={paCondition} onChange={e=>setPaCondition(e.target.value as "above"|"below")}>
+            <option value="above">Goes above</option>
+            <option value="below">Drops below</option>
+          </select>
+        </div>
+        <div style={{display:"flex",gap:8,marginBottom:20}}>
+          <input className="inp" type="number" placeholder="Target price" inputMode="decimal" value={paTarget} onChange={e=>setPaTarget(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doCreatePriceAlert()}/>
+          <button className="btn btn-primary" onClick={doCreatePriceAlert} disabled={paLoading}>{paLoading?"Adding…":"Add"}</button>
+        </div>
+        {priceAlerts.filter(a=>a.status==="active").length===0
+          ?<div style={{fontSize:12,color:"var(--text3)",textAlign:"center",padding:"12px 0"}}>No active alerts yet.</div>
+          :priceAlerts.filter(a=>a.status==="active").map(a=>(
+            <div key={a.id} className="setting-row" style={{padding:"10px 0"}}>
+              <div style={{fontSize:13}}><b>{a.symbol}</b> {a.condition==="above"?"above":"below"} ${a.target_price.toLocaleString()}</div>
+              <button className="btn btn-ghost btn-sm" onClick={()=>doCancelPriceAlert(a.id)}>Remove</button>
+            </div>
+          ))}
       </Modal>
 
       {/* Sidebar */}
@@ -1310,7 +1624,14 @@ export default function App(){
     <ProfileMenu/>
   </div>
 </div>        {/* ══ DASHBOARD ══ */}
-        {page==="admin"&&<Suspense fallback={<div className="gcard skeleton" style={{minHeight:360}} aria-label="Loading admin center"/>}><AdminPanel currentUser={user} notify={toast2}/></Suspense>}
+        {page==="admin"&&<ErrorBoundary boundaryName="admin-panel" userId={user?.id} fallback={
+          <div className="gcard" style={{padding:32,textAlign:"center"}}>
+            <div style={{fontSize:32,marginBottom:10}}>⚠️</div>
+            <div style={{fontSize:15,fontWeight:700,marginBottom:6}}>Admin panel hit an error</div>
+            <div style={{fontSize:13,color:"var(--text3)",marginBottom:16}}>The rest of the app is unaffected. Try switching pages and back, or reload.</div>
+            <button className="btn btn-primary" onClick={()=>setPage("dashboard")}>Back to Dashboard</button>
+          </div>
+        }><Suspense fallback={<div className="gcard skeleton" style={{minHeight:360}} aria-label="Loading admin center"/>}><AdminPanel currentUser={user} notify={toast2}/></Suspense></ErrorBoundary>}
 
         <Modal open={showTour} onClose={dismissTour} title="Welcome to Wave 👋">
           <div style={{fontSize:13,color:"var(--text2)",lineHeight:1.7}}>
@@ -1323,6 +1644,7 @@ export default function App(){
         </Modal>
 
         {page==="dashboard"&&<>
+          <div style={{marginBottom:mob?12:16}}><ErrorBoundary boundaryName="tradingview-ticker" fallback={null}><TradingViewTicker/></ErrorBoundary></div>
           <div className="stats" style={{marginTop:mob?12:0}}>
             {accountLoading?[0,1,2,3].map(i=>(
               <div key={i} className="stat skeleton" style={{minHeight:88}}/>
@@ -1682,6 +2004,43 @@ export default function App(){
                 ))}
               </div>;
             })()}
+
+            <div className="gcard" style={{marginTop:20}}>
+              <div className="stitle">Auto-Invest</div>
+              <div style={{fontSize:12,color:"var(--text3)",marginBottom:16}}>Automatically buy a fixed dollar amount of a stock every week. If your balance can't cover it that week, we skip it and let you know — never a partial buy.</div>
+
+              <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr auto",gap:10,marginBottom:20,alignItems:"end"}}>
+                <div>
+                  <div className="tlab">Stock</div>
+                  <select className="inp" value={autoInvestSymbol} onChange={e=>setAutoInvestSymbol(e.target.value)}>
+                    {Object.entries(STOCK_NAMES).map(([sym,name])=><option key={sym} value={sym}>{sym} — {name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <div className="tlab">Weekly amount (min $25)</div>
+                  <input className="inp" type="number" placeholder="25" inputMode="decimal" value={autoInvestAmt} onChange={e=>setAutoInvestAmt(e.target.value)}/>
+                </div>
+                <button className="btn btn-primary" style={{height:44}} onClick={doCreateAutoInvest} disabled={autoInvestLoading}>{autoInvestLoading?"Setting up…":"Start Plan"}</button>
+              </div>
+
+              {autoInvestPlans.filter(p=>p.status!=="cancelled").length>0&&<div>
+                {autoInvestPlans.filter(p=>p.status!=="cancelled").map(p=>(
+                  <div key={p.id} className="setting-row">
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      <div style={{width:30,height:30,borderRadius:8,background:stockColor(p.symbol),color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800}}>{p.symbol.slice(0,2)}</div>
+                      <div>
+                        <div style={{fontWeight:700,fontSize:13}}>${p.weekly_amount}/week into {p.symbol}{p.status==="paused"&&<span className="badge badge-blue" style={{marginLeft:8,fontSize:9}}>Paused</span>}</div>
+                        <div style={{fontSize:11,color:"var(--text3)"}}>Next: {new Date(p.next_run_at).toLocaleDateString()}</div>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",gap:8}}>
+                      <button className="btn btn-ghost btn-sm" onClick={()=>doPauseResumeAutoInvest(p)}>{p.status==="active"?"Pause":"Resume"}</button>
+                      <button className="btn btn-danger btn-sm" onClick={()=>doCancelAutoInvest(p)}>Cancel</button>
+                    </div>
+                  </div>
+                ))}
+              </div>}
+            </div>
           </div>
         )}
 
@@ -1761,6 +2120,7 @@ export default function App(){
                     <div className="trow"><span className="trl">Fee (0.5%)</span><span className="trv">${tamt?(parseFloat(tamt)*0.005).toFixed(2):"0.00"}</span></div>
                     <div className="trow"><span className="trl">You'll be charged</span><span className="trt">${tamt?(parseFloat(tamt)*1.005).toFixed(2):"0.00"}</span></div>
                   </div>}
+                  {ttype==="withdraw"&&<Turnstile key={withdrawTurnstileKey} onVerify={setWithdrawTurnstileToken} onError={()=>setWithdrawTurnstileToken("")}/>}
                   <button className="btn btn-primary btn-lg" style={{width:"100%",background:ttype==="deposit"?"linear-gradient(135deg,#10B981,#059669)":"linear-gradient(135deg,#EF4444,#DC2626)"}} onClick={doTrade} disabled={loading}>
                     {loading?"Processing…":`${ttype==="deposit"?"Deposit":"Withdraw"}`}
                   </button>
@@ -2040,6 +2400,51 @@ export default function App(){
           </div>
         </>}
 
+        {/* ══ REFERRALS ══ */}
+        {page==="referrals"&&(
+          <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1.1fr .9fr",gap:18}}>
+            <div className="gcard" style={{padding:30,background:"linear-gradient(135deg,#1a1035,#2a1245)"}}>
+              <div style={{fontSize:11,color:"#d8b4fe",fontWeight:800,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>Refer a friend</div>
+              <div style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:26,fontWeight:900,lineHeight:1.2,color:"#fff"}}>Give ${referralData?.refereeBonus??5}, get ${referralData?.referrerBonus??10}.</div>
+              <p style={{color:"#e9d5ff",fontSize:13,lineHeight:1.6,marginTop:10}}>
+                Share your code below. When a friend signs up and deposits at least ${referralData?.depositThreshold??100}, you both get a cash bonus — usable for trading right away.
+              </p>
+              {referralLoading?<div style={{color:"#e9d5ff",fontSize:13,marginTop:20}}>Loading your code…</div>:referralData?.code?(<>
+                <div style={{display:"flex",gap:8,marginTop:20}}>
+                  <div style={{flex:1,background:"rgba(255,255,255,.1)",borderRadius:10,padding:"12px 16px",fontFamily:"monospace",fontSize:18,fontWeight:800,color:"#fff",letterSpacing:2,textAlign:"center"}}>{referralData.code}</div>
+                  <button className="btn btn-primary" onClick={()=>{navigator.clipboard?.writeText(referralData.code!);toast2("Code copied");}}>Copy</button>
+                </div>
+                <button className="btn" style={{width:"100%",marginTop:10,background:"rgba(255,255,255,.1)",color:"#fff"}} onClick={()=>{navigator.clipboard?.writeText(`${window.location.origin}?ref=${referralData.code}`);toast2("Referral link copied");}}>Copy shareable link</button>
+                <div style={{marginTop:20,paddingTop:16,borderTop:"1px solid rgba(255,255,255,.12)",display:"flex",justifyContent:"space-between"}}>
+                  <div><div style={{fontSize:11,color:"#e9d5ff"}}>Friends referred</div><div style={{fontSize:20,fontWeight:800,color:"#fff"}}>{referralData.referrals.length}</div></div>
+                  <div style={{textAlign:"right"}}><div style={{fontSize:11,color:"#e9d5ff"}}>Total earned</div><div style={{fontSize:20,fontWeight:800,color:"#fff"}}>${referralData.totalEarned.toLocaleString()}</div></div>
+                </div>
+              </>):<div style={{color:"#e9d5ff",fontSize:13,marginTop:20}}>Couldn't load your referral code — try reopening this page.</div>}
+            </div>
+
+            <div className="gcard" style={{padding:0,overflow:"hidden"}}>
+              <div style={{padding:mob?"14px 16px 12px":"22px 24px 16px",borderBottom:"1px solid var(--border)"}}>
+                <div className="stitle" style={{marginBottom:0}}>Your Referrals</div>
+              </div>
+              {referralLoading?<div style={{padding:24,color:"var(--text3)",fontSize:13}}>Loading…</div>
+                :!referralData?.referrals.length?<div style={{padding:24,color:"var(--text3)",fontSize:13}}>No referrals yet — share your code to start earning.</div>
+                :<div style={{padding:mob?"8px 16px 16px":"8px 24px 20px"}}>
+                  {referralData.referrals.map(r=>(
+                    <div key={r.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 0",borderBottom:"1px solid var(--border)"}}>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{r.refereeName}</div>
+                        <div style={{fontSize:11,color:"var(--text3)"}}>Joined {new Date(r.createdAt).toLocaleDateString()}</div>
+                      </div>
+                      {r.status==="completed"
+                        ?<span className="badge badge-green">Earned ${referralData.referrerBonus}</span>
+                        :<span className="badge badge-blue">Needs ${r.thresholdAmount} deposit</span>}
+                    </div>
+                  ))}
+                </div>}
+            </div>
+          </div>
+        )}
+
         {/* ══ HISTORY ══ */}
         {page==="history"&&(
           <div className="gcard" style={{padding:0,overflow:"hidden"}}>
@@ -2139,8 +2544,11 @@ export default function App(){
               <div className="gcard">
                 <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:4}}>🔒 Security</div>
                 <div style={{fontSize:12,color:"var(--text3)",marginBottom:16}}>Manage your account security</div>
+                <div className="setting-row">
+                  <div><div className="setting-label">Two-Factor Auth</div><div className="setting-desc">{user?.totpEnabled?"Enabled — an authenticator app is required at login":"Require an authenticator app code at login"}</div></div>
+                  <Toggle on={!!user?.totpEnabled} onToggle={()=>{user?.totpEnabled?setTwoFADisableOpen(true):startTwoFASetup();}}/>
+                </div>
                 {([
-                  {key:"twoFA",        label:"Two-Factor Auth",     desc:"Require 2FA on every login"},
                   {key:"notifications",label:"Login Notifications", desc:"Email alert on new sign-in"},
                 ] as const).map(s=>(
                   <div key={s.key} className="setting-row">
@@ -2277,8 +2685,8 @@ export default function App(){
                 <Toggle on={true} onToggle={()=>toast2("Trade alerts always on for security","🔒")}/>
               </div>
               <div className="setting-row">
-                <div><div className="setting-label">Price Alerts</div><div className="setting-desc">Get notified on major price movements</div></div>
-                <Toggle on={false} onToggle={()=>toast2("Price alerts coming soon","📈")}/>
+                <div><div className="setting-label">Price Alerts</div><div className="setting-desc">Get notified when a coin or stock hits your target price</div></div>
+                <button className="btn btn-ghost btn-sm" onClick={()=>setPriceAlertsOpen(true)}>Manage</button>
               </div>
               <div className="setting-row" style={{borderBottom:isAdmin?undefined:"none"}}>
                 <div><div className="setting-label">Live Balance Updates</div><div className="setting-desc">See your balance update on this device the moment a deposit is confirmed, even if you're already on the page</div></div>
@@ -2314,9 +2722,12 @@ export default function App(){
                       {/\bmobile\b/i.test(s.device)?"📱":"💻"}
                     </div>
                     <div>
-                      <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{s.device}{s.current&&<span className="badge badge-green" style={{marginLeft:8,fontSize:9}}>This device</span>}</div>
+                      <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{s.device}{s.current&&<span className="badge badge-green" style={{marginLeft:8,fontSize:9}}>This device</span>}{s.trusted&&<span className="badge badge-blue" style={{marginLeft:8,fontSize:9}}>Trusted</span>}</div>
                       <div style={{fontSize:11,color:"var(--text3)"}}>Signed in {new Date(s.login_at).toLocaleString()}</div>
-                      <button className="btn btn-danger btn-sm" style={{marginTop:8}} onClick={()=>signOutDevice(s)}>{s.current?"Sign out":"Sign out device"}</button>
+                      <div style={{display:"flex",gap:8,marginTop:8}}>
+                        <button className="btn btn-danger btn-sm" onClick={()=>signOutDevice(s)}>{s.current?"Sign out":"Sign out device"}</button>
+                        {s.trusted&&!s.current&&<button className="btn btn-ghost btn-sm" onClick={()=>revokeDeviceTrust(s)}>Revoke trust</button>}
+                      </div>
                     </div>
                   </div>
                   <div style={{fontSize:11,color:"var(--text3)",fontWeight:600,textAlign:"right"}}>
