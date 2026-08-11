@@ -28,7 +28,7 @@ const { verifyTurnstileToken } = require("../services/turnstile");
 const { logSecurityEvent } = require("../middleware/security");
 const { getOrSetDeviceId, isDeviceTrusted, trustDevice } = require("../services/deviceTrust");
 const { assessLoginRisk, assessSignupRisk } = require("../services/riskEngine");
-const { sendVerificationCode, checkVerificationCode } = require("../services/twilio");
+const { normalizeToE164, lookupLineType, sendVerificationCode, checkVerificationCode } = require("../services/twilio");
 const { sendVerificationEmail, sendNewDeviceLoginAlert } = require("../services/email");
 const { isDisposableEmail } = require("../services/disposableEmail");
 
@@ -203,7 +203,7 @@ passport.deserializeUser(async (id, done) => {
 // ── Register ─────────────────────────────────────────────────────────────────
 router.post("/signup-phone/send-code", async (req, res) => {
   try {
-    const phone = require("../services/twilio").normalizeToE164(req.body?.phone);
+    const phone = normalizeToE164(req.body?.phone);
     const channel = req.body?.channel === "voice" || req.body?.channel === "call" ? "voice" : "sms";
     if (!phone) return res.status(400).json({ error: "Please enter a valid phone number." });
 
@@ -215,7 +215,6 @@ router.post("/signup-phone/send-code", async (req, res) => {
       return res.status(429).json({ error: "Too many verification requests. Please try again later." });
     }
 
-    const { lookupLineType } = require("../services/twilio");
     const lookup = await lookupLineType(phone);
     if (lookup.error === "twilio_not_configured") {
       console.error("Twilio is not configured - failing closed on signup phone verification.");
@@ -243,7 +242,7 @@ router.post("/signup-phone/send-code", async (req, res) => {
 
 router.post("/signup-phone/verify-code", async (req, res) => {
   try {
-    const phone = require("../services/twilio").normalizeToE164(req.body?.phone);
+    const phone = normalizeToE164(req.body?.phone);
     const { code } = req.body;
     if (!phone || !code) return res.status(400).json({ error: "phone and code are required" });
 
@@ -344,13 +343,8 @@ router.post("/register", async (req, res) => {
     // case-sensitive by default), and a returning user typing a different
     // case than they signed up with would fail to log in.
     email = email.trim().toLowerCase();
-    const normalizedPhone = require("../services/twilio").normalizeToE164(phone);
+    const normalizedPhone = normalizeToE164(phone);
     if (!normalizedPhone) return res.status(400).json({ error: "Please enter a valid phone number." });
-
-    if (await isDisposableEmail(email)) {
-      await logSecurityEvent("SIGNUP_BLOCKED", { ip: req.ip, metadata: { reason: "disposable_email", email } });
-      return res.status(400).json({ error: "Please use a permanent email address." });
-    }
 
     // Signup rate limiting — separate IP and email limits, checked BEFORE
     // Turnstile so a flooded IP/email gets a cheap 429 without spending a
@@ -360,6 +354,11 @@ router.post("/register", async (req, res) => {
     if (!ipLimit.allowed || !emailLimit.allowed) {
       await logSecurityEvent("SIGNUP_BLOCKED", { ip: req.ip, metadata: { reason: "rate_limit", email } });
       return res.status(429).json({ error: "Too many signup attempts. Please try again later." });
+    }
+
+    if (await isDisposableEmail(email)) {
+      await logSecurityEvent("SIGNUP_BLOCKED", { ip: req.ip, metadata: { reason: "disposable_email", email } });
+      return res.status(400).json({ error: "Please use a permanent email address." });
     }
 
     // Turnstile — required on every signup, no progressive exception (unlike
