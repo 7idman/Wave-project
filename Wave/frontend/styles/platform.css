@@ -758,3 +758,96 @@
   .dashboard-shell .product-portfolio-page .stat-value{font-size:27px;}
   .dashboard-shell .bni span:last-child{font-size:8px;}
 }
+.ct-ok{
+  margin:0 0 14px;
+  padding:11px 12px;
+  border:1px solid rgba(20,200,138,.28);
+  border-radius:10px;
+  background:rgba(20,200,138,.1);
+  color:#64F4BB;
+  font-size:12px;
+  font-weight:700;
+  line-height:1.45;
+}
+.auth-label{
+  font-size:10px;
+  font-weight:700;
+  color:var(--text3);
+  text-transform:uppercase;
+  margin-bottom:4px;
+}
+.auth-help{font-size:11px;color:var(--text3);line-height:1.45;}
+.signup-phone-card{
+  margin:8px 0 12px;
+  padding:12px;
+  border:1px solid rgba(255,255,255,.1);
+  border-radius:12px;
+  background:rgba(255,255,255,.035);
+}
+.signup-phone-head,
+.signup-phone-actions,
+.signup-phone-code{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+}
+.signup-phone-head{margin-bottom:10px;}
+.signup-phone-grid{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:8px;margin-bottom:10px;}
+.signup-phone-actions{margin-bottom:10px;}
+.signup-phone-code{align-items:stretch;}
+.signup-phone-code .btn{min-width:92px;}
+.auth-segment{
+  display:flex;
+  padding:3px;
+  border:1px solid rgba(255,255,255,.1);
+  border-radius:10px;
+  background:rgba(255,255,255,.045);
+}
+.auth-segment button{
+  min-height:34px;
+  padding:0 12px;
+  border:0;
+  border-radius:8px;
+  background:transparent;
+  color:var(--text3);
+  font:700 11px Inter,sans-serif;
+  cursor:pointer;
+}
+.auth-segment button.active{background:rgba(20,200,138,.16);color:#64F4BB;}
+.turnstile-frame{
+  position:relative;
+  min-height:73px;
+  margin-bottom:16px;
+}
+.turnstile-skeleton{
+  position:absolute;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  border:1px solid rgba(255,255,255,.1);
+  border-radius:10px;
+  background:linear-gradient(100deg,rgba(255,255,255,.035),rgba(255,255,255,.07),rgba(255,255,255,.035));
+  color:var(--text3);
+  font-size:12px;
+  font-weight:700;
+}
+.btn-spinner{
+  display:inline-block;
+  width:14px;
+  height:14px;
+  border-radius:50%;
+  border:2px solid currentColor;
+  border-right-color:transparent;
+  animation:signout-spin .75s linear infinite;
+}
+@media(max-width:520px){
+  .signup-phone-head,
+  .signup-phone-actions{align-items:flex-start;flex-direction:column;}
+  .signup-phone-grid,
+  .signup-phone-code{grid-template-columns:1fr;}
+  .signup-phone-code{display:grid;}
+  .signup-phone-code .btn{width:100%;}
+}

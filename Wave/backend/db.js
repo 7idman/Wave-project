@@ -482,6 +482,18 @@ async function initSchema() {
     try { await db.execute(sql); } catch (_) { /* column already exists — skip */ }
   }
 
+  try {
+    await execute(
+      `UPDATE users
+       SET first_name = CASE WHEN instr(trim(name), ' ') > 0 THEN substr(trim(name), 1, instr(trim(name), ' ') - 1) ELSE trim(name) END,
+           last_name = CASE WHEN instr(trim(name), ' ') > 0 THEN trim(substr(trim(name), instr(trim(name), ' ') + 1)) ELSE NULL END
+       WHERE (first_name IS NULL OR first_name = '') AND name IS NOT NULL AND trim(name) <> ''`
+    );
+    await execute("UPDATE users SET email_verified_at = COALESCE(email_verified_at, created_at, datetime('now')) WHERE email_verified = 1");
+  } catch (err) {
+    console.warn("User compatibility backfill skipped:", err.message);
+  }
+
   const defaultRoles = [
     ["owner", "Owner", {access_admin:true,manage_requests:true,manage_roles:true,manage_members:true,manage_announcements:true,ban_users:true}, 1],
     ["admin", "Admin", {access_admin:true,manage_requests:true,manage_announcements:true,ban_users:true}, 0],

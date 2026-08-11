@@ -137,6 +137,18 @@ export default function App(){
       if(ref)setRegReferralCode(ref.trim().toUpperCase());
     }catch{}
   },[]);
+  useEffect(()=>{
+    try{
+      const params=new URLSearchParams(window.location.search);
+      if(params.get("emailVerified")==="1"){
+        setAuthTab("login");
+        setAuthNotice("Email verified. You can sign in now.");
+        params.delete("emailVerified");
+        const next=`${window.location.pathname}${params.toString()?`?${params}`:""}${window.location.hash}`;
+        window.history.replaceState(null,"",next);
+      }
+    }catch{}
+  },[]);
   const[showTerms,setShowTerms]=useState<string>(""); // "terms"|"privacy"|"" — inline on login page
   const[prices,setPrices]     =useState<Record<string,Price>>(FB_PRICES);
   const[priceDir,setPriceDir] =useState<Record<string,boolean>>(Object.fromEntries(Object.keys(FB_PRICES).map(s=>[s,(FB_PRICES[s].change24h||0)>=0])));
@@ -602,28 +614,72 @@ export default function App(){
     }catch(err:any){toast2(err.message||"Couldn't disable 2FA.","⚠",false);}
     finally{setLoading(false);}
   };
+  const signupPhoneNumber=()=>{
+    const selected=PHONE_COUNTRIES.find(c=>c.code===regPhoneCountry)||PHONE_COUNTRIES[0];
+    const raw=regPhone.trim();
+    if(raw.startsWith("+")) return raw.replace(/[\s().-]/g,"");
+    return `${selected.dial}${raw.replace(/\D/g,"").replace(/^0+/,"")}`;
+  };
+  const sendSignupPhoneCode=async()=>{
+    if(!regPhone.trim())return setLoginErr("Please enter your phone number.");
+    setLoginErr("");setAuthNotice("");setPhoneVerifyBusy(true);
+    try{
+      const phone=signupPhoneNumber();
+      const d=await api.post("/auth/signup-phone/send-code",{phone,channel:regPhoneChannel});
+      setRegVerifiedPhone("");
+      setRegPhoneToken("");
+      setRegPhoneCode("");
+      setAuthNotice(d.message||"Verification code sent.");
+    }catch(err:any){setLoginErr(err.message||"Couldn't send verification code.");}
+    finally{setPhoneVerifyBusy(false);}
+  };
+  const verifySignupPhoneCode=async()=>{
+    if(!regPhoneCode.trim())return setLoginErr("Enter the phone verification code.");
+    setLoginErr("");setAuthNotice("");setPhoneVerifyBusy(true);
+    try{
+      const phone=signupPhoneNumber();
+      const d=await api.post("/auth/signup-phone/verify-code",{phone,code:regPhoneCode.trim(),channel:regPhoneChannel});
+      setRegPhoneToken(d.phoneVerificationToken);
+      setRegVerifiedPhone(d.phone||phone);
+      setAuthNotice("Phone verified. Finish the form and check your email next.");
+    }catch(err:any){setLoginErr(err.message||"Invalid phone verification code.");}
+    finally{setPhoneVerifyBusy(false);}
+  };
+  const resendVerificationEmail=async()=>{
+    const target=(authTab==="register"?regEmail:email).trim();
+    if(!target)return setLoginErr("Enter your email first.");
+    setLoginErr("");setAuthNotice("");setResendBusy(true);
+    try{
+      const d=await api.post("/auth/resend-verification",{email:target});
+      setShowResendVerification(true);
+      setAuthNotice(d.message||"Verification email sent.");
+    }catch(err:any){setLoginErr(err.message||"Couldn't resend verification email.");}
+    finally{setResendBusy(false);}
+  };
   const doRegister=async()=>{
-    if(!regName.trim())return setLoginErr("Please enter your full name.");
+    if(!regFirstName.trim())return setLoginErr("Please enter your first name.");
+    if(!regLastName.trim())return setLoginErr("Please enter your last name.");
     if(!regEmail.trim())return setLoginErr("Please enter your email.");
     if(!regPw)return setLoginErr("Please enter a password.");
     if(regPw.length<8)return setLoginErr("Password must be at least 8 characters.");
     if(regPw!==regPw2)return setLoginErr("Passwords do not match.");
     if(!regDob)return setLoginErr("Please enter your date of birth.");
     if(!regCountry)return setLoginErr("Please select your country.");
+    if(!regPhoneToken||!regVerifiedPhone)return setLoginErr("Please verify your phone number first.");
     if(!regAgree)return setLoginErr("Please accept the Terms & Privacy Policy.");
     if(!regTurnstileToken)return setLoginErr("Please complete the verification challenge.");
-    setLoginErr("");setLoading(true);
+    setLoginErr("");setAuthNotice("");setLoading(true);
     try{
-      const d=await api.post("/auth/register",{email:regEmail,name:regName,password:regPw,date_of_birth:regDob,country:regCountry,referralCode:regReferralCode.trim()||undefined,turnstileToken:regTurnstileToken});
-      api.setTokens(d.accessToken,d.refreshToken);
-      const u=d.user;
-      const nm=u.name||regName||"User";
-      const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
-      setAccountLoading(true);
-      setUser({id:u.id,name:nm,email:u.email,initials,role:u.role,permissions:u.permissions,totpEnabled:u.totpEnabled});
+      const displayName=`${regFirstName.trim()} ${regLastName.trim()}`.trim();
+      const d=await api.post("/auth/register",{email:regEmail,firstName:regFirstName,lastName:regLastName,name:displayName,password:regPw,date_of_birth:regDob,country:regCountry,phone:regVerifiedPhone,phoneVerificationToken:regPhoneToken,referralCode:regReferralCode.trim()||undefined,turnstileToken:regTurnstileToken});
+      setAuthNotice(d.message||"Account created. Check your email to verify before signing in.");
+      setShowResendVerification(true);
       setAppSettings(p=>({...p,currency:currencyForCountry(regCountry)}));
       localStorage.setItem("wave_currency_auto","1");
-      toast2(`Welcome to Wave, ${nm.split(" ")[0]}!`,);
+      setAuthTab("login");
+      setEmail(regEmail);
+      setPw("");
+      toast2("Check your email to finish signup.");
     }catch(err:any){setLoginErr(err.message||"Registration failed.");setRegTurnstileToken("");setRegTurnstileKey(k=>k+1);}
     finally{setLoading(false);}
   };
@@ -1188,13 +1244,14 @@ export default function App(){
           {/* Tabs */}
           <div className="landing-auth-tabs">
             {(["login","register"] as const).map(t=>(
-              <button key={t} className={`landing-auth-tab ${authTab===t?"active":""}`} onClick={()=>{setAuthTab(t);setLoginErr("");}}>
+              <button key={t} className={`landing-auth-tab ${authTab===t?"active":""}`} onClick={()=>{setAuthTab(t);setLoginErr("");setAuthNotice("");}}>
                 {t==="login"?"Sign In":"Create Account"}
               </button>
             ))}
           </div>
 
           {loginErr&&<div className="ct-err">⚠ {loginErr}</div>}
+          {authNotice&&<div className="ct-ok">{authNotice}</div>}
 
           {/* Social login buttons */}
           <div className="landing-social">
@@ -1220,13 +1277,14 @@ export default function App(){
           {authTab==="login"&&((pending2FAToken||pendingRiskOtpToken)?<>
             <div style={{fontSize:13,color:"var(--text3)",marginBottom:16,lineHeight:1.6}}>{pending2FAToken?"Enter the 6-digit code from your authenticator app, or one of your backup codes.":"For your security, we texted a code to your verified phone. Enter it below."}</div>
             <input className="inp" placeholder="123456" inputMode="numeric" autoComplete="one-time-code" style={{marginBottom:16,letterSpacing:2,textAlign:"center",fontSize:18}} value={twoFACode} onChange={e=>{setTwoFACode(e.target.value);setLoginErr("");}} onKeyDown={e=>e.key==="Enter"&&doTwoFAVerify()} autoFocus/>
-            <button className="btn btn-primary btn-lg" style={{width:"100%",borderRadius:12,marginBottom:12}} onClick={doTwoFAVerify} disabled={loading}>{loading?"Verifying…":"Verify"}</button>
+            <button className="btn btn-primary btn-lg" style={{width:"100%",borderRadius:12,marginBottom:12}} onClick={doTwoFAVerify} disabled={loading}>{loading?<><span className="btn-spinner"/> Verifying…</>:"Verify"}</button>
             <button className="btn btn-ghost" style={{width:"100%"}} onClick={()=>{setPending2FAToken(null);setPendingRiskOtpToken(null);setTwoFACode("");setLoginErr("");}}>Back to sign in</button>
           </>:<>
             <input className="inp" placeholder="Email address" type="email" autoComplete="email" style={{marginBottom:10}} value={email} onChange={e=>{setEmail(e.target.value);setLoginErr("");}}/>
             <input className="inp" placeholder="Password" type="password" autoComplete="current-password" style={{marginBottom:16}} value={pw} onChange={e=>{setPw(e.target.value);setLoginErr("");}} onKeyDown={e=>e.key==="Enter"&&doEmail()}/>
             {loginTurnstileRequired&&<Turnstile key={loginTurnstileKey} onVerify={setLoginTurnstileToken} onError={()=>setLoginTurnstileToken("")}/>}
-            <button className="btn btn-primary btn-lg" style={{width:"100%",borderRadius:12,marginBottom:12}} onClick={doEmail} disabled={loading}>{loading?"Signing in…":"Sign In"}</button>
+            <button className="btn btn-primary btn-lg" style={{width:"100%",borderRadius:12,marginBottom:12}} onClick={doEmail} disabled={loading}>{loading?<><span className="btn-spinner"/> Signing in…</>:"Sign In"}</button>
+            {showResendVerification&&<button type="button" className="btn btn-ghost" style={{width:"100%",marginBottom:12}} onClick={resendVerificationEmail} disabled={resendBusy}>{resendBusy?<span className="btn-spinner"/>:null}Resend verification email</button>}
           </>)}
 
           
@@ -1235,13 +1293,17 @@ export default function App(){
           {authTab==="register"&&<>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
               <div>
-                <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Full Name *</div>
-                <input className="inp" placeholder="John Doe" type="text" autoComplete="name" value={regName} onChange={e=>{setRegName(e.target.value);setLoginErr("");}}/>
+                <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>First Name *</div>
+                <input className="inp" placeholder="John" type="text" autoComplete="given-name" value={regFirstName} onChange={e=>{setRegFirstName(e.target.value);setLoginErr("");}}/>
               </div>
               <div>
-                <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Email *</div>
-                <input className="inp" placeholder="Jack.Reaper@wave.io" type="email" autoComplete="email" value={regEmail} onChange={e=>{setRegEmail(e.target.value);setLoginErr("");}}/>
+                <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Last Name *</div>
+                <input className="inp" placeholder="Doe" type="text" autoComplete="family-name" value={regLastName} onChange={e=>{setRegLastName(e.target.value);setLoginErr("");}}/>
               </div>
+            </div>
+            <div style={{marginBottom:8}}>
+              <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Email *</div>
+              <input className="inp" placeholder="you@wave.io" type="email" autoComplete="email" value={regEmail} onChange={e=>{setRegEmail(e.target.value);setLoginErr("");}}/>
             </div>
             <div style={{marginBottom:8}}>
               <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Date of Birth * (must be 18+)</div>
@@ -1293,6 +1355,33 @@ export default function App(){
                   {f:"🇻🇦",n:"Vatican City"},{f:"🇻🇪",n:"Venezuela"},{f:"🇻🇳",n:"Vietnam"},{f:"🇾🇪",n:"Yemen"},{f:"🇿🇲",n:"Zambia"},{f:"🇿🇼",n:"Zimbabwe"},
                 ].map(c=><option key={c.n} value={c.n}>{c.f} {c.n}</option>)}
               </select>
+            </div>
+            <div className="signup-phone-card">
+              <div className="signup-phone-head">
+                <div>
+                  <div className="auth-label">Phone Verification *</div>
+                  <div className="auth-help">Choose SMS or voice, then verify the code before creating your account.</div>
+                </div>
+                {regPhoneToken&&<span className="badge badge-green">Verified</span>}
+              </div>
+              <div className="signup-phone-grid">
+                <select className="inp" value={regPhoneCountry} onChange={e=>{setRegPhoneCountry(e.target.value);setRegPhoneToken("");setRegVerifiedPhone("");}}>
+                  {PHONE_COUNTRIES.map(c=><option key={c.code} value={c.code}>{c.name} {c.dial}</option>)}
+                </select>
+                <input className="inp" placeholder="Phone number" type="tel" autoComplete="tel-national" value={regPhone} onChange={e=>{setRegPhone(e.target.value);setRegPhoneToken("");setRegVerifiedPhone("");setLoginErr("");}}/>
+              </div>
+              <div className="signup-phone-actions">
+                <div className="auth-segment">
+                  {(["sms","voice"] as const).map(channel=>(
+                    <button key={channel} type="button" className={regPhoneChannel===channel?"active":""} onClick={()=>setRegPhoneChannel(channel)}>{channel==="sms"?"SMS":"Voice"}</button>
+                  ))}
+                </div>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={sendSignupPhoneCode} disabled={phoneVerifyBusy}>{phoneVerifyBusy&&!regPhoneCode?<span className="btn-spinner"/>:null}{regPhoneToken?"Send new code":"Send code"}</button>
+              </div>
+              <div className="signup-phone-code">
+                <input className="inp" placeholder="123456" inputMode="numeric" autoComplete="one-time-code" value={regPhoneCode} onChange={e=>{setRegPhoneCode(e.target.value);setLoginErr("");}}/>
+                <button type="button" className="btn btn-primary btn-sm" onClick={verifySignupPhoneCode} disabled={phoneVerifyBusy||!regPhoneCode.trim()}>{phoneVerifyBusy&&regPhoneCode?<span className="btn-spinner"/>:null}Verify</button>
+              </div>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
               <div>
@@ -1374,7 +1463,7 @@ export default function App(){
                 </div>
               </div>
             )}
-            <button className="btn btn-primary btn-lg" style={{width:"100%",borderRadius:12}} onClick={doRegister} disabled={loading}>{loading?"Creating account…":"Create Account"}</button>
+            <button className="btn btn-primary btn-lg" style={{width:"100%",borderRadius:12}} onClick={doRegister} disabled={loading}>{loading?<><span className="btn-spinner"/> Creating account…</>:"Create Account"}</button>
           </>}
 
           <p className="landing-auth-security"><span>◈</span> Protected with 256-bit SSL encryption</p>
