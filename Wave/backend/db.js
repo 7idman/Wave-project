@@ -120,6 +120,14 @@ async function initSchema() {
       used_at    TEXT,
       created_at TEXT    NOT NULL DEFAULT (datetime('now'))
     )`,
+    `CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT    UNIQUE NOT NULL,
+      expires_at TEXT    NOT NULL,
+      used_at    TEXT,
+      created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
     `CREATE TABLE IF NOT EXISTS signup_phone_tokens (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       phone      TEXT    NOT NULL,
@@ -477,6 +485,9 @@ async function initSchema() {
     "ALTER TABLE price_cache ADD COLUMN asset_type TEXT NOT NULL DEFAULT 'crypto'",
     "ALTER TABLE transactions ADD COLUMN reference_id TEXT",
     "ALTER TABLE transactions ADD COLUMN source TEXT",
+    "ALTER TABLE transactions ADD COLUMN email_otp_hash TEXT",
+    "ALTER TABLE transactions ADD COLUMN email_otp_expires_at TEXT",
+    "CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_hash ON password_reset_tokens(token_hash)",
   ];
   for (const sql of migrations) {
     try { await db.execute(sql); } catch (_) { /* column already exists — skip */ }

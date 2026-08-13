@@ -92,9 +92,68 @@ async function sendNewDeviceLoginAlert({ to, name, device, ip, time }) {
   return sendEmail({ to, subject, html, text, tags: [{ name: "type", value: "new_device_login" }] });
 }
 
+async function sendPasswordResetEmail({ to, name, resetUrl }) {
+  const safeName = name || "there";
+  const htmlName = escapeHtml(safeName);
+  const htmlUrl = escapeHtml(resetUrl);
+  const subject = "Reset your Wave password";
+  const text = `Hi ${safeName}, reset your Wave password by opening this link: ${resetUrl}\n\nThis link expires in 30 minutes. If you did not request this, you can ignore this email — your password will not change.`;
+  const html = `
+    <div style="font-family:Inter,Arial,sans-serif;max-width:560px;margin:0 auto;padding:28px;color:#111827">
+      <h1 style="margin:0 0 12px;font-size:24px">Reset your Wave password</h1>
+      <p style="line-height:1.6;color:#4b5563">Hi ${htmlName}, we received a request to reset your Wave password.</p>
+      <p style="margin:26px 0">
+        <a href="${htmlUrl}" style="display:inline-block;background:#14C88A;color:#fff;text-decoration:none;padding:13px 18px;border-radius:10px;font-weight:700">Reset password</a>
+      </p>
+      <p style="line-height:1.6;color:#6b7280;font-size:13px">This link expires in 30 minutes. If you did not request this, you can safely ignore this email — your password will not be changed.</p>
+    </div>
+  `;
+  return sendEmail({ to, subject, html, text, tags: [{ name: "type", value: "password_reset" }] });
+}
+
+async function sendWithdrawalEmailCode({ to, name, code, amount }) {
+  const safeName = name || "there";
+  const htmlName = escapeHtml(safeName);
+  const htmlAmount = escapeHtml(amount);
+  const subject = `${code} is your Wave withdrawal code`;
+  const text = `Hi ${safeName}, your verification code for a $${amount} withdrawal is: ${code}\n\nThis code expires in 10 minutes. If you did not request this withdrawal, secure your account immediately and contact support.`;
+  const html = `
+    <div style="font-family:Inter,Arial,sans-serif;max-width:560px;margin:0 auto;padding:28px;color:#111827">
+      <h1 style="margin:0 0 12px;font-size:24px">Confirm your withdrawal</h1>
+      <p style="line-height:1.6;color:#4b5563">Hi ${htmlName}, enter this code to confirm your $${htmlAmount} withdrawal request:</p>
+      <div style="margin:24px 0;text-align:center">
+        <span style="display:inline-block;font-size:32px;font-weight:800;letter-spacing:8px;background:#F3F4F6;padding:16px 24px;border-radius:12px;color:#111827">${code}</span>
+      </div>
+      <p style="line-height:1.6;color:#6b7280;font-size:13px">This code expires in 10 minutes. If you did not request this withdrawal, please secure your account and contact support immediately.</p>
+    </div>
+  `;
+  return sendEmail({ to, subject, html, text, tags: [{ name: "type", value: "withdrawal_otp" }] });
+}
+
+async function sendLoginEmailCode({ to, name, code }) {
+  const safeName = name || "there";
+  const htmlName = escapeHtml(safeName);
+  const subject = `${code} is your Wave sign-in code`;
+  const text = `Hi ${safeName}, your Wave sign-in verification code is: ${code}\n\nThis code expires in 10 minutes. If you did not try to sign in, someone may have your password — change it immediately.`;
+  const html = `
+    <div style="font-family:Inter,Arial,sans-serif;max-width:560px;margin:0 auto;padding:28px;color:#111827">
+      <h1 style="margin:0 0 12px;font-size:24px">Confirm it's you</h1>
+      <p style="line-height:1.6;color:#4b5563">Hi ${htmlName}, enter this code to finish signing in to Wave:</p>
+      <div style="margin:24px 0;text-align:center">
+        <span style="display:inline-block;font-size:32px;font-weight:800;letter-spacing:8px;background:#F3F4F6;padding:16px 24px;border-radius:12px;color:#111827">${code}</span>
+      </div>
+      <p style="line-height:1.6;color:#6b7280;font-size:13px">This code expires in 10 minutes. If you did not try to sign in, someone may have your password — change it immediately and contact support.</p>
+    </div>
+  `;
+  return sendEmail({ to, subject, html, text, tags: [{ name: "type", value: "login_otp" }] });
+}
+
 module.exports = {
   isEmailConfigured,
   sendEmail,
   sendVerificationEmail,
   sendNewDeviceLoginAlert,
+  sendPasswordResetEmail,
+  sendWithdrawalEmailCode,
+  sendLoginEmailCode,
 };

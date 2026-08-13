@@ -30,13 +30,18 @@ async function logSecurityEvent(type, { userId = null, ip = null, metadata = {} 
 // call verifyTurnstileToken directly instead of this middleware.
 function requireTurnstile() {
   return async (req, res, next) => {
-    const token = req.body?.turnstileToken;
-    const result = await verifyTurnstileToken(token, req.ip);
-    if (!result.success) {
-      await logSecurityEvent("TURNSTILE_FAILED", { ip: req.ip, metadata: { reason: result.reason, route: req.originalUrl } });
+    try {
+      const token = req.body?.turnstileToken;
+      const result = await verifyTurnstileToken(token, req.ip);
+      if (!result.success) {
+        await logSecurityEvent("TURNSTILE_FAILED", { ip: req.ip, metadata: { reason: result.reason, route: req.originalUrl } });
+        return res.status(400).json({ error: "Verification failed — please try again.", code: "TURNSTILE_REQUIRED" });
+      }
+      next();
+    } catch (err) {
+      console.error("Turnstile middleware error:", err.message);
       return res.status(400).json({ error: "Verification failed — please try again.", code: "TURNSTILE_REQUIRED" });
     }
-    next();
   };
 }
 

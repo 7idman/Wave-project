@@ -29,7 +29,7 @@ const { logSecurityEvent } = require("../middleware/security");
 const { getOrSetDeviceId, isDeviceTrusted, trustDevice } = require("../services/deviceTrust");
 const { assessLoginRisk, assessSignupRisk } = require("../services/riskEngine");
 const { normalizeToE164, lookupLineType, sendVerificationCode, checkVerificationCode } = require("../services/twilio");
-const { sendVerificationEmail, sendNewDeviceLoginAlert } = require("../services/email");
+const { sendVerificationEmail, sendNewDeviceLoginAlert, sendPasswordResetEmail, sendLoginEmailCode } = require("../services/email");
 const { isDisposableEmail } = require("../services/disposableEmail");
 
 const EMAIL_VERIFY_TTL_MINUTES = parseInt(process.env.EMAIL_VERIFY_TTL_MINUTES || "60", 10);
@@ -92,7 +92,14 @@ async function maybeSendNewDeviceEmail(user, req, wasTrusted) {
 // roles.role_key) instead of a per-user column. Every caller must `await` it.
 const safeUser = async (u) => {
   const roleRow = u.role ? await queryOne("SELECT permissions FROM roles WHERE role_key = ?", [u.role]) : null;
-  const permissions = roleRow ? JSON.parse(roleRow.permissions) : {};
+  let permissions = {};
+  if (roleRow) {
+    try {
+      permissions = JSON.parse(roleRow.permissions);
+    } catch (err) {
+      console.error(`Malformed permissions JSON for role "${u.role}" — defaulting to no permissions:`, err.message);
+    }
+  }
   return {
     id:            u.id,
     email:         u.email,
@@ -291,6 +298,94 @@ router.get("/verify-email", async (req, res) => {
     res.redirect(`${clientBaseUrl()}/?emailVerified=1`);
   } catch (err) {
     res.status(500).send(err.message);
+  }
+});
+
+const PASSWORD_RESET_TTL_MINUTES = parseInt(process.env.PASSWORD_RESET_TTL_MINUTES || "30", 10);
+
+// ── Forgot password ──────────────────────────────────────────────────────────
+// Always responds with the same generic message whether or not the email is
+// registered — a differing response here would let someone enumerate which
+// emails have Wave accounts.
+router.post("/forgot-password", async (req, res) => {
+  const GENERIC_MESSAGE = "If an account exists for that email, a reset link has been sent.";
+  try {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    if (!email) return res.status(400).json({ error: "Email is required." });
+
+    // Rate limit by both email and IP so this can't be used to spam a
+    // specific inbox, or to enumerate emails via response timing at volume.
+    const emailLimit = await recordRate("forgot_password_email", email, { max: 3, windowMinutes: 30 });
+    const ipLimit = await recordRate("forgot_password_ip", req.ip, { max: 10, windowMinutes: 30 });
+    if (!emailLimit.allowed || !ipLimit.allowed) return res.json({ message: GENERIC_MESSAGE });
+
+    const user = await queryOne("SELECT id, name, email, password_hash FROM users WHERE email = ?", [email]);
+    // No account, or a Google-only account with no password to reset —
+    // either way, say nothing that reveals which case it was.
+    if (!user || !user.password_hash) return res.json({ message: GENERIC_MESSAGE });
+
+    const token = crypto.randomBytes(32).toString("base64url");
+    const tokenHash = hashToken(token);
+    await execute("DELETE FROM password_reset_tokens WHERE user_id = ? AND used_at IS NULL", [user.id]);
+    await execute(
+      "INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (?, ?, datetime('now', ?))",
+      [user.id, tokenHash, `+${PASSWORD_RESET_TTL_MINUTES} minutes`]
+    );
+    // Points straight at the frontend, not a backend GET route — a GET
+    // link can get pre-fetched by email-scanner/link-preview bots and burn
+    // the token before the person ever clicks it. The token is only
+    // consumed when the frontend POSTs it below.
+    const resetUrl = `${clientBaseUrl()}/?resetToken=${encodeURIComponent(token)}`;
+    await sendPasswordResetEmail({ to: user.email, name: user.name, resetUrl });
+    await logSecurityEvent("PASSWORD_RESET_REQUESTED", { userId: user.id, ip: req.ip });
+
+    res.json({ message: GENERIC_MESSAGE });
+  } catch (err) {
+    // Even on an internal error, don't leak anything more specific than the
+    // generic message to the client — log the real error server-side only.
+    console.error("forgot-password error:", err.message);
+    res.json({ message: GENERIC_MESSAGE });
+  }
+});
+
+// ── Reset password ───────────────────────────────────────────────────────────
+router.post("/reset-password", async (req, res) => {
+  try {
+    const token = String(req.body?.token || "");
+    const newPassword = String(req.body?.password || "");
+    if (!token) return res.status(400).json({ error: "Reset token is required." });
+    if (newPassword.length < 8) return res.status(400).json({ error: "New password must be at least 8 characters." });
+
+    const row = await queryOne(
+      "SELECT id, user_id FROM password_reset_tokens WHERE token_hash = ? AND used_at IS NULL AND expires_at > datetime('now')",
+      [hashToken(token)]
+    );
+    if (!row) return res.status(400).json({ error: "This reset link is invalid or expired." });
+
+    // Claim the token atomically first — same double-submit protection
+    // pattern used for withdrawal confirmation, so two requests racing on
+    // the same token can't both succeed.
+    const claimed = await execute(
+      "UPDATE password_reset_tokens SET used_at = datetime('now') WHERE id = ? AND used_at IS NULL AND expires_at > datetime('now')",
+      [row.id]
+    );
+    if (claimed.rowsAffected !== 1) return res.status(400).json({ error: "This reset link is invalid or expired." });
+
+    const hash = await bcrypt.hash(newPassword, 12);
+    await execute(
+      "UPDATE users SET password_hash = ?, last_sensitive_change_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
+      [hash, row.user_id]
+    );
+
+    // A password reset means the old password may have been compromised —
+    // sign every existing session out everywhere, not just this device.
+    await execute("DELETE FROM refresh_tokens WHERE user_id = ?", [row.user_id]);
+    await execute("UPDATE sessions SET logout_at = datetime('now') WHERE user_id = ? AND logout_at IS NULL", [row.user_id]);
+
+    await logSecurityEvent("PASSWORD_RESET_COMPLETED", { userId: row.user_id, ip: req.ip });
+    res.json({ message: "Password reset. Please sign in with your new password." });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -598,15 +693,19 @@ router.post("/refresh", async (req, res) => {
 
 // ── Logout ────────────────────────────────────────────────────────────────────
 router.post("/logout", async (req, res) => {
-  const { refreshToken } = req.body;
-  if (refreshToken) {
-    const stored = await queryOne("SELECT session_id FROM refresh_tokens WHERE token = ?", [refreshToken]);
-    if (stored?.session_id) {
-      await execute("UPDATE sessions SET logout_at = datetime('now') WHERE id = ?", [stored.session_id]);
+  try {
+    const { refreshToken } = req.body;
+    if (refreshToken) {
+      const stored = await queryOne("SELECT session_id FROM refresh_tokens WHERE token = ?", [refreshToken]);
+      if (stored?.session_id) {
+        await execute("UPDATE sessions SET logout_at = datetime('now') WHERE id = ?", [stored.session_id]);
+      }
+      await execute("DELETE FROM refresh_tokens WHERE token = ?", [refreshToken]);
     }
-    await execute("DELETE FROM refresh_tokens WHERE token = ?", [refreshToken]);
+    res.json({ message: "Logged out" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-  res.json({ message: "Logged out" });
 });
 
 // ── Google OAuth ───────────────────────────────────────────────────────────────
@@ -616,20 +715,30 @@ router.get("/google",
 router.get("/google/callback",
   passport.authenticate("google", { failureRedirect: "/login" }),
   async (req, res) => {
-    if (req.user.account_status === "banned") return res.status(403).json({ error: req.user.ban_reason || TERMINATED_MESSAGE, code: "ACCOUNT_TERMINATED" });
-    const { deviceId } = getOrSetDeviceId(req, res);
-    await trustDevice(req.user.id, deviceId, parseDevice(req.headers["user-agent"]));
-    const sessionId     = await createSession(req.user.id, req, deviceId);
-    const accessToken   = signAccessToken(req.user.id, sessionId);
-    const refreshToken  = await signRefreshToken(req.user.id, sessionId);
-    const clientURL     = process.env.CLIENT_URL || "http://localhost:5173";
-    res.redirect(`${clientURL}/auth/callback?access=${accessToken}&refresh=${refreshToken}`);
+    try {
+      if (req.user.account_status === "banned") return res.status(403).json({ error: req.user.ban_reason || TERMINATED_MESSAGE, code: "ACCOUNT_TERMINATED" });
+      const { deviceId } = getOrSetDeviceId(req, res);
+      await trustDevice(req.user.id, deviceId, parseDevice(req.headers["user-agent"]));
+      const sessionId     = await createSession(req.user.id, req, deviceId);
+      const accessToken   = signAccessToken(req.user.id, sessionId);
+      const refreshToken  = await signRefreshToken(req.user.id, sessionId);
+      const clientURL     = process.env.CLIENT_URL || "http://localhost:5173";
+      res.redirect(`${clientURL}/auth/callback?access=${accessToken}&refresh=${refreshToken}`);
+    } catch (err) {
+      console.error("Google OAuth callback failed:", err.message);
+      const clientURL = process.env.CLIENT_URL || "http://localhost:5173";
+      res.redirect(`${clientURL}/login?error=oauth_failed`);
+    }
   }
 );
 
 // ── Me ────────────────────────────────────────────────────────────────────────
 router.get("/me", authenticate, async (req, res) => {
-  res.json({ user: await safeUser(req.user) });
+  try {
+    res.json({ user: await safeUser(req.user) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── Sessions (login/device history) ─────────────────────────────────────────
@@ -766,6 +875,13 @@ function generateBackupCodes(count = 8) {
 router.post("/2fa/setup", authenticate, async (req, res) => {
   try {
     if (req.user.totp_enabled) return res.status(400).json({ error: "2FA is already enabled" });
+    // Two-factor on Wave means THREE factors at login — authenticator +
+    // SMS + email — so a verified phone has to exist before setup even
+    // starts, not discovered as a gap the first time someone tries to log
+    // back in.
+    if (!req.user.phone_verified || !req.user.phone) {
+      return res.status(403).json({ error: "Please verify a phone number in Settings before enabling 2FA.", code: "PHONE_VERIFICATION_REQUIRED" });
+    }
 
     const secret = authenticator.generateSecret();
     await execute("UPDATE users SET totp_secret_pending = ?, updated_at = datetime('now') WHERE id = ?", [secret, req.user.id]);
@@ -827,9 +943,59 @@ router.post("/2fa/disable", authenticate, async (req, res) => {
   }
 });
 
+// Second stage of a TOTP-enabled login: password + TOTP both checked out,
+// but the account isn't fully authenticated yet — SMS and email codes go
+// out now, and login only finishes once BOTH check out via /mfa/verify.
+//
+// Accounts that enabled 2FA before the phone-verification requirement
+// existed on /2fa/setup are handled gracefully here rather than being
+// locked out: if there's no verified phone on file, this falls back to
+// email-only and flags phoneRecommended so the frontend can nudge them to
+// add one — new 2FA signups always have a phone by the time they reach
+// this function, so they always get the full three factors.
+async function beginSecondFactorStage(user, req, res, { deviceTrusted, deviceId, usedBackupCode }) {
+  const hasPhone = Boolean(user.phone_verified && user.phone);
+
+  const emailCode = String(crypto.randomInt(100000, 1000000));
+  const emailCodeHash = hashToken(emailCode);
+  try {
+    await sendLoginEmailCode({ to: user.email, name: user.name, code: emailCode });
+  } catch (err) {
+    console.error("Login email code send failed:", err.message);
+    return res.status(503).json({ error: "Couldn't send email verification code. Please try again." });
+  }
+
+  let smsSent = false;
+  if (hasPhone) {
+    const otpLimit = await recordRate("login_mfa_otp_send", `user:${user.id}`, { max: 5, windowMinutes: 30 });
+    if (!otpLimit.allowed) return res.status(429).json({ error: "Too many verification requests. Please try again later." });
+    const sendResult = await sendVerificationCode(user.phone);
+    smsSent = sendResult.success;
+    if (!smsSent) console.error("Login SMS code send failed — proceeding on email-only for this login:", user.id);
+  }
+
+  const factors = smsSent ? ["sms", "email"] : ["email"];
+  const tempToken = jwt.sign(
+    { sub: user.id, type: "mfa_pending", factors, emailCodeHash, deviceTrusted, deviceId, usedBackupCode: Boolean(usedBackupCode) },
+    JWT_SECRET,
+    { expiresIn: "10m" }
+  );
+
+  await logSecurityEvent("MFA_SECOND_FACTOR_SENT", { userId: user.id, ip: req.ip, metadata: { factors } });
+
+  return res.json({
+    requiresSecondFactors: true,
+    tempToken,
+    factors,
+    phoneRecommended: !hasPhone,
+  });
+}
+
 // Step 2 of login when totp_enabled — takes the tempToken from /login and a
-// 6-digit code (or a one-time backup code), then finally issues real
-// session + tokens, same shape as a normal login response.
+// 6-digit code (or a one-time backup code). Passing this does NOT finish
+// login by itself anymore: it clears the TOTP factor and moves on to
+// /mfa/verify for the SMS + email factors, since 2FA on Wave means all
+// three factors, not TOTP alone.
 router.post("/2fa/verify", async (req, res) => {
   try {
     const { tempToken, code } = req.body;
@@ -867,17 +1033,100 @@ router.post("/2fa/verify", async (req, res) => {
     }
     if (!ok) return res.status(401).json({ error: "Invalid code" });
 
-    // Full authentication now complete (password + TOTP) — this is the
-    // point where a device earns trust for a 2FA-enabled account.
     const { deviceId: cookieDeviceId } = getOrSetDeviceId(req, res);
     const deviceId = payload.deviceId || cookieDeviceId;
+    return beginSecondFactorStage(user, req, res, { deviceTrusted: payload.deviceTrusted, deviceId, usedBackupCode });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Step 3 of login when totp_enabled — the SMS + email codes sent by
+// beginSecondFactorStage above. Only once both check out (or just email,
+// for the graceful-fallback accounts with no verified phone) does login
+// actually finish and real session tokens get issued.
+router.post("/mfa/verify", async (req, res) => {
+  try {
+    const { tempToken, code, emailCode } = req.body;
+    if (!tempToken || !emailCode) return res.status(400).json({ error: "tempToken and emailCode are required" });
+
+    let payload;
+    try {
+      payload = jwt.verify(tempToken, JWT_SECRET);
+    } catch {
+      return res.status(401).json({ error: "Login session expired — please sign in again" });
+    }
+    if (payload.type !== "mfa_pending") return res.status(401).json({ error: "Invalid token" });
+
+    const user = await queryOne("SELECT * FROM users WHERE id = ?", [payload.sub]);
+    if (!user || !user.totp_enabled) return res.status(401).json({ error: "Invalid token" });
+    if (user.account_status === "banned") return res.status(403).json({ error: user.ban_reason || TERMINATED_MESSAGE, code: "ACCOUNT_TERMINATED" });
+
+    const verifyLimit = await recordRate("login_mfa_verify", `user:${user.id}`, { max: 5, windowMinutes: 15 });
+    if (!verifyLimit.allowed) return res.status(429).json({ error: "Too many attempts. Please try again later." });
+
+    // Email code checked first — cheap local comparison against the hash
+    // carried in the signed tempToken, so a wrong email code fails fast
+    // without spending a Twilio Verify call (billed) on the SMS side for a
+    // request that's going to fail anyway.
+    if (hashToken(String(emailCode).trim()) !== payload.emailCodeHash) {
+      await logSecurityEvent("MFA_VERIFICATION_FAILED", { userId: user.id, ip: req.ip, metadata: { factor: "email" } });
+      return res.status(401).json({ error: "Invalid or expired email code." });
+    }
+
+    if (payload.factors.includes("sms")) {
+      if (!code) return res.status(400).json({ error: "SMS code is required." });
+      const check = await checkVerificationCode(user.phone, code);
+      if (!check.approved) {
+        await logSecurityEvent("MFA_VERIFICATION_FAILED", { userId: user.id, ip: req.ip, metadata: { factor: "sms" } });
+        return res.status(401).json({ error: "Invalid or expired SMS code." });
+      }
+    }
+
+    const deviceId = payload.deviceId || getOrSetDeviceId(req, res).deviceId;
     await trustDevice(user.id, deviceId, parseDevice(req.headers["user-agent"]));
+    await logSecurityEvent("MFA_VERIFIED", { userId: user.id, ip: req.ip, metadata: { factors: payload.factors, usedBackupCode: payload.usedBackupCode } });
 
     const sessionId    = await createSession(user.id, req, deviceId);
     const accessToken  = signAccessToken(user.id, sessionId);
     const refreshToken = await signRefreshToken(user.id, sessionId);
     maybeSendNewDeviceEmail(user, req, Boolean(payload.deviceTrusted));
-    res.json({ accessToken, refreshToken, user: await safeUser(user), usedBackupCode });
+    res.json({ accessToken, refreshToken, user: await safeUser(user), usedBackupCode: Boolean(payload.usedBackupCode) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Re-sends the phone code for a pending login MFA stage — by SMS again, or
+// as a voice call. The email code is untouched (still the one already sent
+// by beginSecondFactorStage). Twilio Verify invalidates the previous code
+// automatically once a new one goes out for the same phone number.
+router.post("/mfa/resend-code", async (req, res) => {
+  try {
+    const { tempToken, channel } = req.body;
+    if (!tempToken) return res.status(400).json({ error: "tempToken is required" });
+
+    let payload;
+    try {
+      payload = jwt.verify(tempToken, JWT_SECRET);
+    } catch {
+      return res.status(401).json({ error: "Login session expired — please sign in again" });
+    }
+    if (payload.type !== "mfa_pending") return res.status(401).json({ error: "Invalid token" });
+    if (!payload.factors.includes("sms")) return res.status(400).json({ error: "No phone code to resend for this login." });
+
+    const user = await queryOne("SELECT * FROM users WHERE id = ?", [payload.sub]);
+    if (!user) return res.status(401).json({ error: "Invalid token" });
+
+    const resendLimit = await recordRate("login_mfa_otp_resend", `user:${user.id}`, { max: 5, windowMinutes: 30 });
+    if (!resendLimit.allowed) return res.status(429).json({ error: "Too many resend attempts. Please try again later." });
+
+    const useVoice = channel === "voice";
+    const sendResult = await sendVerificationCode(user.phone, useVoice ? "voice" : "sms");
+    if (!sendResult.success) return res.status(503).json({ error: `Couldn't ${useVoice ? "call" : "text"} you a new code. Please try again.` });
+
+    await logSecurityEvent("MFA_CODE_RESENT", { userId: user.id, ip: req.ip, metadata: { channel: useVoice ? "voice" : "sms" } });
+    res.json({ message: useVoice ? "Calling you now with your code." : "New code sent by text." });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

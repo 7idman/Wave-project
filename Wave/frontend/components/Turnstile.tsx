@@ -37,12 +37,21 @@ export function Turnstile({ onVerify, onError, onLoad }: { onVerify: (token: str
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY;
     if (!siteKey) { setLoadFailed(true); return; }
+
+    // If the widget hasn't rendered within 10s — slow network, a blocked
+    // challenges.cloudflare.com request, or the container not being in the
+    // DOM yet when the script resolved — stop spinning forever and give the
+    // user something actionable instead of a silent, permanent skeleton.
+    const timeoutId = window.setTimeout(() => {
+      if (!cancelled) setTimedOut(true);
+    }, 10000);
 
     loadTurnstileScript()
       .then(() => {
@@ -53,6 +62,7 @@ export function Turnstile({ onVerify, onError, onLoad }: { onVerify: (token: str
           "error-callback": () => onError?.(),
           "expired-callback": () => onError?.(),
         });
+        window.clearTimeout(timeoutId);
         setReady(true);
         onLoad?.();
       })
@@ -60,6 +70,7 @@ export function Turnstile({ onVerify, onError, onLoad }: { onVerify: (token: str
 
     return () => {
       cancelled = true;
+      window.clearTimeout(timeoutId);
       if (widgetIdRef.current && window.turnstile) window.turnstile.remove(widgetIdRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -67,6 +78,10 @@ export function Turnstile({ onVerify, onError, onLoad }: { onVerify: (token: str
 
   if (loadFailed) {
     return <div className="turnstile-frame" style={{fontSize:12,color:"var(--red)"}}>Verification widget failed to load - please refresh the page.</div>;
+  }
+
+  if (timedOut && !ready) {
+    return <div className="turnstile-frame" style={{fontSize:12,color:"var(--red)"}}>This is taking longer than expected — please refresh the page and try again.</div>;
   }
 
   return (

@@ -16,6 +16,17 @@ import { TradingViewTicker } from "./components/TradingViewTicker";
 
 const AdminPanel=lazy(()=>import("./admin/AdminPanel"));
 
+// Shared across every transaction status badge in this file. 'processing'
+// and 'awaiting_review' are mid-flight states (SMS/email verification in
+// progress, or sitting in front of an admin) — styled the same as
+// 'pending' rather than defaulting to the green "success" style that a
+// catch-all else would otherwise give them.
+function txStatusBadge(status:string){
+  if(status==="completed")return{cls:"badge-green",icon:"✓"};
+  if(status==="failed"||status==="rejected")return{cls:"badge-red",icon:"✕"};
+  return{cls:"badge-gray",icon:"⏳"}; // pending | processing | awaiting_review
+}
+
 const fontLink = document.createElement("link");
 fontLink.rel = "stylesheet";
 fontLink.href = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800;900&display=swap";
@@ -236,6 +247,10 @@ export default function App(){
   const[resendBusy,setResendBusy]=useState(false);
   const[pending2FAToken,setPending2FAToken]=useState<string|null>(null);
   const[pendingRiskOtpToken,setPendingRiskOtpToken]=useState<string|null>(null);
+  const[pendingMfaToken,setPendingMfaToken]=useState<string|null>(null);
+  const[pendingMfaFactors,setPendingMfaFactors]=useState<string[]>([]);
+  const[pendingMfaPhoneRecommended,setPendingMfaPhoneRecommended]=useState(false);
+  const[mfaEmailCode,setMfaEmailCode]=useState("");
   const[twoFACode,setTwoFACode]=useState("");
   const[siteUpdates,setSiteUpdates]=useState<SiteUpdate[]>([]);
   const[loginHistory,setLoginHistory]=useState<LoginEvent[]>([]);
@@ -248,7 +263,7 @@ export default function App(){
   const[tierInfo,setTierInfo]=useState<TierInfo|null>(null);
   const[balanceHistory,setBalanceHistory]=useState<BalancePoint[]>([]);
   const[walletAnalytics,setWalletAnalytics]=useState<WalletAnalytics|null>(null);
-  const[depositReceipt,setDepositReceipt]=useState<{referenceId:string;amount:number;cashBalance:number;bonus:{promotionName:string;bonusAmount:number;unlockAt:string}|null;timestamp:string}|null>(null);
+  const[depositReceipt,setDepositReceipt]=useState<{requestId:number;amount:number;timestamp:string}|null>(null);
   const[txSearch,setTxSearch]=useState("");
   const[txTypeFilter,setTxTypeFilter]=useState<"all"|"deposit"|"withdraw">("all");
   const[txSort,setTxSort]=useState<"date_desc"|"date_asc"|"amount_desc"|"amount_asc">("date_desc");
@@ -557,6 +572,70 @@ export default function App(){
     }
     finally{setLoading(false);}
   };
+
+  // ── Forgot / reset password ──────────────────────────────────────────────
+  const[showForgotPw,setShowForgotPw]=useState(false);
+  const[forgotPwEmail,setForgotPwEmail]=useState("");
+  const[forgotPwSent,setForgotPwSent]=useState(false);
+  const[forgotPwBusy,setForgotPwBusy]=useState(false);
+  const doForgotPassword=async()=>{
+    if(!forgotPwEmail)return toast2("Please enter your email.","!",false);
+    setForgotPwBusy(true);
+    try{
+      await api.post("/auth/forgot-password",{email:forgotPwEmail});
+      setForgotPwSent(true);
+    }catch(err:any){
+      // The endpoint always responds generically, but a network/5xx error can
+      // still throw here — show it rather than silently failing.
+      toast2(err.message||"Something went wrong. Please try again.","!",false);
+    }finally{setForgotPwBusy(false);}
+  };
+
+  const[resetPwToken,setResetPwToken]=useState("");
+  const[resetPwNew,setResetPwNew]=useState("");
+  const[resetPwConfirm,setResetPwConfirm]=useState("");
+  const[resetPwBusy,setResetPwBusy]=useState(false);
+  const[resetPwErr,setResetPwErr]=useState("");
+  const[resetPwDone,setResetPwDone]=useState(false);
+  useEffect(()=>{
+    const params=new URLSearchParams(window.location.search);
+    const t=params.get("resetToken");
+    if(t){
+      setResetPwToken(t);
+      params.delete("resetToken");
+      const next=`${window.location.pathname}${params.toString()?`?${params}`:""}${window.location.hash}`;
+      window.history.replaceState({},"",next);
+    }
+  },[]);
+  const doResetPassword=async()=>{
+    if(resetPwNew.length<8)return setResetPwErr("New password must be at least 8 characters.");
+    if(resetPwNew!==resetPwConfirm)return setResetPwErr("Passwords don't match.");
+    setResetPwErr("");setResetPwBusy(true);
+    try{
+      await api.post("/auth/reset-password",{token:resetPwToken,password:resetPwNew});
+      setResetPwDone(true);
+    }catch(err:any){
+      setResetPwErr(err.message||"This reset link is invalid or expired.");
+    }finally{setResetPwBusy(false);}
+  };
+
+  const finalizeLogin=(d:any,usedBackupCode?:boolean)=>{
+    api.setTokens(d.accessToken,d.refreshToken);
+    const u=d.user;
+    const nm=u.name||email.split("@")[0]||"User";
+    const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
+    setAccountLoading(true);
+    setUser({id:u.id,name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined,role:u.role,permissions:u.permissions,totpEnabled:u.totpEnabled});
+    if(u.country&&!localStorage.getItem("wave_currency_auto")){
+      setAppSettings(p=>({...p,currency:currencyForCountry(u.country)}));
+      localStorage.setItem("wave_currency_auto","1");
+    }
+    setPending2FAToken(null);setPendingRiskOtpToken(null);setPendingMfaToken(null);setPendingMfaFactors([]);setPendingMfaPhoneRecommended(false);
+    setTwoFACode("");setMfaEmailCode("");
+    if(usedBackupCode) toast2(`Welcome back, ${nm.split(" ")[0]}! You used a backup code — generate new ones from Settings when you get a chance.`,"⚠");
+    else toast2(`Welcome back, ${nm.split(" ")[0]}!`);
+  };
+
   const doTwoFAVerify=async()=>{
     if(!pending2FAToken&&!pendingRiskOtpToken)return;
     if(!twoFACode.trim())return setLoginErr("Enter the 6-digit code.");
@@ -565,21 +644,43 @@ export default function App(){
       const endpoint=pending2FAToken?"/auth/2fa/verify":"/auth/risk-otp/verify";
       const tempToken=pending2FAToken||pendingRiskOtpToken;
       const d=await api.post(endpoint,{tempToken,code:twoFACode.trim()});
-      api.setTokens(d.accessToken,d.refreshToken);
-      const u=d.user;
-      const nm=u.name||email.split("@")[0]||"User";
-      const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
-      setAccountLoading(true);
-      setUser({id:u.id,name:nm,email:u.email,initials,phone:u.phone||undefined,avatarUrl:u.avatarUrl||undefined,role:u.role,permissions:u.permissions,totpEnabled:u.totpEnabled});
-      if(u.country&&!localStorage.getItem("wave_currency_auto")){
-        setAppSettings(p=>({...p,currency:currencyForCountry(u.country)}));
-        localStorage.setItem("wave_currency_auto","1");
+      if(d.requiresSecondFactors){
+        // TOTP checked out — now the SMS + email codes that were just sent
+        // need to check out too before login actually finishes.
+        setPending2FAToken(null);
+        setPendingMfaToken(d.tempToken);
+        setPendingMfaFactors(d.factors||[]);
+        setPendingMfaPhoneRecommended(Boolean(d.phoneRecommended));
+        setTwoFACode("");
+        setLoading(false);
+        return;
       }
-      setPending2FAToken(null);setPendingRiskOtpToken(null);setTwoFACode("");
-      if(d.usedBackupCode) toast2(`Welcome back, ${nm.split(" ")[0]}! You used a backup code — generate new ones from Settings when you get a chance.`,"⚠");
-      else toast2(`Welcome back, ${nm.split(" ")[0]}!`);
+      finalizeLogin(d,d.usedBackupCode);
     }catch(err:any){setLoginErr(err.message||"Invalid code. Please try again.");}
     finally{setLoading(false);}
+  };
+
+  const doMfaVerify=async()=>{
+    if(!pendingMfaToken)return;
+    const needsSms=pendingMfaFactors.includes("sms");
+    if(needsSms&&!twoFACode.trim())return setLoginErr("Enter the code texted to your phone.");
+    if(!mfaEmailCode.trim())return setLoginErr("Enter the code emailed to you.");
+    setLoginErr("");setAuthNotice("");setLoading(true);
+    try{
+      const d=await api.post("/auth/mfa/verify",{tempToken:pendingMfaToken,code:needsSms?twoFACode.trim():undefined,emailCode:mfaEmailCode.trim()});
+      finalizeLogin(d,d.usedBackupCode);
+    }catch(err:any){setLoginErr(err.message||"Invalid code. Please try again.");}
+    finally{setLoading(false);}
+  };
+  const[mfaResendBusy,setMfaResendBusy]=useState(false);
+  const doResendMfaCode=async(channel:"sms"|"voice")=>{
+    if(!pendingMfaToken)return;
+    setMfaResendBusy(true);
+    try{
+      const d=await api.post("/auth/mfa/resend-code",{tempToken:pendingMfaToken,channel});
+      toast2(d.message);
+    }catch(err:any){toast2(err.message,"⚠",false);}
+    finally{setMfaResendBusy(false);}
   };
   const startTwoFASetup=async()=>{
     setTwoFAStage("qr");setTwoFASetupCode("");setTwoFASecret("");setTwoFAQr("");
@@ -979,19 +1080,60 @@ export default function App(){
   const[withdrawConfirmOpen,setWithdrawConfirmOpen]=useState(false);
   const[withdrawConfirmTxId,setWithdrawConfirmTxId]=useState<number|null>(null);
   const[withdrawConfirmCode,setWithdrawConfirmCode]=useState("");
+  const[withdrawConfirmEmailCode,setWithdrawConfirmEmailCode]=useState("");
+
+  // ── Deposit methods ────────────────────────────────────────────────────
+  type DepositMethods={paypal?:{email:string;instructions:string};crypto?:{coins:{symbol:string;name:string;network:string;address:string}[]};bank_transfer?:{bankName:string;accountName:string;accountNumber:string;routingNumber:string;iban:string;swift:string;instructions:string}};
+  const[depositMethods,setDepositMethods]=useState<DepositMethods>({});
+  const[depositMethod,setDepositMethod]=useState<"paypal"|"crypto"|"bank_transfer"|"">("");
+  const[depositCoin,setDepositCoin]=useState("");
+  const[depositReference,setDepositReference]=useState("");
+  const[connectedWallet,setConnectedWallet]=useState("");
+  const[walletConnecting,setWalletConnecting]=useState(false);
+  useEffect(()=>{
+    if(!user)return;
+    api.get("/trades/deposit-methods").then((d:DepositMethods)=>{
+      setDepositMethods(d);
+      const first=(Object.keys(d)[0]as typeof depositMethod)||"";
+      setDepositMethod(first);
+      if(d.crypto?.coins?.length)setDepositCoin(d.crypto.coins[0].symbol);
+    }).catch(e=>console.warn("deposit-methods:",e.message));
+  },[user]);
+  const doConnectWallet=async()=>{
+    const eth=(window as any).ethereum;
+    if(!eth)return toast2("No crypto wallet extension found. Install MetaMask or a similar wallet to connect.","⚠",false);
+    setWalletConnecting(true);
+    try{
+      const accounts:string[]=await eth.request({method:"eth_requestAccounts"});
+      if(accounts&&accounts[0]){
+        setConnectedWallet(accounts[0]);
+        setDepositReference(`Sending from wallet: ${accounts[0]}`);
+        toast2("Wallet connected");
+      }
+    }catch(e:any){toast2(e.message||"Couldn't connect wallet","⚠",false);}
+    finally{setWalletConnecting(false);}
+  };
   const doTrade=async()=>{
   const amt=parseFloat(tamt);
   if(!amt||amt<=0)return toast2("Enter a valid amount","⚠",false);
   if(ttype==="deposit"&&amt<100)return toast2("Minimum deposit is $100","⚠",false);
+  if(ttype==="deposit"&&!depositMethod)return toast2("Choose a deposit method","⚠",false);
+  if(ttype==="deposit"&&depositMethod==="crypto"&&!depositCoin)return toast2("Choose a coin","⚠",false);
   if(ttype==="withdraw"&&!withdrawTurnstileToken)return toast2("Please complete the verification challenge.","⚠",false);
   setLoading(true);
   try{
-    const d=await api.post("/trades",{type:ttype,symbol:tcoin,amount:amt,turnstileToken:ttype==="withdraw"?withdrawTurnstileToken:undefined});
+    const d=await api.post("/trades",{
+      type:ttype,symbol:tcoin,amount:amt,
+      turnstileToken:ttype==="withdraw"?withdrawTurnstileToken:undefined,
+      method:ttype==="deposit"?depositMethod:undefined,
+      methodDetails:ttype==="deposit"?{coin:depositCoin,reference:depositReference}:undefined,
+    });
     if(ttype==="deposit"){
-      setDepositReceipt({referenceId:d.referenceId,amount:amt,cashBalance:d.cashBalance,bonus:d.bonus||null,timestamp:new Date().toISOString()});
-      api.get("/account/tier").then(setTierInfo).catch(()=>{});
+      setDepositReceipt({requestId:d.requestId,amount:amt,timestamp:new Date().toISOString()});
+      setDepositReference("");setConnectedWallet("");
     }else if(d.transactionId){
-      // Large withdrawal — backend needs a phone OTP before any money moves.
+      // Every withdrawal now needs both a phone code and an email code
+      // before it's sent to an admin for review — no money moves yet.
       setWithdrawConfirmTxId(d.transactionId);
       setWithdrawConfirmOpen(true);
       toast2(d.message);
@@ -1008,15 +1150,26 @@ export default function App(){
   finally{setLoading(false);}
 };
   const doConfirmWithdrawal=async()=>{
-    if(!withdrawConfirmTxId||!withdrawConfirmCode.trim())return toast2("Enter the code you received","⚠",false);
+    if(!withdrawConfirmTxId||!withdrawConfirmCode.trim())return toast2("Enter the code from your phone","⚠",false);
+    if(!withdrawConfirmEmailCode.trim())return toast2("Enter the code from your email","⚠",false);
     setLoading(true);
     try{
-      const d=await api.post(`/trades/withdraw/${withdrawConfirmTxId}/confirm`,{code:withdrawConfirmCode.trim()});
-      toast2(d.message,"🔴");
-      setWithdrawConfirmOpen(false);setWithdrawConfirmTxId(null);setWithdrawConfirmCode("");
+      const d=await api.post(`/trades/withdraw/${withdrawConfirmTxId}/confirm`,{code:withdrawConfirmCode.trim(),emailCode:withdrawConfirmEmailCode.trim()});
+      toast2(d.message,"⏳");
+      setWithdrawConfirmOpen(false);setWithdrawConfirmTxId(null);setWithdrawConfirmCode("");setWithdrawConfirmEmailCode("");
       await loadData();
     }catch(e:any){toast2(e.message,"⚠",false);}
     finally{setLoading(false);}
+  };
+  const[withdrawResendBusy,setWithdrawResendBusy]=useState(false);
+  const doResendWithdrawCode=async(channel:"sms"|"voice")=>{
+    if(!withdrawConfirmTxId)return;
+    setWithdrawResendBusy(true);
+    try{
+      const d=await api.post(`/trades/withdraw/${withdrawConfirmTxId}/resend-code`,{channel});
+      toast2(d.message);
+    }catch(e:any){toast2(e.message,"⚠",false);}
+    finally{setWithdrawResendBusy(false);}
   };
 
   const doStockTrade=async()=>{
@@ -1274,18 +1427,40 @@ export default function App(){
           <div className="landing-auth-divider">or use email</div>
 
           {/* LOGIN FORM */}
-          {authTab==="login"&&((pending2FAToken||pendingRiskOtpToken)?<>
+          {authTab==="login"&&(pendingMfaToken?<>
+            <div style={{fontSize:13,color:"var(--text3)",marginBottom:16,lineHeight:1.6}}>
+              {pendingMfaFactors.includes("sms")
+                ?"Almost there — enter the code texted to your phone and the code emailed to you."
+                :"Almost there — enter the code emailed to you."}
+            </div>
+            {pendingMfaPhoneRecommended&&<div style={{fontSize:12,color:"var(--text3)",background:"var(--surface2)",borderRadius:8,padding:"10px 12px",marginBottom:14,lineHeight:1.5}}>Add a verified phone number in Settings for full three-factor protection on future sign-ins.</div>}
+            {pendingMfaFactors.includes("sms")&&<>
+              <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Code from your phone</div>
+              <input className="inp" placeholder="123456" inputMode="numeric" autoComplete="one-time-code" style={{marginBottom:6,letterSpacing:2,textAlign:"center",fontSize:18}} value={twoFACode} onChange={e=>{setTwoFACode(e.target.value);setLoginErr("");}} onKeyDown={e=>e.key==="Enter"&&doMfaVerify()} autoFocus/>
+              <div style={{textAlign:"center",marginBottom:14}}>
+                <button type="button" style={{background:"none",border:"none",padding:0,fontSize:12,color:"var(--text3)",cursor:"pointer",textDecoration:"underline"}} disabled={mfaResendBusy} onClick={()=>doResendMfaCode("sms")}>Resend text</button>
+                <span style={{color:"var(--text3)",margin:"0 8px"}}>·</span>
+                <button type="button" style={{background:"none",border:"none",padding:0,fontSize:12,color:"var(--text3)",cursor:"pointer",textDecoration:"underline"}} disabled={mfaResendBusy} onClick={()=>doResendMfaCode("voice")}>Call me instead</button>
+              </div>
+            </>}
+            <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Code from your email</div>
+            <input className="inp" placeholder="123456" inputMode="numeric" autoComplete="one-time-code" style={{marginBottom:16,letterSpacing:2,textAlign:"center",fontSize:18}} value={mfaEmailCode} onChange={e=>{setMfaEmailCode(e.target.value);setLoginErr("");}} onKeyDown={e=>e.key==="Enter"&&doMfaVerify()} autoFocus={!pendingMfaFactors.includes("sms")}/>
+            <button className="btn btn-primary btn-lg" style={{width:"100%",borderRadius:12,marginBottom:12}} onClick={doMfaVerify} disabled={loading}>{loading?<><span className="btn-spinner"/> Verifying…</>:"Verify & sign in"}</button>
+            <button className="btn btn-ghost" style={{width:"100%"}} onClick={()=>{setPendingMfaToken(null);setPendingMfaFactors([]);setPendingMfaPhoneRecommended(false);setTwoFACode("");setMfaEmailCode("");setLoginErr("");}}>Back to sign in</button>
+          </>:(pending2FAToken||pendingRiskOtpToken)?<>
             <div style={{fontSize:13,color:"var(--text3)",marginBottom:16,lineHeight:1.6}}>{pending2FAToken?"Enter the 6-digit code from your authenticator app, or one of your backup codes.":"For your security, we texted a code to your verified phone. Enter it below."}</div>
             <input className="inp" placeholder="123456" inputMode="numeric" autoComplete="one-time-code" style={{marginBottom:16,letterSpacing:2,textAlign:"center",fontSize:18}} value={twoFACode} onChange={e=>{setTwoFACode(e.target.value);setLoginErr("");}} onKeyDown={e=>e.key==="Enter"&&doTwoFAVerify()} autoFocus/>
             <button className="btn btn-primary btn-lg" style={{width:"100%",borderRadius:12,marginBottom:12}} onClick={doTwoFAVerify} disabled={loading}>{loading?<><span className="btn-spinner"/> Verifying…</>:"Verify"}</button>
             <button className="btn btn-ghost" style={{width:"100%"}} onClick={()=>{setPending2FAToken(null);setPendingRiskOtpToken(null);setTwoFACode("");setLoginErr("");}}>Back to sign in</button>
           </>:<>
             <input className="inp" placeholder="Email address" type="email" autoComplete="email" style={{marginBottom:10}} value={email} onChange={e=>{setEmail(e.target.value);setLoginErr("");}}/>
-            <input className="inp" placeholder="Password" type="password" autoComplete="current-password" style={{marginBottom:16}} value={pw} onChange={e=>{setPw(e.target.value);setLoginErr("");}} onKeyDown={e=>e.key==="Enter"&&doEmail()}/>
+            <input className="inp" placeholder="Password" type="password" autoComplete="current-password" style={{marginBottom:8}} value={pw} onChange={e=>{setPw(e.target.value);setLoginErr("");}} onKeyDown={e=>e.key==="Enter"&&doEmail()}/>
+            <div style={{textAlign:"right",marginBottom:16}}><button type="button" style={{background:"none",border:"none",padding:0,fontSize:12,color:"var(--text3)",cursor:"pointer",textDecoration:"underline"}} onClick={()=>{setForgotPwEmail(email);setForgotPwSent(false);setShowForgotPw(true);}}>Forgot password?</button></div>
             {loginTurnstileRequired&&<Turnstile key={loginTurnstileKey} onVerify={setLoginTurnstileToken} onError={()=>setLoginTurnstileToken("")}/>}
             <button className="btn btn-primary btn-lg" style={{width:"100%",borderRadius:12,marginBottom:12}} onClick={doEmail} disabled={loading}>{loading?<><span className="btn-spinner"/> Signing in…</>:"Sign In"}</button>
             {showResendVerification&&<button type="button" className="btn btn-ghost" style={{width:"100%",marginBottom:12}} onClick={resendVerificationEmail} disabled={resendBusy}>{resendBusy?<span className="btn-spinner"/>:null}Resend verification email</button>}
           </>)}
+
 
           
 
@@ -1482,8 +1657,34 @@ export default function App(){
         <section id="faq" className="landing-section" style={{paddingTop:40}}><div className="landing-section-head"><div className="landing-overline">Questions, answered</div><h2 className="landing-h2">A straightforward experience deserves straightforward answers.</h2></div><div className="landing-faq">{[['How does Wave keep my account secure?','Wave uses encrypted transport, bcrypt password hashing, short-lived access tokens, and device-level session controls.'],['Can I start with any amount?','Yes. Your account starts with a zero balance, so you can add funds and start on your own terms.'],['Will I see fees before I act?','Always. Trade and withdrawal fees are made clear before confirmation, with activity recorded in your account history.']].map(([q,a])=><details key={q}><summary>{q}</summary><p>{a}</p></details>)}</div></section>
         <section className="landing-cta"><h2>Let your next move feel inevitable.</h2><p>Join Wave and build a more intentional relationship with your financial future.</p><button className="btn" onClick={()=>{setAuthTab("register");document.getElementById("access")?.scrollIntoView({behavior:"smooth",block:"center"});}}>Create your account <span>-&gt;</span></button></section>
       </main>
-      <footer className="landing-footer"><div className="landing-brand"><WaveLogo size={22}/>Wave</div><span>Copyright 2026 Wave Invest. Built for what is next.</span><div className="landing-footer-links"><a href="#security">Security</a><a href="#faq">Support</a><a href="#access">Privacy</a></div></footer>
+      <footer className="landing-footer"><div className="landing-brand"><WaveLogo size={22}/>Wave</div><span>Copyright 2026 Wave Invest. Built for what is next.</span><div className="landing-footer-links"><a href="#security">Security</a><a href="#faq">Support</a><a href="#access" onClick={()=>{setAuthTab("register");setShowTerms("terms");}}>Terms</a><a href="#access" onClick={()=>{setAuthTab("register");setShowTerms("privacy");}}>Privacy</a></div></footer>
       {toast&&<div style={{position:"fixed",bottom:24,right:16,left:16,maxWidth:380,margin:"0 auto",padding:"13px 18px",borderRadius:100,background:toast.ok===false?"rgba(239,68,68,.25)":"rgba(16,185,129,.25)",border:`1px solid ${toast.ok===false?"rgba(239,68,68,.5)":"rgba(16,185,129,.5)"}`,color:"#fff",fontSize:13,fontWeight:700,zIndex:999,display:"flex",alignItems:"center",gap:9,backdropFilter:"blur(15px)",WebkitBackdropFilter:"blur(15px)"}}><span>{toast.icon}</span>{toast.msg}</div>}
+
+      <Modal open={showForgotPw} onClose={()=>setShowForgotPw(false)} title="Reset your password">
+        {forgotPwSent?<div style={{fontSize:13,textAlign:"center",padding:"10px 0"}}>
+          <div style={{fontSize:32,marginBottom:10}}>📩</div>
+          <p style={{color:"var(--text2)",lineHeight:1.6}}>If an account exists for <b>{forgotPwEmail}</b>, a reset link is on its way. Check your inbox — the link expires in 30 minutes.</p>
+          <button className="btn btn-primary btn-lg" style={{width:"100%",marginTop:16}} onClick={()=>setShowForgotPw(false)}>Done</button>
+        </div>:<div style={{fontSize:13}}>
+          <p style={{color:"var(--text3)",marginBottom:14,lineHeight:1.6}}>Enter the email on your account and we'll send you a link to reset your password.</p>
+          <input className="inp" placeholder="Email address" type="email" autoComplete="email" style={{marginBottom:16}} value={forgotPwEmail} onChange={e=>setForgotPwEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doForgotPassword()} autoFocus/>
+          <button className="btn btn-primary btn-lg" style={{width:"100%"}} onClick={doForgotPassword} disabled={forgotPwBusy}>{forgotPwBusy?<><span className="btn-spinner"/> Sending…</>:"Send reset link"}</button>
+        </div>}
+      </Modal>
+
+      <Modal open={!!resetPwToken} onClose={()=>{setResetPwToken("");setResetPwNew("");setResetPwConfirm("");setResetPwErr("");setResetPwDone(false);}} title="Set a new password">
+        {resetPwDone?<div style={{fontSize:13,textAlign:"center",padding:"10px 0"}}>
+          <div style={{fontSize:32,marginBottom:10}}>✅</div>
+          <p style={{color:"var(--text2)",lineHeight:1.6}}>Your password has been reset. You've been signed out everywhere for your security — sign in below with your new password.</p>
+          <button className="btn btn-primary btn-lg" style={{width:"100%",marginTop:16}} onClick={()=>{setResetPwToken("");setResetPwNew("");setResetPwConfirm("");setResetPwDone(false);setAuthTab("login");}}>Sign in</button>
+        </div>:<div style={{fontSize:13}}>
+          <p style={{color:"var(--text3)",marginBottom:14,lineHeight:1.6}}>Choose a new password for your account.</p>
+          {resetPwErr&&<div style={{color:"var(--red)",fontSize:12,marginBottom:12}}>{resetPwErr}</div>}
+          <input className="inp" placeholder="New password" type="password" autoComplete="new-password" style={{marginBottom:10}} value={resetPwNew} onChange={e=>{setResetPwNew(e.target.value);setResetPwErr("");}} autoFocus/>
+          <input className="inp" placeholder="Confirm new password" type="password" autoComplete="new-password" style={{marginBottom:16}} value={resetPwConfirm} onChange={e=>{setResetPwConfirm(e.target.value);setResetPwErr("");}} onKeyDown={e=>e.key==="Enter"&&doResetPassword()}/>
+          <button className="btn btn-primary btn-lg" style={{width:"100%"}} onClick={doResetPassword} disabled={resetPwBusy}>{resetPwBusy?<><span className="btn-spinner"/> Resetting…</>:"Reset password"}</button>
+        </div>}
+      </Modal>
     </div>
   );
 
@@ -1591,7 +1792,10 @@ export default function App(){
           <div style={{fontSize:13,color:"var(--text3)",marginBottom:16,lineHeight:1.6}}>Scan this QR code with an authenticator app (Google Authenticator, Authy, 1Password, etc.), then enter the 6-digit code it shows.</div>
           {twoFAQr?<div style={{display:"flex",justifyContent:"center",marginBottom:16}}><img src={twoFAQr} alt="2FA QR code" style={{width:180,height:180,borderRadius:8,background:"#fff",padding:8}}/></div>
             :<div style={{textAlign:"center",padding:20,color:"var(--text3)",fontSize:13}}>Generating QR code…</div>}
-          {twoFASecret&&<div style={{fontSize:11,color:"var(--text3)",textAlign:"center",marginBottom:16,wordBreak:"break-all"}}>Can't scan? Enter manually: <b style={{color:"var(--text2)"}}>{twoFASecret}</b></div>}
+          {twoFASecret&&<div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,fontSize:11,color:"var(--text3)",textAlign:"center",marginBottom:16,flexWrap:"wrap"}}>
+            <span>Can't scan? Enter manually: <b style={{color:"var(--text2)",wordBreak:"break-all"}}>{twoFASecret}</b></span>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={()=>{navigator.clipboard?.writeText(twoFASecret);toast2("Secret copied");}}>Copy</button>
+          </div>}
           <input className="inp" placeholder="123456" inputMode="numeric" style={{marginBottom:16,letterSpacing:2,textAlign:"center",fontSize:18}} value={twoFASetupCode} onChange={e=>setTwoFASetupCode(e.target.value)} onKeyDown={e=>e.key==="Enter"&&confirmTwoFASetup()}/>
           <button className="btn btn-primary btn-lg" style={{width:"100%",justifyContent:"center"}} disabled={loading||!twoFASecret} onClick={confirmTwoFASetup}>{loading?"Verifying…":"Enable 2FA"}</button>
         </>:<>
@@ -1612,10 +1816,18 @@ export default function App(){
         <button className="btn btn-danger" style={{width:"100%",justifyContent:"center"}} disabled={loading||!twoFADisablePw||!twoFADisableCode.trim()} onClick={confirmTwoFADisable}>{loading?"Disabling…":"Turn Off 2FA"}</button>
       </Modal>
 
-      <Modal open={withdrawConfirmOpen} onClose={()=>{setWithdrawConfirmOpen(false);setWithdrawConfirmCode("");}} title="Confirm Withdrawal">
-        <div style={{fontSize:13,color:"var(--text3)",marginBottom:16,lineHeight:1.6}}>For your security, this withdrawal needs a code sent to your verified phone.</div>
-        <input className="inp" placeholder="123456" inputMode="numeric" style={{marginBottom:20,letterSpacing:2,textAlign:"center",fontSize:18}} value={withdrawConfirmCode} onChange={e=>setWithdrawConfirmCode(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doConfirmWithdrawal()}/>
-        <button className="btn btn-danger" style={{width:"100%",justifyContent:"center"}} disabled={loading||!withdrawConfirmCode.trim()} onClick={doConfirmWithdrawal}>{loading?"Confirming…":"Confirm Withdrawal"}</button>
+      <Modal open={withdrawConfirmOpen} onClose={()=>{setWithdrawConfirmOpen(false);setWithdrawConfirmCode("");setWithdrawConfirmEmailCode("");}} title="Confirm Withdrawal">
+        <div style={{fontSize:13,color:"var(--text3)",marginBottom:16,lineHeight:1.6}}>For your security, this withdrawal needs both a code texted to your verified phone and a code emailed to you. Once verified, it's sent to our team for review.</div>
+        <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Code from your phone</div>
+        <input className="inp" placeholder="123456" inputMode="numeric" autoComplete="one-time-code" style={{marginBottom:6,letterSpacing:2,textAlign:"center",fontSize:18}} value={withdrawConfirmCode} onChange={e=>setWithdrawConfirmCode(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doConfirmWithdrawal()}/>
+        <div style={{textAlign:"center",marginBottom:14}}>
+          <button type="button" style={{background:"none",border:"none",padding:0,fontSize:12,color:"var(--text3)",cursor:"pointer",textDecoration:"underline"}} disabled={withdrawResendBusy} onClick={()=>doResendWithdrawCode("sms")}>Resend text</button>
+          <span style={{color:"var(--text3)",margin:"0 8px"}}>·</span>
+          <button type="button" style={{background:"none",border:"none",padding:0,fontSize:12,color:"var(--text3)",cursor:"pointer",textDecoration:"underline"}} disabled={withdrawResendBusy} onClick={()=>doResendWithdrawCode("voice")}>Call me instead</button>
+        </div>
+        <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Code from your email</div>
+        <input className="inp" placeholder="123456" inputMode="numeric" autoComplete="one-time-code" style={{marginBottom:20,letterSpacing:2,textAlign:"center",fontSize:18}} value={withdrawConfirmEmailCode} onChange={e=>setWithdrawConfirmEmailCode(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doConfirmWithdrawal()}/>
+        <button className="btn btn-danger" style={{width:"100%",justifyContent:"center"}} disabled={loading||!withdrawConfirmCode.trim()||!withdrawConfirmEmailCode.trim()} onClick={doConfirmWithdrawal}>{loading?"Verifying…":"Verify & Send for Review"}</button>
       </Modal>
 
       <Modal open={priceAlertsOpen} onClose={()=>setPriceAlertsOpen(false)} title="Price Alerts">
@@ -2257,6 +2469,66 @@ export default function App(){
                   <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
                     {(ttype==="deposit"?["100","250","500","1000"]:["50","100","500","1000"]).map(v=><button key={v} className={`qpill ${tamt===v?"act":""}`} onClick={()=>setTamt(v)}>${v}</button>)}
                   </div>
+
+                  {ttype==="deposit"&&<>
+                    {Object.keys(depositMethods).length===0?
+                      <div style={{fontSize:12,color:"var(--text3)",background:"var(--surface2)",borderRadius:8,padding:"10px 12px",marginBottom:14}}>No deposit methods are configured yet. Check back soon.</div>
+                    :<>
+                      <div className="tlab">Deposit method</div>
+                      <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
+                        {(["paypal","crypto","bank_transfer"]as const).filter(m=>depositMethods[m]).map(m=>(
+                          <button key={m} className={`qpill ${depositMethod===m?"act":""}`} onClick={()=>{setDepositMethod(m);setDepositReference("");setConnectedWallet("");}}>
+                            {m==="paypal"?"PayPal":m==="crypto"?"Crypto":"Bank transfer"}
+                          </button>
+                        ))}
+                        <button className="qpill" disabled style={{opacity:.45,cursor:"not-allowed"}} title="Card deposits are coming soon">Card · Coming soon</button>
+                      </div>
+
+                      {depositMethod==="paypal"&&depositMethods.paypal&&<div style={{background:"var(--surface2)",borderRadius:10,padding:14,marginBottom:14,fontSize:13}}>
+                        <div style={{fontSize:11,color:"var(--text3)",textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>Send payment to</div>
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                          <span style={{fontWeight:700,wordBreak:"break-all"}}>{depositMethods.paypal.email}</span>
+                          <button className="btn btn-ghost btn-sm" onClick={()=>{navigator.clipboard?.writeText(depositMethods.paypal!.email);toast2("Copied");}}>Copy</button>
+                        </div>
+                        <div style={{fontSize:12,color:"var(--text3)",marginBottom:10,lineHeight:1.5}}>{depositMethods.paypal.instructions}</div>
+                        <input className="inp" placeholder="PayPal transaction ID (optional, speeds up review)" value={depositReference} onChange={e=>setDepositReference(e.target.value)}/>
+                      </div>}
+
+                      {depositMethod==="crypto"&&depositMethods.crypto&&<div style={{background:"var(--surface2)",borderRadius:10,padding:14,marginBottom:14,fontSize:13}}>
+                        <div className="tlab" style={{marginTop:0}}>Coin</div>
+                        <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
+                          {depositMethods.crypto.coins.map(c=>(
+                            <button key={c.symbol} className={`qpill ${depositCoin===c.symbol?"act":""}`} onClick={()=>setDepositCoin(c.symbol)}>{c.symbol}</button>
+                          ))}
+                        </div>
+                        {depositMethods.crypto.coins.filter(c=>c.symbol===depositCoin).map(c=>(
+                          <div key={c.symbol}>
+                            <div style={{fontSize:11,color:"var(--text3)",textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>{c.name} address ({c.network})</div>
+                            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                              <span style={{fontWeight:700,wordBreak:"break-all",fontFamily:"monospace",fontSize:12}}>{c.address}</span>
+                              <button className="btn btn-ghost btn-sm" onClick={()=>{navigator.clipboard?.writeText(c.address);toast2("Address copied");}}>Copy</button>
+                            </div>
+                          </div>
+                        ))}
+                        <button className="btn" style={{width:"100%",marginBottom:10}} onClick={doConnectWallet} disabled={walletConnecting}>
+                          {walletConnecting?"Connecting…":connectedWallet?`Connected: ${connectedWallet.slice(0,6)}…${connectedWallet.slice(-4)}`:"Connect Wallet"}
+                        </button>
+                        <div style={{fontSize:11,color:"var(--text3)",marginBottom:10,lineHeight:1.5}}>Connecting confirms which wallet you're sending from for our records — it doesn't send funds automatically. Send the amount to the address above from your wallet app, then submit below.</div>
+                        <input className="inp" placeholder="Transaction hash (optional, speeds up review)" value={depositReference} onChange={e=>setDepositReference(e.target.value)}/>
+                      </div>}
+
+                      {depositMethod==="bank_transfer"&&depositMethods.bank_transfer&&<div style={{background:"var(--surface2)",borderRadius:10,padding:14,marginBottom:14,fontSize:13}}>
+                        {[["Bank",depositMethods.bank_transfer.bankName],["Account name",depositMethods.bank_transfer.accountName],["Account number",depositMethods.bank_transfer.accountNumber],["Routing number",depositMethods.bank_transfer.routingNumber],["IBAN",depositMethods.bank_transfer.iban],["SWIFT/BIC",depositMethods.bank_transfer.swift]].filter(([,v])=>v).map(([k,v])=>(
+                          <div key={k} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)"}}>
+                            <span style={{color:"var(--text3)"}}>{k}</span><span style={{fontWeight:700,fontFamily:"monospace",fontSize:12}}>{v}</span>
+                          </div>
+                        ))}
+                        <div style={{fontSize:12,color:"var(--text3)",margin:"10px 0",lineHeight:1.5}}>{depositMethods.bank_transfer.instructions}</div>
+                        <input className="inp" placeholder="Transfer reference (optional, speeds up review)" value={depositReference} onChange={e=>setDepositReference(e.target.value)}/>
+                      </div>}
+                    </>}
+                  </>}
+
                   {ttype==="withdraw"&&<div className="tsum">
                     <div className="trow"><span className="trl">Fee (0.5%)</span><span className="trv">${tamt?(parseFloat(tamt)*0.005).toFixed(2):"0.00"}</span></div>
                     <div className="trow"><span className="trl">You'll be charged</span><span className="trt">${tamt?(parseFloat(tamt)*1.005).toFixed(2):"0.00"}</span></div>
@@ -2323,7 +2595,7 @@ export default function App(){
                           <td style={{color:tx.type==="withdraw"?"var(--red)":"var(--green)",fontWeight:700}}>{tx.type==="withdraw"?"-":"+"}${(tx.total||0).toLocaleString()}</td>
                           <td style={{fontFamily:"monospace",fontSize:12,color:"var(--text3)"}}>{tx.reference_id||"—"}</td>
                           <td>{(tx.created_at||"").slice(0,10)}</td>
-                          <td><span className={`badge ${tx.status==="failed"?"badge-red":tx.status==="pending"?"badge-gray":"badge-green"}`}>{tx.status==="failed"?"✕":tx.status==="pending"?"⏳":"✓"} {tx.status}</span></td>
+                          <td><span className={`badge ${txStatusBadge(tx.status).cls}`}>{txStatusBadge(tx.status).icon} {tx.status}</span></td>
                         </tr>
                       ))}</tbody>
                     </table></div>
@@ -2354,13 +2626,13 @@ export default function App(){
               </div>}
             </Modal>
 
-            <Modal open={!!depositReceipt} onClose={()=>setDepositReceipt(null)} title="Deposit receipt">
+            <Modal open={!!depositReceipt} onClose={()=>setDepositReceipt(null)} title="Deposit submitted">
               {depositReceipt&&<div style={{fontSize:13}}>
                 <div style={{textAlign:"center",padding:"10px 0 20px",borderBottom:"1px dashed var(--border)",marginBottom:16}}>
-                  <div style={{fontSize:32,marginBottom:6}}>✅</div>
-                  <div style={{fontSize:11,color:"var(--text3)",textTransform:"uppercase",letterSpacing:1}}>Deposit completed</div>
-                  <div style={{fontSize:28,fontWeight:900,color:"var(--green)",margin:"6px 0"}}>+{cur(depositReceipt.amount)}</div>
-                  <span className="badge badge-green">✓ completed</span>
+                  <div style={{fontSize:32,marginBottom:6}}>⏳</div>
+                  <div style={{fontSize:11,color:"var(--text3)",textTransform:"uppercase",letterSpacing:1}}>Sent for admin review</div>
+                  <div style={{fontSize:28,fontWeight:900,color:"var(--text)",margin:"6px 0"}}>{cur(depositReceipt.amount)}</div>
+                  <span className="badge badge-gray">⏳ pending</span>
                 </div>
                 <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Account</div>
                 <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0 14px"}}>
@@ -2369,12 +2641,12 @@ export default function App(){
                   </div>
                   <div><div style={{fontWeight:700,color:"var(--text)"}}>{user?.name}</div><div style={{fontSize:12,color:"var(--text3)"}}>{user?.email}</div></div>
                 </div>
-                {[["Reference ID",depositReceipt.referenceId],["Date",new Date(depositReceipt.timestamp).toLocaleString()],["Amount",cur(depositReceipt.amount)],...(depositReceipt.bonus?[["Bonus",`+${cur(depositReceipt.bonus.bonusAmount)} (${depositReceipt.bonus.promotionName})`],["Bonus unlocks",new Date(depositReceipt.bonus.unlockAt).toLocaleDateString()]]:[]),["New balance",cur(depositReceipt.cashBalance)]].map(([k,v])=>(
+                {[["Request ID",`#${depositReceipt.requestId}`],["Submitted",new Date(depositReceipt.timestamp).toLocaleString()],["Amount",cur(depositReceipt.amount)]].map(([k,v])=>(
                   <div key={k} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid var(--border)"}}>
-                    <span style={{color:"var(--text3)"}}>{k}</span><span style={{fontWeight:600,color:"var(--text)",fontFamily:k==="Reference ID"?"monospace":undefined}}>{v}</span>
+                    <span style={{color:"var(--text3)"}}>{k}</span><span style={{fontWeight:600,color:"var(--text)",fontFamily:k==="Request ID"?"monospace":undefined}}>{v}</span>
                   </div>
                 ))}
-                <div style={{fontSize:11,color:"var(--text3)",textAlign:"center",marginTop:16}}>Keep this reference ID for your records.</div>
+                <div style={{fontSize:11,color:"var(--text3)",textAlign:"center",marginTop:16}}>Your balance updates once an admin approves this deposit.</div>
               </div>}
             </Modal>
           </div>
@@ -2605,7 +2877,7 @@ export default function App(){
                       <td>${(tx.price||0).toLocaleString()}</td>
                       <td style={{color:tx.type==="buy"||tx.type==="withdraw"?"var(--red)":"var(--green)",fontWeight:700}}>{tx.type==="buy"||tx.type==="withdraw"?"-":"+"}${(tx.total||0).toLocaleString()}</td>
                       <td>{(tx.created_at||"").slice(0,10)}</td>
-                      <td><span className={`badge ${tx.status==="failed"?"badge-red":tx.status==="pending"?"badge-gray":"badge-green"}`}>{tx.status==="failed"?"✕":tx.status==="pending"?"⏳":"✓"} {tx.status}</span></td>
+                      <td><span className={`badge ${txStatusBadge(tx.status).cls}`}>{txStatusBadge(tx.status).icon} {tx.status}</span></td>
                     </tr>
                   ))}
                 </tbody>
