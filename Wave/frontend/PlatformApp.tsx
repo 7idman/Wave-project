@@ -1871,32 +1871,32 @@ export default function App(){
         </div>
         <div className="ssec">Main</div>
         {NAV.map(n=>(
-          <div key={n.id} className={`sitem ${page===n.id?"active":""}`} onClick={()=>nav(n.id)} onKeyDown={e=>onActivate(e,()=>nav(n.id))} role="button" tabIndex={0} aria-current={page===n.id?"page":undefined}>
-            <span className="sicon"><AppIcon name={n.icon} size={17}/></span>{n.label}
+          <div key={n.id} className={`sitem ${page===n.id?"active":""}`} onClick={()=>nav(n.id)} onKeyDown={e=>onActivate(e,()=>nav(n.id))} role="button" tabIndex={0} aria-current={page===n.id?"page":undefined} aria-label={n.label} title={sbCollapsed?n.label:undefined}>
+            <span className="sicon"><AppIcon name={n.icon} size={17}/></span><span className="slabel">{n.label}</span>
           </div>
         ))}
         <div className="ssec" style={{marginTop:18}}>Wealth Services</div>
         {SERVICE_NAV.map(n=>(
-          <div key={n.id} className={`sitem ${page===n.id?"active":""}`} onClick={()=>nav(n.id)} onKeyDown={e=>onActivate(e,()=>nav(n.id))} role="button" tabIndex={0} aria-current={page===n.id?"page":undefined}>
-            <span className="sicon"><AppIcon name={n.icon} size={17}/></span>{n.label}
+          <div key={n.id} className={`sitem ${page===n.id?"active":""}`} onClick={()=>nav(n.id)} onKeyDown={e=>onActivate(e,()=>nav(n.id))} role="button" tabIndex={0} aria-current={page===n.id?"page":undefined} aria-label={n.label} title={sbCollapsed?n.label:undefined}>
+            <span className="sicon"><AppIcon name={n.icon} size={17}/></span><span className="slabel">{n.label}</span>
           </div>
         ))}
         {isAdmin&&<>
           <div className="ssec" style={{marginTop:18}}>Admin</div>
-          <div className={`sitem ${page==="admin"?"active":""}`} onClick={()=>nav("admin")} onKeyDown={e=>onActivate(e,()=>nav("admin"))} role="button" tabIndex={0} aria-current={page==="admin"?"page":undefined}>
-            <span className="sicon">+</span>Admin Center
+          <div className={`sitem ${page==="admin"?"active":""}`} onClick={()=>nav("admin")} onKeyDown={e=>onActivate(e,()=>nav("admin"))} role="button" tabIndex={0} aria-current={page==="admin"?"page":undefined} aria-label="Admin Center" title={sbCollapsed?"Admin Center":undefined}>
+            <span className="sicon">+</span><span className="slabel">Admin Center</span>
           </div>
         </>}
         <div className="ssec" style={{marginTop:8}}>Account</div>
-        <div className={`sitem ${page==="settings"?"active":""}`} onClick={()=>nav("settings")} onKeyDown={e=>onActivate(e,()=>nav("settings"))} role="button" tabIndex={0} aria-current={page==="settings"?"page":undefined}>
-          <span className="sicon">⚙</span>Settings
+        <div className={`sitem ${page==="settings"?"active":""}`} onClick={()=>nav("settings")} onKeyDown={e=>onActivate(e,()=>nav("settings"))} role="button" tabIndex={0} aria-current={page==="settings"?"page":undefined} aria-label="Settings" title={sbCollapsed?"Settings":undefined}>
+          <span className="sicon">⚙</span><span className="slabel">Settings</span>
         </div>
-        <div className={`sitem ${page==="notifications"?"active":""}`} onClick={()=>nav("notifications")} onKeyDown={e=>onActivate(e,()=>nav("notifications"))} role="button" tabIndex={0} aria-current={page==="notifications"?"page":undefined} style={{position:"relative"}}>
+        <div className={`sitem ${page==="notifications"?"active":""}`} onClick={()=>nav("notifications")} onKeyDown={e=>onActivate(e,()=>nav("notifications"))} role="button" tabIndex={0} aria-current={page==="notifications"?"page":undefined} style={{position:"relative"}} aria-label="Notifications" title={sbCollapsed?"Notifications":undefined}>
           <span className="sicon">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
           </span>
-          Notifications
-          {appSettings.notifications&&<span style={{marginLeft:"auto",width:7,height:7,borderRadius:"50%",background:"var(--green)",flexShrink:0}}/>}
+          <span className="slabel">Notifications</span>
+          {appSettings.notifications&&<span className="sbadge" style={{marginLeft:"auto",width:7,height:7,borderRadius:"50%",background:"var(--green)",flexShrink:0}}/>}
         </div>
         <div className="sbot">
           <div className="suser" onClick={()=>nav("settings")} onKeyDown={e=>onActivate(e,()=>nav("settings"))} role="button" tabIndex={0} aria-label="Open profile settings">
@@ -2003,9 +2003,9 @@ export default function App(){
               {l:"Total Balance",  raw:port.totalValue,           s:"+3.82% today",pos:true,  glow:"#6366F1",tip:"Cash balance plus the current value of everything you hold"},
               {l:"Portfolio Value",raw:port.totalPortfolioValue,  s:"Invested",    pos:null,  glow:"#06B6D4",tip:"Current market value of your holdings only, excluding cash"},
               {l:"Cash Balance",   raw:port.cashBalance,          s:"Available",  pos:null,  glow:"#10B981",tip:"Uninvested cash available to trade or withdraw"},
-              {l:"24h P&L",        raw:dayPnl,                    s:`${dayPnl>=0?"+":""}${dayPnlPct.toFixed(2)}%`, pos:dayPnl>=0,  glow:"#8B5CF6",tip:"Unrealized 24h price movement on your current holdings. Doesn't separate out trades made earlier today — cash isn't included since it doesn't move in price.",signed:true},
+              {l:"24h P&L",        raw:dayPnl,                    s:`${dayPnl>=0?"+":""}${dayPnlPct.toFixed(2)}%`, pos:dayPnl>=0,  glow:dayPnl>=0?"#10B981":"#EF4444",tip:"Unrealized 24h price movement on your current holdings. Doesn't separate out trades made earlier today — cash isn't included since it doesn't move in price.",signed:true},
             ].map((s,i)=>(
-              <div key={i} className={`stat ${s.l==="Total Balance"||s.l==="Cash Balance"?"balance-link":""}`} onClick={s.l==="Total Balance"||s.l==="Cash Balance"?goToDeposit:undefined} title={`${s.tip} (${cur(s.raw)})`} aria-label={`${s.l}: ${cur(s.raw)}. ${s.tip}`}>
+              <div key={i} className={`stat ${s.l==="Total Balance"||s.l==="Cash Balance"?"balance-link":""}`} onClick={s.l==="Total Balance"||s.l==="Cash Balance"?goToDeposit:undefined} title={`${s.tip} (${cur(s.raw)})`} aria-label={`${s.l}: ${cur(s.raw)}. ${s.tip}`} style={i>0?(appSettings.theme==="Light"?{background:`linear-gradient(155deg,${s.glow}22 0%,${s.glow}08 55%,#fff 100%)`,borderColor:`${s.glow}33`}:{background:`linear-gradient(155deg,${s.glow}38 0%,${s.glow}12 48%,var(--bg2) 100%)`,borderColor:`${s.glow}4d`}):undefined}>
                 <div className="stat-glow" style={{background:s.glow}}/>
                 <div className="stat-label">{s.l}</div>
                 <div className="stat-value">
@@ -2019,9 +2019,9 @@ export default function App(){
 
           <div className="quick-actions dashboard-actions" style={{display:"flex",gap:10,flexWrap:"wrap",margin:"16px 0"}}>
             <button className="btn btn-primary btn-sm" onClick={()=>{setTtype("buy");nav("trade");}} title="Buy crypto">+ Buy</button>
-            <button className="btn btn-ghost btn-sm" onClick={goToDeposit} title="Add funds to your cash balance">Deposit</button>
-            <button className="btn btn-ghost btn-sm" onClick={()=>{setTtype("withdraw");nav("transactions");}} title="Withdraw cash">Withdraw</button>
-            <button className="btn btn-ghost btn-sm" onClick={()=>nav("portfolio")} title="View full portfolio">Portfolio</button>
+            <button className="btn btn-ghost btn-sm" onClick={goToDeposit} title="Add funds to your cash balance">↓ Deposit</button>
+            <button className="btn btn-ghost btn-sm" onClick={()=>{setTtype("withdraw");nav("transactions");}} title="Withdraw cash">↑ Withdraw</button>
+            <button className="btn btn-ghost btn-sm" onClick={()=>nav("portfolio")} title="View full portfolio">▤ Portfolio</button>
           </div>
 
           <div className="crow dashboard-market-layout">
