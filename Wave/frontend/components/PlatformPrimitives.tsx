@@ -15,10 +15,15 @@ export const CoinIcon=({symbol,size=32}:{symbol:string;size?:number})=>{
 };
 
 export const WaveLogo=({size=28}:{size?:number})=>(
-  <svg width={size} height={size} viewBox="0 0 32 32" fill="none">
-    <rect x="7" y="14" width="4" height="11" rx="2" fill="#818CF8" opacity="0.7"/>
-    <rect x="14" y="9" width="4" height="16" rx="2" fill="#6366F1"/>
-    <rect x="21" y="6" width="4" height="19" rx="2" fill="#818CF8" opacity="0.85"/>
+  <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+    <defs>
+      <linearGradient id="wave-mark" x1="5" y1="6" x2="28" y2="27" gradientUnits="userSpaceOnUse">
+        <stop stopColor="#36D9B0"/>
+        <stop offset=".48" stopColor="#38C9ED"/>
+        <stop offset="1" stopColor="#9790F4"/>
+      </linearGradient>
+    </defs>
+    <path d="M4.8 8.2c.7-.35 1.55-.06 1.9.64l4.12 8.22 3.52-7.3c.46-.96 1.82-.98 2.3-.04l3.64 7.16 4.04-8.06a1.43 1.43 0 0 1 2.56 1.28l-5.32 10.62c-.52 1.04-2.01 1.04-2.54 0l-3.64-7.16-3.54 7.34c-.5 1.03-1.97 1.05-2.5.02L4.16 10.12a1.43 1.43 0 0 1 .64-1.92Z" fill="url(#wave-mark)"/>
   </svg>
 );
 

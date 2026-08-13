@@ -73,6 +73,83 @@ function AnimatedStat({value,format}:{value:number;format:(n:number)=>string}){
   },[value]);
   return <>{format(display)}</>;
 }
+
+/* A lightweight terminal-style price chart for the dashboard. The app receives
+   close prices from the live feed, so the OHLC values below are intentionally
+   derived only for presentation; trading, balances, and market data stay intact. */
+function TerminalChart({data,symbol}:{data:ChartPt[];symbol:string}){
+  const points=(data.length?data:[{t:0,v:0}]).slice(-48);
+  const closes=points.map(point=>point.v);
+  const minClose=Math.min(...closes);
+  const maxClose=Math.max(...closes);
+  const spread=Math.max(maxClose-minClose,Math.max(Math.abs(maxClose)*.018,1));
+  const floor=minClose-spread*.28;
+  const ceiling=maxClose+spread*.28;
+  const plotTop=15;
+  const plotBottom=232;
+  const plotHeight=plotBottom-plotTop;
+  const candleGap=1000/points.length;
+  const candleWidth=Math.max(4,Math.min(11,candleGap*.52));
+  const y=(value:number)=>plotBottom-((value-floor)/(ceiling-floor))*plotHeight;
+  const candles=points.map((point,index)=>{
+    const open=points[Math.max(0,index-1)]?.v??point.v;
+    const close=point.v;
+    const variance=Math.max(Math.abs(close-open)*.52,spread*(.025+((index*7)%5)*.006));
+    const high=Math.max(open,close)+variance;
+    const low=Math.min(open,close)-variance*.88;
+    const up=close>=open;
+    const volume=18+((Math.abs(close-open)/spread)*45)+((index*13)%19);
+    return{open,close,high,low,up,volume};
+  });
+  const formatPrice=(value:number)=>value>=1000?`$${Math.round(value).toLocaleString()}`:`$${value.toFixed(value<10?3:2)}`;
+  const labels=Array.from({length:4},(_,index)=>ceiling-((ceiling-floor)*index/3));
+
+  return(
+    <div className="terminal-chart" role="img" aria-label={`${symbol} candlestick chart`}>
+      <div className="terminal-chart-plot">
+        <svg viewBox="0 0 1000 320" preserveAspectRatio="none" aria-hidden="true">
+          {[0,1,2,3,4].map(index=>{
+            const yPos=plotTop+(plotHeight/4)*index;
+            return <line key={`grid-${index}`} className="terminal-gridline" x1="0" x2="1000" y1={yPos} y2={yPos}/>;
+          })}
+          {candles.map((candle,index)=>{
+            const x=candleGap*index+candleGap/2;
+            const openY=y(candle.open);
+            const closeY=y(candle.close);
+            const highY=y(candle.high);
+            const lowY=y(candle.low);
+            const bodyTop=Math.min(openY,closeY);
+            const bodyHeight=Math.max(2,Math.abs(closeY-openY));
+            return <g key={`${points[index].t}-${index}`} className={candle.up?"terminal-candle up":"terminal-candle down"}>
+              <line x1={x} x2={x} y1={highY} y2={lowY}/>
+              <rect x={x-candleWidth/2} y={bodyTop} width={candleWidth} height={bodyHeight} rx="1"/>
+              <rect className="terminal-volume" x={x-candleWidth/2} y={300-candle.volume} width={candleWidth} height={candle.volume} rx="1"/>
+            </g>;
+          })}
+          <line className="terminal-latest-line" x1="0" x2="1000" y1={y(candles[candles.length-1].close)} y2={y(candles[candles.length-1].close)}/>
+        </svg>
+        <div className="terminal-price-scale" aria-hidden="true">
+          {labels.map((label,index)=><span key={index}>{formatPrice(label)}</span>)}
+        </div>
+      </div>
+      <div className="terminal-chart-axis" aria-hidden="true"><span>09:00</span><span>12:00</span><span>15:00</span><span>18:00</span><span>Now</span></div>
+    </div>
+  );
+}
+
+function MarketSparkline({data,positive}:{data:ChartPt[];positive:boolean}){
+  const points=(data.length?data:[{t:0,v:0},{t:1,v:0}]).slice(-26);
+  const values=points.map(point=>point.v);
+  const low=Math.min(...values);
+  const high=Math.max(...values);
+  const span=Math.max(high-low,1);
+  const d=points.map((point,index)=>{
+    const x=(index/(Math.max(points.length-1,1)))*100;
+    const y=21-((point.v-low)/span)*17;
+    return `${index===0?"M":"L"}${x.toFixed(2)} ${y.toFixed(2)}`;
+  }).join(" ");
+  return <svg className={`market-sparkline ${positive?"positive":"negative"}`} viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"><path d={d}/></svg>;
+}
 /* ════════════════ APP ════════════════ */
 export default function App(){
   const[user,setUser]         =useState<User|null>(null);
@@ -1971,7 +2048,9 @@ export default function App(){
     </div>
   </div>
   <div className="product-topbar-actions" style={{display:"flex",alignItems:"center",gap:12}}>
-    <button type="button" className="tchip balance-chip" onClick={goToDeposit} title="Add funds">{cur(port.cashBalance)}</button>
+    <button type="button" className="tchip balance-chip dashboard-total-balance" onClick={goToDeposit} title="Add funds or view your cash balance">
+      <span>Total balance</span><strong>{cur(port.totalValue)}</strong>
+    </button>
     <ProfileMenu/>
   </div>
 </div>        {/* ══ DASHBOARD ══ */}
@@ -2000,12 +2079,12 @@ export default function App(){
             {accountLoading?[0,1,2,3].map(i=>(
               <div key={i} className="stat skeleton" style={{minHeight:88}}/>
             )):[
-              {l:"Total Balance",  raw:port.totalValue,           s:"+3.82% today",pos:true,  glow:"#6366F1",tip:"Cash balance plus the current value of everything you hold"},
-              {l:"Portfolio Value",raw:port.totalPortfolioValue,  s:"Invested",    pos:null,  glow:"#06B6D4",tip:"Current market value of your holdings only, excluding cash"},
-              {l:"Cash Balance",   raw:port.cashBalance,          s:"Available",  pos:null,  glow:"#10B981",tip:"Uninvested cash available to trade or withdraw"},
-              {l:"24h P&L",        raw:dayPnl,                    s:`${dayPnl>=0?"+":""}${dayPnlPct.toFixed(2)}%`, pos:dayPnl>=0,  glow:dayPnl>=0?"#10B981":"#EF4444",tip:"Unrealized 24h price movement on your current holdings. Doesn't separate out trades made earlier today — cash isn't included since it doesn't move in price.",signed:true},
+              {l:"Portfolio Value",raw:port.totalPortfolioValue,  s:"Invested",         pos:null,           glow:"#35C7F2",tone:"portfolio",tip:"Current market value of your holdings only, excluding cash"},
+              {l:"Cash Balance",   raw:port.cashBalance,          s:"Available",        pos:null,           glow:"#22D3A5",tone:"cash",tip:"Uninvested cash available to trade or withdraw",cash:true},
+              {l:"24h P&L",        raw:dayPnl,                    s:`${dayPnl>=0?"+":""}${dayPnlPct.toFixed(2)}%`, pos:dayPnl>=0, glow:dayPnl>=0?"#22D3A5":"#F35D78",tone:dayPnl>=0?"positive":"negative",tip:"Unrealized 24h price movement on your current holdings. Doesn't separate out trades made earlier today — cash isn't included since it doesn't move in price.",signed:true},
+              {l:"Buying Power",   raw:port.cashBalance,          s:"Ready to trade",   pos:null,           glow:"#A99BFF",tone:"buying",tip:"Funds currently available for your next trade",cash:true},
             ].map((s,i)=>(
-              <div key={i} className={`stat ${s.l==="Total Balance"||s.l==="Cash Balance"?"balance-link":""}`} onClick={s.l==="Total Balance"||s.l==="Cash Balance"?goToDeposit:undefined} title={`${s.tip} (${cur(s.raw)})`} aria-label={`${s.l}: ${cur(s.raw)}. ${s.tip}`} style={i>0?(appSettings.theme==="Light"?{background:`linear-gradient(155deg,${s.glow}22 0%,${s.glow}08 55%,#fff 100%)`,borderColor:`${s.glow}33`}:{background:`linear-gradient(155deg,${s.glow}38 0%,${s.glow}12 48%,var(--bg2) 100%)`,borderColor:`${s.glow}4d`}):undefined}>
+              <div key={i} className={`stat kpi-${s.tone} ${s.cash?"balance-link":""}`} onClick={s.cash?goToDeposit:undefined} title={`${s.tip} (${cur(s.raw)})`} aria-label={`${s.l}: ${cur(s.raw)}. ${s.tip}`}>
                 <div className="stat-glow" style={{background:s.glow}}/>
                 <div className="stat-label">{s.l}</div>
                 <div className="stat-value">
@@ -2049,18 +2128,7 @@ export default function App(){
                   </div>
                 </div>
               </div>
-              <ResponsiveContainer width="100%" height={mob?140:200}>
-                <AreaChart data={lcd}>
-                  <defs>
-                    <linearGradient id={`ag-${selCoin}-${priceDir[selCoin]?1:0}`} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor={priceDir[selCoin]?"#10B981":"#EF4444"} stopOpacity={.3}/>
-                      <stop offset="95%" stopColor={priceDir[selCoin]?"#10B981":"#EF4444"} stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <XAxis dataKey="t" hide/><YAxis hide domain={["auto","auto"]}/><Tooltip content={CT}/>
-                  <Area type="monotone" dataKey="v" stroke={priceDir[selCoin]?"#10B981":"#EF4444"} strokeWidth={2.5} fill={`url(#ag-${selCoin}-${priceDir[selCoin]?1:0})`} dot={false}/>
-                </AreaChart>
-              </ResponsiveContainer>
+              <TerminalChart data={lcd} symbol={selCoin}/>
             </div>
 
             <div className="gcard dashboard-market-list" style={{padding:mob?"14px":"20px"}}>
@@ -2074,6 +2142,7 @@ export default function App(){
                   return(
                     <div key={s} className="mitem" onClick={()=>openCoin(s)}>
                       <div style={{display:"flex",alignItems:"center",gap:10}}><CoinIcon symbol={s} size={32}/><div><div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{mob?s:m.name}</div><div style={{fontSize:10,color:"var(--text3)",fontWeight:500}}>{s}</div></div></div>
+                      <MarketSparkline data={ld} positive={pos}/>
                       <button aria-label={`${watchlist.includes(s)?"Remove":"Add"} ${s} ${watchlist.includes(s)?"from":"to"} watchlist`} onClick={e=>{e.stopPropagation();toggleWatch(s);}} style={{border:"none",background:"transparent",cursor:"pointer",fontSize:17,padding:"4px",color:watchlist.includes(s)?"#F59E0B":"var(--text3)"}}>{watchlist.includes(s)?"★":"☆"}</button>
                       <div style={{textAlign:"right"}}><div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>${lv.toLocaleString()}</div><div style={{fontSize:10,fontWeight:700,color:pos?"var(--green)":"var(--red)",marginTop:2}}>{pos?"+":""}{(prices[s]?.change24h||0).toFixed(2)}%</div></div>
                     </div>
