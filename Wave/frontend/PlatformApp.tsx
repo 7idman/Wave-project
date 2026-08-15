@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useState, useEffect, useCallback, useRef } from "react";
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, CartesianGrid } from "recharts";
 import "./styles/platform.css";
 import { api } from "./api/client";
 import type { User, Price, Portfolio, Tx, Strategy, CopierPortfolio, ManagedPortfolio, TierInfo, BalancePoint, WalletAnalytics } from "./types";
@@ -72,6 +72,101 @@ function AnimatedStat({value,format}:{value:number;format:(n:number)=>string}){
     return()=>cancelAnimationFrame(raf);
   },[value]);
   return <>{format(display)}</>;
+}
+
+type WalletHistoryRange="7D"|"30D"|"ALL";
+
+/* The wallet history is real account data.  This component only changes how it
+   is explored: range controls, a focussed data point, and an intentional
+   hover state make the history useful rather than a static placeholder. */
+function WalletBalanceHistoryChart({points,mobile}:{points:BalancePoint[];mobile:boolean}){
+  const[range,setRange]=useState<WalletHistoryRange>("ALL");
+  const[hoveredPoint,setHoveredPoint]=useState<BalancePoint|null>(null);
+  const chronology=[...points].sort((a,b)=>new Date(a.date).getTime()-new Date(b.date).getTime());
+  const latestTime=chronology.length?new Date(chronology[chronology.length-1].date).getTime():0;
+  const rangeDays=range==="7D"?7:range==="30D"?30:0;
+  const ranged=rangeDays&&Number.isFinite(latestTime)
+    ?chronology.filter(point=>new Date(point.date).getTime()>=latestTime-rangeDays*86400000)
+    :chronology;
+  // Some histories only record balance-changing events. Keep a useful series
+  // when there are fewer than two events inside the selected calendar window.
+  const history=ranged.length>1?ranged:chronology.slice(Math.max(0,chronology.length-(range==="7D"?7:30)));
+  const firstBalance=Number(history[0]?.balance||0);
+  const latestPoint=history[history.length-1];
+  const focalPoint=hoveredPoint??latestPoint;
+  const focalBalance=Number(focalPoint?.balance||0);
+  const periodChange=focalBalance-firstBalance;
+  const percentChange=firstBalance?periodChange/Math.abs(firstBalance)*100:0;
+  const money=(value:number)=>`$${Number(value||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+  const compactMoney=(value:number)=>{
+    const abs=Math.abs(value);
+    if(abs>=1000000)return `$${(value/1000000).toFixed(abs>=100000000?0:1)}M`;
+    if(abs>=1000)return `$${(value/1000).toFixed(abs>=100000?0:1)}K`;
+    return `$${Math.round(value)}`;
+  };
+  const readableDate=(value:string,withTime=false)=>{
+    const date=new Date(value);
+    if(Number.isNaN(date.getTime()))return value;
+    return date.toLocaleDateString(undefined,{month:"short",day:"numeric",...(withTime?{hour:"numeric",minute:"2-digit"}:{})});
+  };
+  const trendUp=periodChange>=0;
+
+  return <div className="gcard wallet-history-card" style={{marginBottom:22,overflow:"hidden"}}>
+    <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:16,flexWrap:"wrap",marginBottom:mobile?14:18}}>
+      <div style={{minWidth:0}}>
+        <div className="stitle" style={{marginBottom:3}}>Main wallet balance history</div>
+        <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.5,maxWidth:560}}>Explore the balance rebuilt from your deposits, withdrawals, trades, and bonuses.</div>
+      </div>
+      <div role="group" aria-label="Balance history range" style={{display:"flex",gap:5,padding:4,border:"1px solid var(--border)",background:"var(--surface2)",borderRadius:11}}>
+        {(["7D","30D","ALL"] as WalletHistoryRange[]).map(option=><button key={option} type="button" aria-pressed={range===option} onClick={()=>{setRange(option);setHoveredPoint(null);}} style={{border:0,borderRadius:8,padding:"7px 10px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"inherit",background:range===option?"#6366F1":"transparent",color:range===option?"#fff":"var(--text2)",boxShadow:range===option?"0 5px 13px rgba(99,102,241,.22)":"none",transition:"background .18s ease, color .18s ease, box-shadow .18s ease"}}>{option==="ALL"?"All":""+option}</button>)}
+      </div>
+    </div>
+
+    <div style={{display:"grid",gridTemplateColumns:mobile?"1fr":"minmax(0,1fr) auto",gap:12,alignItems:"stretch",marginBottom:14}}>
+      <div style={{minWidth:0,border:"1px solid var(--border)",background:"linear-gradient(135deg, rgba(99,102,241,.13), transparent 72%)",borderRadius:13,padding:"12px 14px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:7,fontSize:10,color:"var(--text3)",fontWeight:800,textTransform:"uppercase",letterSpacing:".65px",marginBottom:5}}><span style={{width:7,height:7,borderRadius:"50%",background:"#6366F1",boxShadow:"0 0 0 4px rgba(99,102,241,.12)"}}/> {hoveredPoint?"Focused balance":"Latest balance"}</div>
+        <div style={{fontSize:mobile?24:28,lineHeight:1.12,fontWeight:900,letterSpacing:"-.04em",fontVariantNumeric:"tabular-nums",overflowWrap:"anywhere"}}>{money(focalBalance)}</div>
+        <div style={{fontSize:11,color:"var(--text3)",marginTop:5}}>{focalPoint?readableDate(focalPoint.date,true):"No history available"}</div>
+      </div>
+      <div style={{display:"flex",flexDirection:mobile?"row":"column",justifyContent:"center",gap:mobile?18:5,padding:"12px 14px",border:"1px solid var(--border)",borderRadius:13,minWidth:mobile?0:150}}>
+        <div style={{fontSize:10,color:"var(--text3)",fontWeight:800,textTransform:"uppercase",letterSpacing:".65px",whiteSpace:"nowrap"}}>Period movement</div>
+        <div style={{fontSize:16,fontWeight:900,color:trendUp?"var(--green)":"var(--red)",fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{trendUp?"+":"-"}{money(Math.abs(periodChange))}</div>
+        <div style={{fontSize:11,color:trendUp?"var(--green)":"var(--red)",fontWeight:800,whiteSpace:"nowrap"}}>{trendUp?"↗":"↘"} {Math.abs(percentChange).toFixed(2)}%</div>
+      </div>
+    </div>
+
+    <div style={{height:mobile?205:250,minWidth:0}}>
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={history} margin={{top:12,right:mobile?6:18,left:mobile?-13:2,bottom:0}} onMouseMove={(state:any)=>{
+          const index=Number(state?.activeTooltipIndex);
+          setHoveredPoint(state?.activePayload?.[0]?.payload??(Number.isInteger(index)?history[index]:null)??null);
+        }} onMouseLeave={()=>setHoveredPoint(null)}>
+          <defs>
+            <linearGradient id="wallet-history-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#6366F1" stopOpacity={.32}/>
+              <stop offset="92%" stopColor="#6366F1" stopOpacity={.015}/>
+            </linearGradient>
+          </defs>
+          <CartesianGrid vertical={false} stroke="var(--border)" strokeOpacity={.72} strokeDasharray="3 5"/>
+          <XAxis dataKey="date" minTickGap={mobile?30:48} tickFormatter={value=>readableDate(value)} tick={{fontSize:10,fill:"var(--text3)"}} axisLine={false} tickLine={false} dy={9}/>
+          <YAxis width={mobile?45:58} tick={{fontSize:10,fill:"var(--text3)"}} axisLine={false} tickLine={false} tickFormatter={value=>compactMoney(Number(value))}/>
+          <Tooltip cursor={{stroke:"#818CF8",strokeWidth:1,strokeDasharray:"3 4"}} content={({active,payload}:any)=>{
+            const point=payload?.[0]?.payload as BalancePoint|undefined;
+            if(!active||!point)return null;
+            const balance=Number(point.balance||0);
+            const change=balance-firstBalance;
+            return <div style={{minWidth:164,padding:"10px 12px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:11,boxShadow:"0 14px 32px rgba(15,23,42,.16)",fontFamily:"inherit"}}>
+              <div style={{fontSize:10,fontWeight:800,letterSpacing:".55px",textTransform:"uppercase",color:"var(--text3)",marginBottom:5}}>{readableDate(point.date,true)}</div>
+              <div style={{fontSize:16,fontWeight:900,fontVariantNumeric:"tabular-nums",color:"var(--text)"}}>{money(balance)}</div>
+              <div style={{fontSize:11,fontWeight:800,color:change>=0?"var(--green)":"var(--red)",marginTop:4}}>{change>=0?"+":"-"}{money(Math.abs(change))} from period start</div>
+            </div>;
+          }}/>
+          <Area type="monotone" dataKey="balance" stroke="#6366F1" strokeWidth={2.6} fill="url(#wallet-history-fill)" animationDuration={520} activeDot={{r:5,fill:"var(--bg2)",stroke:"#6366F1",strokeWidth:3}}/>
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+    <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",fontSize:10,color:"var(--text3)",marginTop:8,paddingTop:10,borderTop:"1px solid var(--border)"}}><span>{history.length} recorded balance event{history.length===1?"":"s"}</span><span>Hover any point for an exact balance</span></div>
+  </div>;
 }
 
 /* A lightweight terminal-style price chart for the dashboard. The app receives
@@ -179,6 +274,25 @@ function ActivityGlyph({type}:{type:string}){
         :<ProductIcon name="sparkle" size={16}/>;
   return <span className={`activity-glyph ${isPositive?"positive":"negative"}`}>{icon}</span>;
 }
+
+function PanelLoading({rows=3,label="Loading content",className=""}:{rows?:number;label?:string;className?:string}){
+  return <div className={`panel-loading ${className}`} role="status" aria-label={label}>
+    <span className="sr-only">{label}</span>
+    {Array.from({length:rows},(_,index)=><div className="panel-loading-row" key={index}>
+      <span className="panel-loading-avatar"/>
+      <span className="panel-loading-lines"><i/><i/><i/></span>
+    </div>)}
+  </div>;
+}
+
+function BusyText({children}:{children:React.ReactNode}){
+  return <><span className="btn-spinner"/>{children}</>;
+}
+
+const getSystemTheme=():"Light"|"Dark"=>{
+  if(typeof window==="undefined"||!window.matchMedia) return "Light";
+  return window.matchMedia("(prefers-color-scheme: dark)").matches?"Dark":"Light";
+};
 /* ════════════════ APP ════════════════ */
 export default function App(){
   const[user,setUser]         =useState<User|null>(null);
@@ -381,13 +495,23 @@ export default function App(){
   const[pushBusy,setPushBusy]=useState(false);
   const[balancePushSubscribed,setBalancePushSubscribed]=useState<boolean|null>(null);
   const[balancePushBusy,setBalancePushBusy]=useState(false);
+  const[systemTheme,setSystemTheme]=useState<"Light"|"Dark">(getSystemTheme);
   const[appSettings,setAppSettings]=useState<AppSettings>(()=>{
     try{
       const saved=localStorage.getItem("wave_prefs");
-      if(saved) return {...{notifications:true,currency:"USD",theme:"Light",language:"English"},...JSON.parse(saved)};
+      if(saved) return {...{notifications:true,currency:"USD",theme:"System",language:"English"},...JSON.parse(saved)};
     }catch{}
-    return {notifications:true,currency:"USD",theme:"Light",language:"English"};
+    return {notifications:true,currency:"USD",theme:"System",language:"English"};
   });
+  const resolvedTheme=appSettings.theme==="System"?systemTheme:appSettings.theme==="Light"?"Light":"Dark";
+  useEffect(()=>{
+    if(!window.matchMedia) return;
+    const query=window.matchMedia("(prefers-color-scheme: dark)");
+    const sync=()=>setSystemTheme(query.matches?"Dark":"Light");
+    sync();
+    query.addEventListener?.("change",sync);
+    return()=>query.removeEventListener?.("change",sync);
+  },[]);
   // Persist preferences whenever they change
   useEffect(()=>{try{localStorage.setItem("wave_prefs",JSON.stringify(appSettings));}catch{}},[appSettings]);
   useEffect(()=>{try{localStorage.setItem("wave_watchlist",JSON.stringify(watchlist));}catch{}},[watchlist]);
@@ -433,6 +557,10 @@ export default function App(){
 
 
   const W=useWW(), mob=W<=640, tab=W<=900;
+  // Four financial summary cards share a constrained workspace beside the sidebar.
+  // Preserve the precise amount in the accessible label/tooltip, but use familiar
+  // financial notation before a value can spill out of its card.
+  const useCompactStats=mob||W<1480;
 
   // Build charts per range
   const buildCharts=(range:Range)=>{
@@ -1458,17 +1586,17 @@ export default function App(){
   };
 
   /* ═══════════ LOGIN ═══════════ */
-  if(authChecking||accountLoading) return(
-    <div className="app app-loading" role="status" aria-live="polite">
-      <div className="loading-aurora loading-aurora-a"/><div className="loading-aurora loading-aurora-b"/>
-      <div className="loading-stage">
-        <div className="loading-orbit loading-orbit-outer"><i/><i/><i/></div>
-        <div className="loading-orbit loading-orbit-inner"><i/><i/></div>
-        <div className="loading-mark"><WaveLogo size={62}/></div>
+  if(authChecking||(accountLoading&&!user)) return(
+    <div className={`app app-loading ${resolvedTheme==="Light"?"theme-light":""}`} role="status" aria-live="polite">
+      <div className="loading-shell">
+        <div className="loading-wordmark"><WaveLogo size={42}/><span>ave</span></div>
+        <div className="loading-preview" aria-hidden="true">
+          <span className="loading-preview-eyebrow"/>
+          <span className="loading-preview-value"/>
+          <span className="loading-preview-chart"><i/><i/><i/><i/><i/><i/><i/></span>
+        </div>
+        <p className="loading-copy"><span className="loading-status-dot"/>{authChecking?"Restoring your secure session…":"Loading your workspace…"}</p>
       </div>
-      <div className="loading-wordmark"><WaveLogo size={31}/><span>ave</span></div>
-      <p className="loading-copy"><span className="loading-status-dot"/>{authChecking?"Restoring your secure session…":"Preparing your market desk…"}</p>
-      <div className="loading-progress" aria-hidden="true"><i/></div>
     </div>
   );
   if(!user) return(
@@ -1801,7 +1929,7 @@ export default function App(){
 
   /* ═══════════ APP ═══════════ */
   return(
-    <div className={`app dashboard-shell ${appSettings.theme==="Light"?"theme-light":""}`}>
+    <div className={`app dashboard-shell ${resolvedTheme==="Light"?"theme-light":""}`}>
       {signingOut&&<div className="signout-overlay" role="status" aria-live="polite"><div className="signout-spinner"/><div className="signout-label">Signing you out…</div></div>}
       {/* Modals */}
       <Modal open={editOpen} onClose={()=>setEditOpen(false)} title="Edit Profile">
@@ -1831,7 +1959,7 @@ export default function App(){
           <div style={{fontSize:11,color:"var(--text3)",marginTop:5}}>Email cannot be changed here</div>
         </div>
         <button className="btn btn-primary" style={{width:"100%",justifyContent:"center"}} onClick={doSaveProfile} disabled={loading}>
-          {loading?"Saving…":"Save Changes"}
+          {loading?<BusyText>Saving…</BusyText>:"Save Changes"}
         </button>
       </Modal>
 
@@ -1841,13 +1969,13 @@ export default function App(){
           <div className="tlab">Phone Number</div>
           <input className="inp" placeholder="+1 (555) 000-0000" type="tel" style={{marginBottom:20}} value={phoneInput} onChange={e=>setPhoneInput(e.target.value)}/>
           <button className="btn btn-primary" style={{width:"100%",justifyContent:"center"}} onClick={doSendPhoneCode} disabled={loading}>
-            {loading?"Sending…":"Send Verification Code"}
+            {loading?<BusyText>Sending…</BusyText>:"Send Verification Code"}
           </button>
         </>:<>
           <div style={{fontSize:13,color:"var(--text3)",marginBottom:16}}>Enter the code we texted to {phoneInput}.</div>
           <input className="inp" placeholder="123456" inputMode="numeric" style={{marginBottom:12,letterSpacing:2,textAlign:"center",fontSize:18}} value={phoneCode} onChange={e=>setPhoneCode(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doVerifyPhoneCode()}/>
           <button className="btn btn-primary" style={{width:"100%",justifyContent:"center",marginBottom:10}} onClick={doVerifyPhoneCode} disabled={loading}>
-            {loading?"Verifying…":"Verify"}
+            {loading?<BusyText>Verifying…</BusyText>:"Verify"}
           </button>
           <button className="btn btn-ghost" style={{width:"100%"}} onClick={()=>setPhoneStage("enter")}>Use a different number</button>
         </>}
@@ -1861,7 +1989,7 @@ export default function App(){
         </div>
         <input ref={idInput} type="file" accept="image/*,.pdf" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(f)setIdFile(f);}}/>
         <button className="btn btn-primary" style={{width:"100%",justifyContent:"center"}} onClick={doSubmitID} disabled={loading}>
-          {loading?"Uploading…":"Submit for Review"}
+          {loading?<BusyText>Uploading…</BusyText>:"Submit for Review"}
         </button>
       </Modal>
 
@@ -1873,7 +2001,7 @@ export default function App(){
         </div>
         <input ref={addrInput} type="file" accept="image/*,.pdf" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(f)setAddrFile(f);}}/>
         <button className="btn btn-primary" style={{width:"100%",justifyContent:"center"}} onClick={doSubmitAddr} disabled={loading}>
-          {loading?"Uploading…":"Submit for Review"}
+          {loading?<BusyText>Uploading…</BusyText>:"Submit for Review"}
         </button>
       </Modal>
 
@@ -1885,7 +2013,7 @@ export default function App(){
         <div className="tlab">Confirm New Password</div>
         <input className="inp" type="password" placeholder="Repeat new password" style={{marginBottom:20}} value={pwConfirm} onChange={e=>setPwConfirm(e.target.value)}/>
         <button className="btn btn-primary" style={{width:"100%",justifyContent:"center"}} onClick={doChangePassword} disabled={loading}>
-          {loading?"Updating…":"Update Password"}
+          {loading?<BusyText>Updating…</BusyText>:"Update Password"}
         </button>
       </Modal>
 
@@ -1894,7 +2022,7 @@ export default function App(){
         <div className="tlab">Type DELETE to confirm</div>
         <input className="inp" placeholder="DELETE" style={{marginBottom:20}} value={deleteConfirm} onChange={e=>setDeleteConfirm(e.target.value)}/>
         <button className="btn btn-danger" style={{width:"100%",justifyContent:"center"}} disabled={deleteConfirm!=="DELETE"||loading} onClick={requestAccountDeletion}>
-          Delete My Account
+          {loading?<BusyText>Submitting…</BusyText>:"Delete My Account"}
         </button>
       </Modal>
 
@@ -1908,7 +2036,7 @@ export default function App(){
             <button type="button" className="btn btn-ghost btn-sm" onClick={()=>{navigator.clipboard?.writeText(twoFASecret);toast2("Secret copied");}}>Copy</button>
           </div>}
           <input className="inp" placeholder="123456" inputMode="numeric" style={{marginBottom:16,letterSpacing:2,textAlign:"center",fontSize:18}} value={twoFASetupCode} onChange={e=>setTwoFASetupCode(e.target.value)} onKeyDown={e=>e.key==="Enter"&&confirmTwoFASetup()}/>
-          <button className="btn btn-primary btn-lg" style={{width:"100%",justifyContent:"center"}} disabled={loading||!twoFASecret} onClick={confirmTwoFASetup}>{loading?"Verifying…":"Enable 2FA"}</button>
+          <button className="btn btn-primary btn-lg" style={{width:"100%",justifyContent:"center"}} disabled={loading||!twoFASecret} onClick={confirmTwoFASetup}>{loading?<BusyText>Verifying…</BusyText>:"Enable 2FA"}</button>
         </>:<>
           <div style={{fontSize:13,color:"var(--red)",marginBottom:16,lineHeight:1.6}}>Save these backup codes somewhere safe. Each one can be used once to sign in if you lose access to your authenticator app — they won't be shown again.</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:20,fontFamily:"monospace",fontSize:14}}>
@@ -1924,7 +2052,7 @@ export default function App(){
         <input className="inp" type="password" style={{marginBottom:12}} value={twoFADisablePw} onChange={e=>setTwoFADisablePw(e.target.value)}/>
         <div className="tlab">Authenticator code</div>
         <input className="inp" placeholder="123456" inputMode="numeric" style={{marginBottom:20,letterSpacing:2,textAlign:"center",fontSize:18}} value={twoFADisableCode} onChange={e=>setTwoFADisableCode(e.target.value)} onKeyDown={e=>e.key==="Enter"&&confirmTwoFADisable()}/>
-        <button className="btn btn-danger" style={{width:"100%",justifyContent:"center"}} disabled={loading||!twoFADisablePw||!twoFADisableCode.trim()} onClick={confirmTwoFADisable}>{loading?"Disabling…":"Turn Off 2FA"}</button>
+        <button className="btn btn-danger" style={{width:"100%",justifyContent:"center"}} disabled={loading||!twoFADisablePw||!twoFADisableCode.trim()} onClick={confirmTwoFADisable}>{loading?<BusyText>Disabling…</BusyText>:"Turn Off 2FA"}</button>
       </Modal>
 
       <Modal open={withdrawConfirmOpen} onClose={()=>{setWithdrawConfirmOpen(false);setWithdrawConfirmCode("");setWithdrawConfirmEmailCode("");}} title="Confirm Withdrawal">
@@ -1938,7 +2066,7 @@ export default function App(){
         </div>
         <div style={{fontSize:10,fontWeight:600,color:"var(--text3)",letterSpacing:".5px",textTransform:"uppercase",marginBottom:4}}>Code from your email</div>
         <input className="inp" placeholder="123456" inputMode="numeric" autoComplete="one-time-code" style={{marginBottom:20,letterSpacing:2,textAlign:"center",fontSize:18}} value={withdrawConfirmEmailCode} onChange={e=>setWithdrawConfirmEmailCode(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doConfirmWithdrawal()}/>
-        <button className="btn btn-danger" style={{width:"100%",justifyContent:"center"}} disabled={loading||!withdrawConfirmCode.trim()||!withdrawConfirmEmailCode.trim()} onClick={doConfirmWithdrawal}>{loading?"Verifying…":"Verify & Send for Review"}</button>
+        <button className="btn btn-danger" style={{width:"100%",justifyContent:"center"}} disabled={loading||!withdrawConfirmCode.trim()||!withdrawConfirmEmailCode.trim()} onClick={doConfirmWithdrawal}>{loading?<BusyText>Verifying…</BusyText>:"Verify & Send for Review"}</button>
       </Modal>
 
       <Modal open={priceAlertsOpen} onClose={()=>setPriceAlertsOpen(false)} title="Price Alerts">
@@ -1955,7 +2083,7 @@ export default function App(){
         </div>
         <div style={{display:"flex",gap:8,marginBottom:20}}>
           <input className="inp" type="number" placeholder="Target price" inputMode="decimal" value={paTarget} onChange={e=>setPaTarget(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doCreatePriceAlert()}/>
-          <button className="btn btn-primary" onClick={doCreatePriceAlert} disabled={paLoading}>{paLoading?"Adding…":"Add"}</button>
+          <button className="btn btn-primary" onClick={doCreatePriceAlert} disabled={paLoading}>{paLoading?<BusyText>Adding…</BusyText>:"Add"}</button>
         </div>
         {priceAlerts.filter(a=>a.status==="active").length===0
           ?<div style={{fontSize:12,color:"var(--text3)",textAlign:"center",padding:"12px 0"}}>No active alerts yet.</div>
@@ -2110,7 +2238,7 @@ export default function App(){
         </Modal>
 
         {page==="dashboard"&&<div className="dashboard-page">
-          <div className="dashboard-ticker" style={{marginBottom:mob?12:16}}><ErrorBoundary boundaryName="tradingview-ticker" fallback={null}><TradingViewTicker/></ErrorBoundary></div>
+          <div className="dashboard-ticker" style={{marginBottom:mob?12:16}}><ErrorBoundary boundaryName="tradingview-ticker" fallback={null}><TradingViewTicker colorTheme={resolvedTheme==="Light"?"light":"dark"}/></ErrorBoundary></div>
           <div className="stats dashboard-stats" style={{marginTop:mob?12:0}}>
             {accountLoading?[0,1,2,3].map(i=>(
               <div key={i} className="stat skeleton" style={{minHeight:88}}/>
@@ -2125,7 +2253,7 @@ export default function App(){
                 <div className="stat-label">{s.l}</div>
                 <div className="stat-value">
                   {s.signed&&s.raw<0?"-":s.signed?"+":""}
-                  <AnimatedStat value={Math.abs(s.raw)} format={mob?compactCur:cur}/>
+                  <AnimatedStat value={Math.abs(s.raw)} format={useCompactStats?compactCur:cur}/>
                 </div>
                 <div className="stat-sub" style={{color:s.pos===true?"var(--green)":s.pos===false?"var(--red)":"var(--text3)"}}>{s.pos===true&&<ProductIcon name="trendUp" size={12}/>} {s.pos===false&&<ProductIcon name="trendDown" size={12}/>} {s.s}</div>
               </div>
@@ -2214,7 +2342,7 @@ export default function App(){
               <div className="panel-eyebrow"><ProductIcon name="activity" size={15}/>Recent Activity</div>
               <button className="btn btn-ghost btn-sm panel-link" onClick={()=>nav("notifications")}>View all <ProductIcon name="arrowRight" size={13}/></button>
             </div>
-            {notifLoading?<div style={{fontSize:12,color:"var(--text3)"}}>Loading…</div>
+            {notifLoading?<PanelLoading rows={4} label="Loading recent activity"/>
             :activities.length===0?<div style={{fontSize:12,color:"var(--text3)"}}>No activity yet — your trades and transfers will show up here.</div>
             :activities.slice(0,5).map((tx,i)=>(
               <div key={i} className="setting-row" style={{borderBottom:i<Math.min(4,activities.length-1)?"1px solid var(--border)":"none",paddingTop:12,paddingBottom:12}}>
@@ -2260,7 +2388,7 @@ export default function App(){
               <div className="panel-eyebrow"><AppIcon name="notifications" size={15}/>Notifications</div>
               <button className="btn btn-ghost btn-sm panel-link" onClick={()=>nav("notifications")}>View all <ProductIcon name="arrowRight" size={13}/></button>
             </div>
-            {notifLoading?<div style={{fontSize:12,color:"var(--text3)"}}>Loading…</div>
+            {notifLoading?<PanelLoading rows={3} label="Loading notifications"/>
             :siteUpdates.length===0?<div style={{fontSize:12,color:"var(--text3)"}}>No notifications right now.</div>
             :siteUpdates.slice(0,3).map((u,i)=>(
               <div key={i} style={{padding:"10px 0",borderBottom:i<Math.min(2,siteUpdates.length-1)?"1px solid var(--border)":"none"}}>
@@ -2341,7 +2469,7 @@ export default function App(){
                   <div className="trow"><span className="trl">{ttype==="buy"?"Total Cost":"You Receive"}</span><span className="trt">${ttot}</span></div>
                 </div>
                 <button className="btn btn-primary btn-lg" style={{width:"100%",background:ttype==="buy"?"linear-gradient(135deg,#10B981,#059669)":"linear-gradient(135deg,#EF4444,#DC2626)",boxShadow:ttype==="buy"?"0 4px 20px rgba(16,185,129,.35)":"0 4px 20px rgba(239,68,68,.35)"}} onClick={doTrade} disabled={loading}>
-                  {loading?"Processing…":`${ttype==="buy"?"Buy":"Sell"} ${tcoin}`}
+                  {loading?<BusyText>Processing…</BusyText>:`${ttype==="buy"?"Buy":"Sell"} ${tcoin}`}
                 </button>
                 <div className="tbal">Available cash: <span>{cur(port.cashBalance)}</span></div>
               </>}
@@ -2440,7 +2568,7 @@ export default function App(){
                   <div className="trow"><span className="trl">{stockSide==="buy"?"Total Cost":"You Receive"}</span><span className="trt">{cur((parseFloat(stockAmt)||0)*(prices[selStock]?.price||0))}</span></div>
                 </div>
                 <button className="btn btn-primary btn-lg" style={{width:"100%",background:stockSide==="buy"?"linear-gradient(135deg,#10B981,#059669)":"linear-gradient(135deg,#EF4444,#DC2626)"}} onClick={doStockTrade} disabled={loading||!prices[selStock]}>
-                  {loading?"Processing…":`${stockSide==="buy"?"Buy":"Sell"} ${selStock}`}
+                  {loading?<BusyText>Processing…</BusyText>:`${stockSide==="buy"?"Buy":"Sell"} ${selStock}`}
                 </button>
                 <div className="tbal">Available cash: <span>{cur(port.cashBalance)}</span></div>
               </div>
@@ -2476,7 +2604,7 @@ export default function App(){
                   <div className="tlab">Weekly amount (min $25)</div>
                   <input className="inp" type="number" placeholder="25" inputMode="decimal" value={autoInvestAmt} onChange={e=>setAutoInvestAmt(e.target.value)}/>
                 </div>
-                <button className="btn btn-primary" style={{height:44}} onClick={doCreateAutoInvest} disabled={autoInvestLoading}>{autoInvestLoading?"Setting up…":"Start Plan"}</button>
+                <button className="btn btn-primary" style={{height:44}} onClick={doCreateAutoInvest} disabled={autoInvestLoading}>{autoInvestLoading?<BusyText>Setting up…</BusyText>:"Start Plan"}</button>
               </div>
 
               {autoInvestPlans.filter(p=>p.status!=="cancelled").length>0&&<div>
@@ -2526,19 +2654,7 @@ export default function App(){
               ))}
             </div>
 
-            {balanceHistory.length>1&&<div className="gcard" style={{marginBottom:22}}>
-              <div className="stitle" style={{marginBottom:2}}>Main wallet balance history</div>
-              <div style={{fontSize:11,color:"var(--text3)",marginBottom:10}}>Reconstructed from your real deposit/withdraw/trade/bonus history — not an estimate.</div>
-              <ResponsiveContainer width="100%" height={180}>
-                <AreaChart data={balanceHistory}>
-                  <defs><linearGradient id="balGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#6366F1" stopOpacity={0.35}/><stop offset="100%" stopColor="#6366F1" stopOpacity={0}/></linearGradient></defs>
-                  <XAxis dataKey="date" tickFormatter={d=>new Date(d).toLocaleDateString(undefined,{month:"short",day:"numeric"})} tick={{fontSize:10,fill:"var(--text3)"}} axisLine={false} tickLine={false}/>
-                  <YAxis tick={{fontSize:10,fill:"var(--text3)"}} axisLine={false} tickLine={false} width={50} tickFormatter={v=>`$${v}`}/>
-                  <Tooltip formatter={(v:any)=>[`$${Number(v).toLocaleString()}`,"Balance"]} labelFormatter={d=>new Date(d).toLocaleString()} contentStyle={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:8,fontSize:12}}/>
-                  <Area type="monotone" dataKey="balance" stroke="#6366F1" strokeWidth={2} fill="url(#balGrad)"/>
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>}
+            {balanceHistory.length>1&&<WalletBalanceHistoryChart points={balanceHistory} mobile={mob}/>}
 
             {walletAnalytics&&<div className="gcard" style={{marginBottom:22}}>
               <div className="stitle">Wallet analytics</div>
@@ -2638,7 +2754,7 @@ export default function App(){
                   </div>}
                   {ttype==="withdraw"&&<Turnstile key={withdrawTurnstileKey} onVerify={setWithdrawTurnstileToken} onError={()=>setWithdrawTurnstileToken("")}/>}
                   <button className="btn btn-primary btn-lg" style={{width:"100%",background:ttype==="deposit"?"linear-gradient(135deg,#10B981,#059669)":"linear-gradient(135deg,#EF4444,#DC2626)"}} onClick={doTrade} disabled={loading}>
-                    {loading?"Processing…":`${ttype==="deposit"?"Deposit":"Withdraw"}`}
+                    {loading?<BusyText>Processing…</BusyText>:`${ttype==="deposit"?"Deposit":"Withdraw"}`}
                   </button>
                   <div className="tbal">Available cash: <span>{cur(port.cashBalance)}</span></div>
                   {ttype==="withdraw"&&tierInfo&&tierInfo.lockedBonus>0&&<div style={{fontSize:11,color:"var(--text3)",marginTop:6}}>🔒 {cur(tierInfo.lockedBonus)} of this is locked bonus funds, not yet withdrawable.</div>}
@@ -2779,7 +2895,7 @@ export default function App(){
                 <p style={{color:"var(--text2)",fontSize:13}}>Mirror admin-managed strategies proportionally into your own account — every trade you see here is real, not simulated.</p>
               </div>
 
-              {copierLoading?<div className="gcard skeleton" style={{minHeight:120,marginBottom:18}}/>:<>
+              {copierLoading?<div className="gcard" style={{minHeight:120,marginBottom:18}}><PanelLoading rows={3} label="Loading copier portfolio"/></div>:<>
 
               {/* Available strategies not yet connected to */}
               {strategies.filter(s=>!myCopiers.some(c=>c.strategyId===s.id)).length>0&&(
@@ -2833,7 +2949,7 @@ export default function App(){
             </>}
             {page==="managed"&&<><div style={{display:"grid",gridTemplateColumns:tab?"1fr":"1.2fr .8fr",gap:18}}><div className="gcard" style={{padding:30,background:"linear-gradient(135deg,#10212b,#13243e)"}}><div style={{fontSize:11,color:"#67e8f9",fontWeight:800,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>Private account management</div><div style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:30,fontWeight:900,lineHeight:1.2}}>Your ambitions, professionally managed.</div><p style={{color:"#bfdbfe",fontSize:14,lineHeight:1.6,marginTop:12}}>A tailored allocation across traditional, alternative and digital assets.</p><button className="btn btn-primary" style={{marginTop:20}} onClick={()=>toast2("Consultation request sent.")}>Request a consultation</button></div><div className="gcard">
               <div className="stitle">Account snapshot</div>
-              {managedLoading?<div style={{padding:"20px 0",color:"var(--text3)",fontSize:13}}>Loading…</div>
+              {managedLoading?<PanelLoading rows={3} label="Loading managed accounts"/>
               :myManaged.length===0?<div style={{padding:"20px 0",color:"var(--text3)",fontSize:13}}>No managed account yet — request a consultation to get started.</div>
               :myManaged.map(m=>[
                 ["Managed value",cur(m.totalValue)],
@@ -2863,9 +2979,9 @@ export default function App(){
         {page==="portfolio"&&<div className="page-wrap product-portfolio-page">
           <div className="stats portfolio-stats" style={{marginBottom:mob?14:24}}>
             {[
-              {l:"Total Value",  v:mob?compactCur(port.totalValue):cur(port.totalValue),                  full:cur(port.totalValue), glow:"#6366F1"},
-              {l:"Invested",     v:mob?compactCur(port.totalPortfolioValue):cur(port.totalPortfolioValue),  full:cur(port.totalPortfolioValue), glow:"#06B6D4"},
-              {l:"Cash",         v:mob?compactCur(port.cashBalance):cur(port.cashBalance),                  full:cur(port.cashBalance), glow:"#10B981"},
+              {l:"Total Value",  v:useCompactStats?compactCur(port.totalValue):cur(port.totalValue),                  full:cur(port.totalValue), glow:"#6366F1"},
+              {l:"Invested",     v:useCompactStats?compactCur(port.totalPortfolioValue):cur(port.totalPortfolioValue),  full:cur(port.totalPortfolioValue), glow:"#06B6D4"},
+              {l:"Cash",         v:useCompactStats?compactCur(port.cashBalance):cur(port.cashBalance),                  full:cur(port.cashBalance), glow:"#10B981"},
               {l:"Assets Held",  v:port.holdings.filter(h=>h.amount>0).length,                 full:undefined,       glow:"#8B5CF6"},
             ].map((s,i)=>(
               <div key={i} className="stat" title={s.full?`${s.l}: ${s.full}`:undefined} aria-label={s.full?`${s.l}: ${s.full}`:undefined}><div className="stat-glow" style={{background:s.glow}}/><div className="stat-label">{s.l}</div><div className="stat-value">{s.v}</div></div>
@@ -2925,7 +3041,7 @@ export default function App(){
               <p style={{color:"#e9d5ff",fontSize:13,lineHeight:1.6,marginTop:10}}>
                 Share your code below. When a friend signs up and deposits at least ${referralData?.depositThreshold??100}, you both get a cash bonus — usable for trading right away.
               </p>
-              {referralLoading?<div style={{color:"#e9d5ff",fontSize:13,marginTop:20}}>Loading your code…</div>:referralData?.code?(<>
+              {referralLoading?<PanelLoading rows={1} label="Loading referral code" className="referral-code-loading"/>:referralData?.code?(<>
                 <div style={{display:"flex",gap:8,marginTop:20}}>
                   <div style={{flex:1,background:"rgba(255,255,255,.1)",borderRadius:10,padding:"12px 16px",fontFamily:"monospace",fontSize:18,fontWeight:800,color:"#fff",letterSpacing:2,textAlign:"center"}}>{referralData.code}</div>
                   <button className="btn btn-primary" onClick={()=>{navigator.clipboard?.writeText(referralData.code!);toast2("Code copied");}}>Copy</button>
@@ -2942,7 +3058,7 @@ export default function App(){
               <div style={{padding:mob?"14px 16px 12px":"22px 24px 16px",borderBottom:"1px solid var(--border)"}}>
                 <div className="stitle" style={{marginBottom:0}}>Your Referrals</div>
               </div>
-              {referralLoading?<div style={{padding:24,color:"var(--text3)",fontSize:13}}>Loading…</div>
+              {referralLoading?<PanelLoading rows={3} label="Loading referrals"/>
                 :!referralData?.referrals.length?<div style={{padding:24,color:"var(--text3)",fontSize:13}}>No referrals yet — share your code to start earning.</div>
                 :<div style={{padding:mob?"8px 16px 16px":"8px 24px 20px"}}>
                   {referralData.referrals.map(r=>(
@@ -3186,7 +3302,7 @@ export default function App(){
         {page==="notifications"&&(
           <div className="product-notifications-page" style={{maxWidth:600}}>
             <div className="gcard" style={{marginBottom:14}}>
-              <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:4}}>🔔 Notification Preferences</div>
+              <div className="panel-eyebrow" style={{marginBottom:4}}><AppIcon name="notifications" size={15}/>Notification Preferences</div>
               <div style={{fontSize:12,color:"var(--text3)",marginBottom:16}}>Control what alerts you receive</div>
 
               <div className="setting-row">
@@ -3215,8 +3331,8 @@ export default function App(){
             </div>
 
             <div className="gcard" style={{marginBottom:14}}>
-              <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:16}}>📢 Site Updates</div>
-              {notifLoading?<div style={{fontSize:12,color:"var(--text3)"}}>Loading…</div>
+              <div className="panel-eyebrow" style={{marginBottom:16}}><ProductIcon name="sparkle" size={15}/>Site Updates</div>
+              {notifLoading?<PanelLoading rows={3} label="Loading site updates"/>
               :siteUpdates.length===0?<div style={{fontSize:12,color:"var(--text3)"}}>No updates yet — you'll see new Wave features and announcements here.</div>
               :siteUpdates.map((u,i)=>(
                 <div key={u.id} className="setting-row" style={{alignItems:"flex-start",borderBottom:i<siteUpdates.length-1?"1px solid var(--border)":"none",display:"block",paddingTop:12,paddingBottom:12}}>
@@ -3228,8 +3344,8 @@ export default function App(){
             </div>
 
             <div className="gcard" style={{marginBottom:14}}>
-              <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:16}}>🖥 Login Activity</div>
-              {notifLoading?<div style={{fontSize:12,color:"var(--text3)"}}>Loading…</div>
+              <div className="panel-eyebrow" style={{marginBottom:16}}><ProductIcon name="activity" size={15}/>Login Activity</div>
+              {notifLoading?<PanelLoading rows={3} label="Loading login activity"/>
               :loginHistory.length===0?<div style={{fontSize:12,color:"var(--text3)"}}>No login history yet — sign-ins across your devices will appear here.</div>
               :loginHistory.map((s,i)=>(
                 <div key={s.id} className="setting-row" style={{borderBottom:i<loginHistory.length-1?"1px solid var(--border)":"none",paddingTop:12,paddingBottom:12}}>
@@ -3254,7 +3370,7 @@ export default function App(){
             </div>
 
             <div className="gcard">
-              <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:16}}>⚡ Recent Activity</div>
+              <div className="panel-eyebrow" style={{marginBottom:16}}><ProductIcon name="activity" size={15}/>Recent Activity</div>
               {activities.slice(0,5).map((tx,i)=>(
                 <div key={i} className="setting-row" style={{borderBottom:i<4?"1px solid var(--border)":"none",paddingTop:12,paddingBottom:12}}>
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
