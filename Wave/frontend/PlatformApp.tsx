@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useState, useEffect, useCallback, useRef } from "react";
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, CartesianGrid } from "recharts";
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import "./styles/platform.css";
 import { api } from "./api/client";
 import type { User, Price, Portfolio, Tx, Strategy, CopierPortfolio, ManagedPortfolio, TierInfo, BalancePoint, WalletAnalytics } from "./types";
@@ -12,7 +12,14 @@ import { useWindowWidth as useWW } from "./hooks/useWindowWidth";
 import { CoinIcon, WaveLogo, AppIcon, CT, Toggle, Modal } from "./components/PlatformPrimitives";
 import { Turnstile } from "./components/Turnstile";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { TradingViewTicker } from "./components/TradingViewTicker";
+import { WalletBalanceHistoryChart } from "./components/PlatformCharts";
+import { BusyText, PanelLoading } from "./components/PlatformFeedback";
+import { ProductIcon } from "./components/ProductIcons";
+import { PortfolioPage } from "./pages/PortfolioPage";
+import { HistoryPage } from "./pages/HistoryPage";
+import { ReferralsPage, type ReferralData } from "./pages/ReferralsPage";
+import { DashboardPage } from "./pages/DashboardPage";
+import { NotificationsPage } from "./pages/NotificationsPage";
 
 const AdminPanel=lazy(()=>import("./admin/AdminPanel"));
 
@@ -51,243 +58,7 @@ const keyToBytes=(key:string)=>{const pad="=".repeat((4-key.length%4)%4);const r
 
 /* Count-up animation for stat values. Ramps from its previous value to `value`
    over ~600ms using requestAnimationFrame — no animation library needed. */
-function AnimatedStat({value,format}:{value:number;format:(n:number)=>string}){
-  const[display,setDisplay]=useState(value);
-  const prevRef=useRef(value);
-  useEffect(()=>{
-    const from=prevRef.current;
-    const to=value;
-    if(from===to){setDisplay(to);return;}
-    const duration=600;
-    const start=performance.now();
-    let raf=0;
-    const tick=(now:number)=>{
-      const p=Math.min(1,(now-start)/duration);
-      const eased=1-Math.pow(1-p,3); // ease-out cubic
-      setDisplay(from+(to-from)*eased);
-      if(p<1) raf=requestAnimationFrame(tick);
-      else prevRef.current=to;
-    };
-    raf=requestAnimationFrame(tick);
-    return()=>cancelAnimationFrame(raf);
-  },[value]);
-  return <>{format(display)}</>;
-}
 
-type WalletHistoryRange="7D"|"30D"|"ALL";
-
-/* The wallet history is real account data.  This component only changes how it
-   is explored: range controls, a focussed data point, and an intentional
-   hover state make the history useful rather than a static placeholder. */
-function WalletBalanceHistoryChart({points,mobile}:{points:BalancePoint[];mobile:boolean}){
-  const[range,setRange]=useState<WalletHistoryRange>("ALL");
-  const[hoveredPoint,setHoveredPoint]=useState<BalancePoint|null>(null);
-  const chronology=[...points].sort((a,b)=>new Date(a.date).getTime()-new Date(b.date).getTime());
-  const latestTime=chronology.length?new Date(chronology[chronology.length-1].date).getTime():0;
-  const rangeDays=range==="7D"?7:range==="30D"?30:0;
-  const ranged=rangeDays&&Number.isFinite(latestTime)
-    ?chronology.filter(point=>new Date(point.date).getTime()>=latestTime-rangeDays*86400000)
-    :chronology;
-  // Some histories only record balance-changing events. Keep a useful series
-  // when there are fewer than two events inside the selected calendar window.
-  const history=ranged.length>1?ranged:chronology.slice(Math.max(0,chronology.length-(range==="7D"?7:30)));
-  const firstBalance=Number(history[0]?.balance||0);
-  const latestPoint=history[history.length-1];
-  const focalPoint=hoveredPoint??latestPoint;
-  const focalBalance=Number(focalPoint?.balance||0);
-  const periodChange=focalBalance-firstBalance;
-  const percentChange=firstBalance?periodChange/Math.abs(firstBalance)*100:0;
-  const money=(value:number)=>`$${Number(value||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`;
-  const compactMoney=(value:number)=>{
-    const abs=Math.abs(value);
-    if(abs>=1000000)return `$${(value/1000000).toFixed(abs>=100000000?0:1)}M`;
-    if(abs>=1000)return `$${(value/1000).toFixed(abs>=100000?0:1)}K`;
-    return `$${Math.round(value)}`;
-  };
-  const readableDate=(value:string,withTime=false)=>{
-    const date=new Date(value);
-    if(Number.isNaN(date.getTime()))return value;
-    return date.toLocaleDateString(undefined,{month:"short",day:"numeric",...(withTime?{hour:"numeric",minute:"2-digit"}:{})});
-  };
-  const trendUp=periodChange>=0;
-
-  return <div className="gcard wallet-history-card" style={{marginBottom:22,overflow:"hidden"}}>
-    <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:16,flexWrap:"wrap",marginBottom:mobile?14:18}}>
-      <div style={{minWidth:0}}>
-        <div className="stitle" style={{marginBottom:3}}>Main wallet balance history</div>
-        <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.5,maxWidth:560}}>Explore the balance rebuilt from your deposits, withdrawals, trades, and bonuses.</div>
-      </div>
-      <div role="group" aria-label="Balance history range" style={{display:"flex",gap:5,padding:4,border:"1px solid var(--border)",background:"var(--surface2)",borderRadius:11}}>
-        {(["7D","30D","ALL"] as WalletHistoryRange[]).map(option=><button key={option} type="button" aria-pressed={range===option} onClick={()=>{setRange(option);setHoveredPoint(null);}} style={{border:0,borderRadius:8,padding:"7px 10px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"inherit",background:range===option?"#6366F1":"transparent",color:range===option?"#fff":"var(--text2)",boxShadow:range===option?"0 5px 13px rgba(99,102,241,.22)":"none",transition:"background .18s ease, color .18s ease, box-shadow .18s ease"}}>{option==="ALL"?"All":""+option}</button>)}
-      </div>
-    </div>
-
-    <div style={{display:"grid",gridTemplateColumns:mobile?"1fr":"minmax(0,1fr) auto",gap:12,alignItems:"stretch",marginBottom:14}}>
-      <div style={{minWidth:0,border:"1px solid var(--border)",background:"linear-gradient(135deg, rgba(99,102,241,.13), transparent 72%)",borderRadius:13,padding:"12px 14px"}}>
-        <div style={{display:"flex",alignItems:"center",gap:7,fontSize:10,color:"var(--text3)",fontWeight:800,textTransform:"uppercase",letterSpacing:".65px",marginBottom:5}}><span style={{width:7,height:7,borderRadius:"50%",background:"#6366F1",boxShadow:"0 0 0 4px rgba(99,102,241,.12)"}}/> {hoveredPoint?"Focused balance":"Latest balance"}</div>
-        <div style={{fontSize:mobile?24:28,lineHeight:1.12,fontWeight:900,letterSpacing:"-.04em",fontVariantNumeric:"tabular-nums",overflowWrap:"anywhere"}}>{money(focalBalance)}</div>
-        <div style={{fontSize:11,color:"var(--text3)",marginTop:5}}>{focalPoint?readableDate(focalPoint.date,true):"No history available"}</div>
-      </div>
-      <div style={{display:"flex",flexDirection:mobile?"row":"column",justifyContent:"center",gap:mobile?18:5,padding:"12px 14px",border:"1px solid var(--border)",borderRadius:13,minWidth:mobile?0:150}}>
-        <div style={{fontSize:10,color:"var(--text3)",fontWeight:800,textTransform:"uppercase",letterSpacing:".65px",whiteSpace:"nowrap"}}>Period movement</div>
-        <div style={{fontSize:16,fontWeight:900,color:trendUp?"var(--green)":"var(--red)",fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{trendUp?"+":"-"}{money(Math.abs(periodChange))}</div>
-        <div style={{fontSize:11,color:trendUp?"var(--green)":"var(--red)",fontWeight:800,whiteSpace:"nowrap"}}>{trendUp?"↗":"↘"} {Math.abs(percentChange).toFixed(2)}%</div>
-      </div>
-    </div>
-
-    <div style={{height:mobile?205:250,minWidth:0}}>
-      <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={history} margin={{top:12,right:mobile?6:18,left:mobile?-13:2,bottom:0}} onMouseMove={(state:any)=>{
-          const index=Number(state?.activeTooltipIndex);
-          setHoveredPoint(state?.activePayload?.[0]?.payload??(Number.isInteger(index)?history[index]:null)??null);
-        }} onMouseLeave={()=>setHoveredPoint(null)}>
-          <defs>
-            <linearGradient id="wallet-history-fill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#6366F1" stopOpacity={.32}/>
-              <stop offset="92%" stopColor="#6366F1" stopOpacity={.015}/>
-            </linearGradient>
-          </defs>
-          <CartesianGrid vertical={false} stroke="var(--border)" strokeOpacity={.72} strokeDasharray="3 5"/>
-          <XAxis dataKey="date" minTickGap={mobile?30:48} tickFormatter={value=>readableDate(value)} tick={{fontSize:10,fill:"var(--text3)"}} axisLine={false} tickLine={false} dy={9}/>
-          <YAxis width={mobile?45:58} tick={{fontSize:10,fill:"var(--text3)"}} axisLine={false} tickLine={false} tickFormatter={value=>compactMoney(Number(value))}/>
-          <Tooltip cursor={{stroke:"#818CF8",strokeWidth:1,strokeDasharray:"3 4"}} content={({active,payload}:any)=>{
-            const point=payload?.[0]?.payload as BalancePoint|undefined;
-            if(!active||!point)return null;
-            const balance=Number(point.balance||0);
-            const change=balance-firstBalance;
-            return <div style={{minWidth:164,padding:"10px 12px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:11,boxShadow:"0 14px 32px rgba(15,23,42,.16)",fontFamily:"inherit"}}>
-              <div style={{fontSize:10,fontWeight:800,letterSpacing:".55px",textTransform:"uppercase",color:"var(--text3)",marginBottom:5}}>{readableDate(point.date,true)}</div>
-              <div style={{fontSize:16,fontWeight:900,fontVariantNumeric:"tabular-nums",color:"var(--text)"}}>{money(balance)}</div>
-              <div style={{fontSize:11,fontWeight:800,color:change>=0?"var(--green)":"var(--red)",marginTop:4}}>{change>=0?"+":"-"}{money(Math.abs(change))} from period start</div>
-            </div>;
-          }}/>
-          <Area type="monotone" dataKey="balance" stroke="#6366F1" strokeWidth={2.6} fill="url(#wallet-history-fill)" animationDuration={520} activeDot={{r:5,fill:"var(--bg2)",stroke:"#6366F1",strokeWidth:3}}/>
-        </AreaChart>
-      </ResponsiveContainer>
-    </div>
-    <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",fontSize:10,color:"var(--text3)",marginTop:8,paddingTop:10,borderTop:"1px solid var(--border)"}}><span>{history.length} recorded balance event{history.length===1?"":"s"}</span><span>Hover any point for an exact balance</span></div>
-  </div>;
-}
-
-/* A lightweight terminal-style price chart for the dashboard. The app receives
-   close prices from the live feed, so the OHLC values below are intentionally
-   derived only for presentation; trading, balances, and market data stay intact. */
-function TerminalChart({data,symbol}:{data:ChartPt[];symbol:string}){
-  const points=(data.length?data:[{t:0,v:0}]).slice(-48);
-  const closes=points.map(point=>point.v);
-  const minClose=Math.min(...closes);
-  const maxClose=Math.max(...closes);
-  const spread=Math.max(maxClose-minClose,Math.max(Math.abs(maxClose)*.018,1));
-  const floor=minClose-spread*.28;
-  const ceiling=maxClose+spread*.28;
-  const plotTop=15;
-  const plotBottom=232;
-  const plotHeight=plotBottom-plotTop;
-  const candleGap=1000/points.length;
-  const candleWidth=Math.max(4,Math.min(11,candleGap*.52));
-  const y=(value:number)=>plotBottom-((value-floor)/(ceiling-floor))*plotHeight;
-  const candles=points.map((point,index)=>{
-    const open=points[Math.max(0,index-1)]?.v??point.v;
-    const close=point.v;
-    const variance=Math.max(Math.abs(close-open)*.52,spread*(.025+((index*7)%5)*.006));
-    const high=Math.max(open,close)+variance;
-    const low=Math.min(open,close)-variance*.88;
-    const up=close>=open;
-    const volume=18+((Math.abs(close-open)/spread)*45)+((index*13)%19);
-    return{open,close,high,low,up,volume};
-  });
-  const formatPrice=(value:number)=>value>=1000?`$${Math.round(value).toLocaleString()}`:`$${value.toFixed(value<10?3:2)}`;
-  const labels=Array.from({length:4},(_,index)=>ceiling-((ceiling-floor)*index/3));
-
-  return(
-    <div className="market-terminal-chart" role="img" aria-label={`${symbol} candlestick chart`}>
-      <div className="market-terminal-chart-plot">
-        <svg viewBox="0 0 1000 320" preserveAspectRatio="none" aria-hidden="true">
-          {[0,1,2,3,4].map(index=>{
-            const yPos=plotTop+(plotHeight/4)*index;
-            return <line key={`grid-${index}`} className="market-terminal-gridline" x1="0" x2="1000" y1={yPos} y2={yPos}/>;
-          })}
-          {candles.map((candle,index)=>{
-            const x=candleGap*index+candleGap/2;
-            const openY=y(candle.open);
-            const closeY=y(candle.close);
-            const highY=y(candle.high);
-            const lowY=y(candle.low);
-            const bodyTop=Math.min(openY,closeY);
-            const bodyHeight=Math.max(2,Math.abs(closeY-openY));
-            return <g key={`${points[index].t}-${index}`} className={candle.up?"market-terminal-candle up":"market-terminal-candle down"}>
-              <line x1={x} x2={x} y1={highY} y2={lowY}/>
-              <rect x={x-candleWidth/2} y={bodyTop} width={candleWidth} height={bodyHeight} rx="1"/>
-              <rect className="market-terminal-volume" x={x-candleWidth/2} y={300-candle.volume} width={candleWidth} height={candle.volume} rx="1"/>
-            </g>;
-          })}
-          <line className="market-terminal-latest-line" x1="0" x2="1000" y1={y(candles[candles.length-1].close)} y2={y(candles[candles.length-1].close)}/>
-        </svg>
-        <div className="market-terminal-price-scale" aria-hidden="true">
-          {labels.map((label,index)=><span key={index}>{formatPrice(label)}</span>)}
-        </div>
-      </div>
-      <div className="market-terminal-chart-axis" aria-hidden="true"><span>09:00</span><span>12:00</span><span>15:00</span><span>18:00</span><span>Now</span></div>
-    </div>
-  );
-}
-
-function MarketSparkline({data,positive}:{data:ChartPt[];positive:boolean}){
-  const points=(data.length?data:[{t:0,v:0},{t:1,v:0}]).slice(-26);
-  const values=points.map(point=>point.v);
-  const low=Math.min(...values);
-  const high=Math.max(...values);
-  const span=Math.max(high-low,1);
-  const d=points.map((point,index)=>{
-    const x=(index/(Math.max(points.length-1,1)))*100;
-    const y=21-((point.v-low)/span)*17;
-    return `${index===0?"M":"L"}${x.toFixed(2)} ${y.toFixed(2)}`;
-  }).join(" ");
-  return <svg className={`market-sparkline ${positive?"positive":"negative"}`} viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"><path d={d}/></svg>;
-}
-
-type ProductIconName="sparkle"|"deposit"|"withdraw"|"logout"|"arrowRight"|"trendUp"|"trendDown"|"activity"|"wallet"|"watch";
-function ProductIcon({name,size=18}:{name:ProductIconName;size?:number}){
-  const paths:Record<ProductIconName,JSX.Element>={
-    sparkle:<><path d="m12 3 .9 4.1L17 8l-4.1.9L12 13l-.9-4.1L7 8l4.1-.9L12 3Z"/><path d="m18.5 14 .5 2.1 2 .4-2 .5-.5 2.1-.5-2.1-2-.5 2-.4.5-2.1Z"/><path d="m5.5 15 .5 2.1 2 .4-2 .5-.5 2.1-.5-2.1-2-.5 2-.4.5-2.1Z"/></>,
-    deposit:<><path d="M12 3v13"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></>,
-    withdraw:<><path d="M12 21V8"/><path d="m7 13 5-5 5 5"/><path d="M5 4h14"/></>,
-    logout:<><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></>,
-    arrowRight:<path d="M5 12h14m-5-5 5 5-5 5"/>,
-    trendUp:<><path d="M4 17 9 12l3 3 7-8"/><path d="M14 7h5v5"/></>,
-    trendDown:<><path d="m4 7 5 5 3-3 7 8"/><path d="M14 17h5v-5"/></>,
-    activity:<><circle cx="12" cy="12" r="8.5"/><path d="M7 12h2l1.2-3 2.3 6 1.5-3H17"/></>,
-    wallet:<><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6.5A2.5 2.5 0 0 1 4 16.5z"/><path d="M4 9h13a2 2 0 0 1 2 2v2H14a2 2 0 0 0 0 4h5"/><circle cx="14" cy="15" r=".7" fill="currentColor" stroke="none"/></>,
-    watch:<path d="m12 3 2.78 5.63 6.22.9-4.5 4.38 1.06 6.19L12 17.18 6.44 20.1 7.5 13.9 3 9.53l6.22-.9L12 3Z"/>,
-  };
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
-}
-
-function ActivityGlyph({type}:{type:string}){
-  const isPositive=type==="buy"||type==="deposit";
-  const icon=type==="buy"||type==="sell"
-    ?<AppIcon name="trade" size={16}/>
-    :type==="deposit"
-      ?<ProductIcon name="deposit" size={16}/>
-      :type==="withdraw"
-        ?<ProductIcon name="withdraw" size={16}/>
-        :<ProductIcon name="sparkle" size={16}/>;
-  return <span className={`activity-glyph ${isPositive?"positive":"negative"}`}>{icon}</span>;
-}
-
-function PanelLoading({rows=3,label="Loading content",className=""}:{rows?:number;label?:string;className?:string}){
-  return <div className={`panel-loading ${className}`} role="status" aria-label={label}>
-    <span className="sr-only">{label}</span>
-    {Array.from({length:rows},(_,index)=><div className="panel-loading-row" key={index}>
-      <span className="panel-loading-avatar"/>
-      <span className="panel-loading-lines"><i/><i/><i/></span>
-    </div>)}
-  </div>;
-}
-
-function BusyText({children}:{children:React.ReactNode}){
-  return <><span className="btn-spinner"/>{children}</>;
-}
 
 const getSystemTheme=():"Light"|"Dark"=>{
   if(typeof window==="undefined"||!window.matchMedia) return "Light";
@@ -392,7 +163,7 @@ export default function App(){
   // is loaded before the dashboard is shown.
   const[port,setPort]         =useState<Portfolio>({cashBalance:0,totalPortfolioValue:0,totalValue:0,holdings:[]});
   const[txs,setTxs]           =useState<Tx[]>([]);
-  const[referralData,setReferralData]=useState<{code:string|null;totalEarned:number;referrerBonus:number;refereeBonus:number;depositThreshold:number;referrals:{id:number;refereeName:string;status:string;thresholdAmount:number;completedAt:string|null;createdAt:string}[]}|null>(null);
+  const[referralData,setReferralData]=useState<ReferralData|null>(null);
   const[referralLoading,setReferralLoading]=useState(false);
   const[charts,setCharts]     =useState<Record<string,ChartPt[]>>({});
   const[selCoin,setSelCoin]   =useState("BTC");
@@ -1534,7 +1305,6 @@ export default function App(){
   };
   const openCoin=(symbol:string)=>{setSelCoin(symbol);setTcoin(symbol);nav("coin");};
   const goToDeposit=()=>{setTtype("deposit");setTamt("");nav("transactions");};
-  const pieData=port.holdings.filter(h=>h.amount>0).map(h=>({name:h.symbol,value:h.value,color:COINS[h.symbol]?.color||"#ccc"}));
   const isAdmin=user?.role==="owner"||user?.role==="admin"||Boolean(user?.permissions?.access_admin);
   useEffect(()=>{
     if(!isAdmin) return;
@@ -2237,168 +2007,39 @@ export default function App(){
           <button className="btn btn-primary" style={{width:"100%",marginTop:18}} onClick={dismissTour}>Got it</button>
         </Modal>
 
-        {page==="dashboard"&&<div className="dashboard-page">
-          <div className="dashboard-ticker" style={{marginBottom:mob?12:16}}><ErrorBoundary boundaryName="tradingview-ticker" fallback={null}><TradingViewTicker colorTheme={resolvedTheme==="Light"?"light":"dark"}/></ErrorBoundary></div>
-          <div className="stats dashboard-stats" style={{marginTop:mob?12:0}}>
-            {accountLoading?[0,1,2,3].map(i=>(
-              <div key={i} className="stat skeleton" style={{minHeight:88}}/>
-            )):[
-              {l:"Portfolio Value",raw:port.totalPortfolioValue,  s:"Invested",         pos:null,           glow:"#35C7F2",tone:"portfolio",tip:"Current market value of your holdings only, excluding cash"},
-              {l:"Cash Balance",   raw:port.cashBalance,          s:"Available",        pos:null,           glow:"#22D3A5",tone:"cash",tip:"Uninvested cash available to trade or withdraw",cash:true},
-              {l:"24h P&L",        raw:dayPnl,                    s:`${dayPnl>=0?"+":""}${dayPnlPct.toFixed(2)}%`, pos:dayPnl>=0, glow:dayPnl>=0?"#22D3A5":"#F35D78",tone:dayPnl>=0?"positive":"negative",tip:"Unrealized 24h price movement on your current holdings. Doesn't separate out trades made earlier today — cash isn't included since it doesn't move in price.",signed:true},
-              {l:"Buying Power",   raw:port.cashBalance,          s:"Ready to trade",   pos:null,           glow:"#A99BFF",tone:"buying",tip:"Funds currently available for your next trade",cash:true},
-            ].map((s,i)=>(
-              <div key={i} className={`stat kpi-${s.tone} ${s.cash?"balance-link":""}`} onClick={s.cash?goToDeposit:undefined} title={`${s.tip} (${cur(s.raw)})`} aria-label={`${s.l}: ${cur(s.raw)}. ${s.tip}`}>
-                <div className="stat-glow" style={{background:s.glow}}/>
-                <div className="stat-label">{s.l}</div>
-                <div className="stat-value">
-                  {s.signed&&s.raw<0?"-":s.signed?"+":""}
-                  <AnimatedStat value={Math.abs(s.raw)} format={useCompactStats?compactCur:cur}/>
-                </div>
-                <div className="stat-sub" style={{color:s.pos===true?"var(--green)":s.pos===false?"var(--red)":"var(--text3)"}}>{s.pos===true&&<ProductIcon name="trendUp" size={12}/>} {s.pos===false&&<ProductIcon name="trendDown" size={12}/>} {s.s}</div>
-              </div>
-            ))}
-          </div>
+        {page==="dashboard"&&<DashboardPage
+          mobile={mob}
+          theme={resolvedTheme}
+          accountLoading={accountLoading}
+          portfolio={port}
+          dayPnl={dayPnl}
+          dayPnlPercent={dayPnlPct}
+          compactStats={useCompactStats}
+          currency={cur}
+          compactCurrency={compactCur}
+          selectedCoin={selCoin}
+          selectedPrice={lp}
+          prices={prices}
+          priceDirection={priceDir}
+          chartRange={chartRange}
+          charts={charts}
+          selectedChart={lcd}
+          watchlist={watchlist}
+          showWatchlist={showWatchlist}
+          notificationLoading={notifLoading}
+          activities={activities}
+          siteUpdates={siteUpdates}
+          onDeposit={goToDeposit}
+          onTrade={type=>{setTtype(type);nav(type==="withdraw"?"transactions":"trade");}}
+          onNavigate={nav}
+          onSelectCoin={setSelCoin}
+          onRangeChange={setChartRange}
+          setShowWatchlist={setShowWatchlist}
+          onToggleWatch={toggleWatch}
+          onOpenCoin={openCoin}
+        />}
 
-          <div className="quick-actions dashboard-actions" style={{display:"flex",gap:10,flexWrap:"wrap",margin:"16px 0"}}>
-            <button className="btn btn-primary btn-sm" onClick={()=>{setTtype("buy");nav("trade");}} title="Buy crypto"><AppIcon name="plus" size={15}/>Buy</button>
-            <button className="btn btn-ghost btn-sm" onClick={goToDeposit} title="Add funds to your cash balance"><ProductIcon name="deposit" size={15}/>Deposit</button>
-            <button className="btn btn-ghost btn-sm" onClick={()=>{setTtype("withdraw");nav("transactions");}} title="Withdraw cash"><ProductIcon name="withdraw" size={15}/>Withdraw</button>
-            <button className="btn btn-ghost btn-sm" onClick={()=>nav("portfolio")} title="View full portfolio"><AppIcon name="portfolio" size={15}/>Portfolio</button>
-          </div>
 
-          <div className="crow dashboard-market-layout">
-            <div className="gcard dashboard-market-chart" style={{padding:26}}>
-              <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:10}}>
-                <div>
-                  <div style={{fontSize:12,color:"var(--text3)",fontWeight:500,marginBottom:4}}>{COINS[selCoin]?.name} / USD</div>
-                  <div className="pbig">${lp.toLocaleString()}</div>
-                  <div className="pchg" style={{color:(prices[selCoin]?.change24h||0)>=0?"var(--green)":"var(--red)"}}>
-                    <ProductIcon name={priceDir[selCoin]?"trendUp":"trendDown"} size={14}/> {Math.abs(prices[selCoin]?.change24h||0).toFixed(2)}% <span style={{color:"var(--text3)",fontSize:11}}>24h</span>
-                  </div>
-                </div>
-                <div style={{display:"flex",flexDirection:"column",gap:8,alignItems:"flex-end"}}>
-                  <div className="coin-pills">
-                    {Object.keys(COINS).map(s=>(
-                      <button key={s} className={`chip ${selCoin===s?"active":""}`} onClick={()=>setSelCoin(s)} style={{display:"flex",alignItems:"center",gap:5}}>
-                        <CoinIcon symbol={s} size={14}/>{s}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="range-pills">
-                    {(["1H","1D","1W","1M"] as Range[]).map(r=>(
-                      <button key={r} className={`chip ${chartRange===r?"active":""}`} style={{padding:"4px 10px",fontSize:10}} onClick={()=>setChartRange(r)}>{r}</button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <TerminalChart data={lcd} symbol={selCoin}/>
-            </div>
-
-            <div className="gcard dashboard-market-list" style={{padding:mob?"14px":"20px"}}>
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:14}}>
-                <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,letterSpacing:".8px",textTransform:"uppercase"}}>Live Markets</div>
-                <button className="btn btn-ghost btn-sm" onClick={()=>setShowWatchlist(v=>!v)} style={{padding:"5px 9px",fontSize:10}}>{showWatchlist?"All markets":<><ProductIcon name="watch" size={13}/>Watchlist</>}</button>
-              </div>
-              <div className="mlist">
-                {(showWatchlist?watchlist:Object.keys(COINS)).map(s=>{
-                  const m=COINS[s];const ld=charts[s]||[];const lv=ld[ld.length-1]?.v||prices[s]?.price||0;const pos=(prices[s]?.change24h||0)>=0;
-                  return(
-                    <div key={s} className="mitem" onClick={()=>openCoin(s)}>
-                      <div style={{display:"flex",alignItems:"center",gap:10}}><CoinIcon symbol={s} size={32}/><div><div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{mob?s:m.name}</div><div style={{fontSize:10,color:"var(--text3)",fontWeight:500}}>{s}</div></div></div>
-                      <MarketSparkline data={ld} positive={pos}/>
-                      <button className={`market-watch-toggle ${watchlist.includes(s)?"active":""}`} aria-label={`${watchlist.includes(s)?"Remove":"Add"} ${s} ${watchlist.includes(s)?"from":"to"} watchlist`} onClick={e=>{e.stopPropagation();toggleWatch(s);}}><ProductIcon name="watch" size={15}/></button>
-                      <div style={{textAlign:"right"}}><div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>${lv.toLocaleString()}</div><div style={{fontSize:10,fontWeight:700,color:pos?"var(--green)":"var(--red)",marginTop:2}}>{pos?"+":""}{(prices[s]?.change24h||0).toFixed(2)}%</div></div>
-                    </div>
-                  );
-                })}
-                {showWatchlist&&watchlist.length===0&&<div style={{padding:"18px 0",textAlign:"center",fontSize:12,color:"var(--text3)"}}>Star a market to add it to your watchlist.</div>}
-              </div>
-            </div>
-          </div>
-
-          <div className="dashboard-section-head" style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"nowrap",gap:8}}>
-            <div className="stitle" style={{marginBottom:0,flexShrink:0}}>My Holdings</div>
-            <button className="btn btn-ghost btn-sm" style={{borderRadius:100,padding:"7px 14px",fontSize:11,fontWeight:700,whiteSpace:"nowrap",flexShrink:0,border:"1px solid var(--border2)"}} onClick={()=>nav("portfolio")}>View all →</button>
-          </div>
-          <div className="hgrid dashboard-holdings-grid">
-            {port.holdings.filter(h=>h.amount>0).map(h=>{
-              const m=COINS[h.symbol];const pct=port.totalPortfolioValue>0?(h.value/port.totalPortfolioValue*100).toFixed(1):"0";const isPos=(h.change24h||0)>=0;
-              return(
-                <div key={h.symbol} className="hi" onClick={()=>openCoin(h.symbol)}>
-                  <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:`linear-gradient(90deg,${m?.color},transparent)`,borderRadius:"18px 18px 0 0"}}/>
-                  <div className="hitop"><CoinIcon symbol={h.symbol} size={32}/><div><div className="hsym">{h.symbol}</div><div className="hnm">{m?.name}</div></div><div style={{marginLeft:"auto",flexShrink:0}}><span className={isPos?"badge badge-green":"badge badge-red"} style={{fontSize:9,padding:"2px 7px"}}>{isPos?"▲":"▼"} {Math.abs(h.change24h||0).toFixed(2)}%</span></div></div>
-                  <div className="hamt">{h.amount}</div>
-                  <div className="husd">${h.value.toLocaleString("en-US",{minimumFractionDigits:2})}</div>
-                  <div className="hbar-bg"><div className="hbar" style={{width:`${pct}%`,background:`linear-gradient(90deg,${m?.color},${m?.color}88)`}}/></div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="dashboard-bottom-grid">
-          <div className="gcard dashboard-activity-card" style={{marginTop:20}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
-              <div className="panel-eyebrow"><ProductIcon name="activity" size={15}/>Recent Activity</div>
-              <button className="btn btn-ghost btn-sm panel-link" onClick={()=>nav("notifications")}>View all <ProductIcon name="arrowRight" size={13}/></button>
-            </div>
-            {notifLoading?<PanelLoading rows={4} label="Loading recent activity"/>
-            :activities.length===0?<div style={{fontSize:12,color:"var(--text3)"}}>No activity yet — your trades and transfers will show up here.</div>
-            :activities.slice(0,5).map((tx,i)=>(
-              <div key={i} className="setting-row" style={{borderBottom:i<Math.min(4,activities.length-1)?"1px solid var(--border)":"none",paddingTop:12,paddingBottom:12}}>
-                <div style={{display:"flex",alignItems:"center",gap:10}}>
-                  <ActivityGlyph type={tx.type}/>
-                  <div>
-                    <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{tx.type==="investment"?`${tx.label} activated`:`${tx.type.charAt(0).toUpperCase()+tx.type.slice(1)} ${tx.label}`}</div>
-                    <div style={{fontSize:11,color:"var(--text3)"}}>{new Date(tx.created_at).toLocaleString()}</div>
-                  </div>
-                </div>
-                <div style={{fontSize:13,fontWeight:700,color:tx.type==="buy"||tx.type==="withdraw"?"var(--red)":"var(--green)"}}>
-                  {tx.type==="buy"||tx.type==="withdraw"||tx.type==="investment"?"-":"+"}${Number(tx.amount||0).toLocaleString()}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {(()=>{
-            const heldOnly=port.holdings.filter(h=>h.amount>0);
-            const topHolding=heldOnly.length?heldOnly.reduce((a,b)=>a.value>b.value?a:b):null;
-            const topPct=topHolding&&port.totalPortfolioValue>0?(topHolding.value/port.totalPortfolioValue*100):0;
-            const cashPct=port.totalValue>0?(port.cashBalance/port.totalValue*100):0;
-            const insights=[
-              topHolding?{icon:<AppIcon name="portfolio" size={17}/>,tone:"violet",text:<>Your largest position is <b>{topHolding.symbol}</b>, {topPct.toFixed(0)}% of your portfolio.</>}:{icon:<ProductIcon name="sparkle" size={17}/>,tone:"violet",text:<>You don't hold any assets yet — head to Trade to make your first buy.</>},
-              {icon:<ProductIcon name={dayPnl>=0?"trendUp":"trendDown"} size={17}/>,tone:dayPnl>=0?"green":"red",text:<>Your holdings are <b style={{color:dayPnl>=0?"var(--green)":"var(--red)"}}>{dayPnl>=0?"up":"down"} {Math.abs(dayPnlPct).toFixed(2)}%</b> over the last 24h.</>},
-              {icon:<ProductIcon name="wallet" size={17}/>,tone:"cyan",text:cashPct>40?<><b>{cashPct.toFixed(0)}%</b> of your account is sitting in cash — consider putting it to work.</>:<>{cashPct.toFixed(0)}% of your account is in cash — the rest is invested.</>},
-            ];
-            return(
-              <div className="gcard dashboard-insights-card" style={{marginTop:20}}>
-                <div className="panel-eyebrow"><ProductIcon name="sparkle" size={15}/>Insights</div>
-                {insights.map((ins,i)=>(
-                  <div key={i} style={{display:"flex",alignItems:"flex-start",gap:12,padding:"10px 0",borderBottom:i<insights.length-1?"1px solid var(--border)":"none"}}>
-                    <span className={`insight-glyph ${ins.tone}`}>{ins.icon}</span>
-                    <span style={{fontSize:13,color:"var(--text2)",lineHeight:1.5}}>{ins.text}</span>
-                  </div>
-                ))}
-              </div>
-            );
-          })()}
-
-          <div className="gcard dashboard-notifications-card" style={{marginTop:20}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
-              <div className="panel-eyebrow"><AppIcon name="notifications" size={15}/>Notifications</div>
-              <button className="btn btn-ghost btn-sm panel-link" onClick={()=>nav("notifications")}>View all <ProductIcon name="arrowRight" size={13}/></button>
-            </div>
-            {notifLoading?<PanelLoading rows={3} label="Loading notifications"/>
-            :siteUpdates.length===0?<div style={{fontSize:12,color:"var(--text3)"}}>No notifications right now.</div>
-            :siteUpdates.slice(0,3).map((u,i)=>(
-              <div key={i} style={{padding:"10px 0",borderBottom:i<Math.min(2,siteUpdates.length-1)?"1px solid var(--border)":"none"}}>
-                <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{u.title}</div>
-                <div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>{u.body}</div>
-              </div>
-            ))}
-          </div>
-          </div>
-        </div>}
 
         {/* ══ TRADE ══ */}
         {page==="coin"&&(
@@ -2976,151 +2617,15 @@ export default function App(){
           </div>
         )}
 
-        {page==="portfolio"&&<div className="page-wrap product-portfolio-page">
-          <div className="stats portfolio-stats" style={{marginBottom:mob?14:24}}>
-            {[
-              {l:"Total Value",  v:useCompactStats?compactCur(port.totalValue):cur(port.totalValue),                  full:cur(port.totalValue), glow:"#6366F1"},
-              {l:"Invested",     v:useCompactStats?compactCur(port.totalPortfolioValue):cur(port.totalPortfolioValue),  full:cur(port.totalPortfolioValue), glow:"#06B6D4"},
-              {l:"Cash",         v:useCompactStats?compactCur(port.cashBalance):cur(port.cashBalance),                  full:cur(port.cashBalance), glow:"#10B981"},
-              {l:"Assets Held",  v:port.holdings.filter(h=>h.amount>0).length,                 full:undefined,       glow:"#8B5CF6"},
-            ].map((s,i)=>(
-              <div key={i} className="stat" title={s.full?`${s.l}: ${s.full}`:undefined} aria-label={s.full?`${s.l}: ${s.full}`:undefined}><div className="stat-glow" style={{background:s.glow}}/><div className="stat-label">{s.l}</div><div className="stat-value">{s.v}</div></div>
-            ))}
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:tab?"1fr":"1.8fr 1fr",gap:18,marginBottom:22}}>
-            <div>
-              <div className="stitle">All Holdings</div>
-              <div className="hgrid" style={{gridTemplateColumns:"repeat(2,1fr)"}}>
-                {Object.entries(COINS).map(([sym,m])=>{
-                  const h=port.holdings.find(x=>x.symbol===sym);const amt=h?.amount||0;const val=h?.value||0;
-                  const pct=port.totalPortfolioValue>0?((val/port.totalPortfolioValue)*100).toFixed(1):"0";
-                  return(
-                    <div key={sym} className="hi" onClick={()=>openCoin(sym)}>
-                      <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:`linear-gradient(90deg,${m.color},transparent)`,opacity:amt>0?1:.3,borderRadius:"18px 18px 0 0"}}/>
-                      <div className="hitop"><CoinIcon symbol={sym} size={32}/><div><div className="hsym">{sym}</div><div className="hnm">{m.name}</div></div><div style={{marginLeft:"auto",fontSize:11,color:"var(--text3)",fontWeight:600}}>{pct}%</div></div>
-                      <div className="hamt" style={{color:amt>0?"var(--text)":"var(--text3)",fontSize:18}}>{amt||"—"}</div>
-                      <div className="husd">${val.toLocaleString("en-US",{minimumFractionDigits:2})}</div>
-                      <div className="hbar-bg"><div className="hbar" style={{width:`${pct}%`,background:`linear-gradient(90deg,${m.color},${m.color}66)`}}/></div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-            {!mob&&(
-              <div>
-                <div className="stitle">Allocation</div>
-                <div className="gcard">
-                  <ResponsiveContainer width="100%" height={200}>
-                    <PieChart>
-                      <Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3} dataKey="value">
-                        {pieData.map((e,i)=><Cell key={i} fill={e.color}/>)}
-                      </Pie>
-                      <Tooltip formatter={(v:any)=>`$${Number(v).toLocaleString()}`} contentStyle={{background:"#1C1E2E",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,color:"#F1F2F8"}}/>
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:12}}>
-                    {pieData.map((d,i)=>(
-                      <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                        <div style={{display:"flex",alignItems:"center",gap:8}}><CoinIcon symbol={d.name} size={18}/><span style={{fontSize:12,fontWeight:700,color:"var(--text)"}}>{d.name}</span></div>
-                        <span style={{fontSize:12,color:"var(--text3)",fontWeight:600}}>{port.totalPortfolioValue>0?((d.value/port.totalPortfolioValue)*100).toFixed(1):0}%</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>}
+        {page==="portfolio"&&<PortfolioPage portfolio={port} mobile={mob} tablet={tab} compactStats={useCompactStats} currency={cur} compactCurrency={compactCur} onOpenCoin={openCoin}/>}
 
         {/* ══ REFERRALS ══ */}
-        {page==="referrals"&&(
-          <div className="product-referrals-page" style={{display:"grid",gridTemplateColumns:mob?"1fr":"1.1fr .9fr",gap:18}}>
-            <div className="gcard" style={{padding:30,background:"linear-gradient(135deg,#1a1035,#2a1245)"}}>
-              <div style={{fontSize:11,color:"#d8b4fe",fontWeight:800,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>Refer a friend</div>
-              <div style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontSize:26,fontWeight:900,lineHeight:1.2,color:"#fff"}}>Give ${referralData?.refereeBonus??5}, get ${referralData?.referrerBonus??10}.</div>
-              <p style={{color:"#e9d5ff",fontSize:13,lineHeight:1.6,marginTop:10}}>
-                Share your code below. When a friend signs up and deposits at least ${referralData?.depositThreshold??100}, you both get a cash bonus — usable for trading right away.
-              </p>
-              {referralLoading?<PanelLoading rows={1} label="Loading referral code" className="referral-code-loading"/>:referralData?.code?(<>
-                <div style={{display:"flex",gap:8,marginTop:20}}>
-                  <div style={{flex:1,background:"rgba(255,255,255,.1)",borderRadius:10,padding:"12px 16px",fontFamily:"monospace",fontSize:18,fontWeight:800,color:"#fff",letterSpacing:2,textAlign:"center"}}>{referralData.code}</div>
-                  <button className="btn btn-primary" onClick={()=>{navigator.clipboard?.writeText(referralData.code!);toast2("Code copied");}}>Copy</button>
-                </div>
-                <button className="btn" style={{width:"100%",marginTop:10,background:"rgba(255,255,255,.1)",color:"#fff"}} onClick={()=>{navigator.clipboard?.writeText(`${window.location.origin}?ref=${referralData.code}`);toast2("Referral link copied");}}>Copy shareable link</button>
-                <div style={{marginTop:20,paddingTop:16,borderTop:"1px solid rgba(255,255,255,.12)",display:"flex",justifyContent:"space-between"}}>
-                  <div><div style={{fontSize:11,color:"#e9d5ff"}}>Friends referred</div><div style={{fontSize:20,fontWeight:800,color:"#fff"}}>{referralData.referrals.length}</div></div>
-                  <div style={{textAlign:"right"}}><div style={{fontSize:11,color:"#e9d5ff"}}>Total earned</div><div style={{fontSize:20,fontWeight:800,color:"#fff"}}>${referralData.totalEarned.toLocaleString()}</div></div>
-                </div>
-              </>):<div style={{color:"#e9d5ff",fontSize:13,marginTop:20}}>Couldn't load your referral code — try reopening this page.</div>}
-            </div>
+        {page==="referrals"&&<ReferralsPage data={referralData} loading={referralLoading} mobile={mob} notify={message=>toast2(message)}/>}
 
-            <div className="gcard" style={{padding:0,overflow:"hidden"}}>
-              <div style={{padding:mob?"14px 16px 12px":"22px 24px 16px",borderBottom:"1px solid var(--border)"}}>
-                <div className="stitle" style={{marginBottom:0}}>Your Referrals</div>
-              </div>
-              {referralLoading?<PanelLoading rows={3} label="Loading referrals"/>
-                :!referralData?.referrals.length?<div style={{padding:24,color:"var(--text3)",fontSize:13}}>No referrals yet — share your code to start earning.</div>
-                :<div style={{padding:mob?"8px 16px 16px":"8px 24px 20px"}}>
-                  {referralData.referrals.map(r=>(
-                    <div key={r.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 0",borderBottom:"1px solid var(--border)"}}>
-                      <div>
-                        <div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{r.refereeName}</div>
-                        <div style={{fontSize:11,color:"var(--text3)"}}>Joined {new Date(r.createdAt).toLocaleDateString()}</div>
-                      </div>
-                      {r.status==="completed"
-                        ?<span className="badge badge-green">Earned ${referralData.referrerBonus}</span>
-                        :<span className="badge badge-blue">Needs ${r.thresholdAmount} deposit</span>}
-                    </div>
-                  ))}
-                </div>}
-            </div>
-          </div>
-        )}
 
         {/* ══ HISTORY ══ */}
-        {page==="history"&&(
-          <div className="gcard history-ledger-card" style={{padding:0,overflow:"hidden"}}>
-            <div style={{padding:mob?"14px 16px 12px":"22px 24px 16px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"10px"}}>
-              <div className="stitle" style={{marginBottom:0}}>All Transactions</div>
-              <span style={{fontSize:11,color:"var(--text3)",fontWeight:600}}>{txs.length} total</span>
-            </div>
-            <div className="txwrap">
-              <table className="txt">
-                <thead><tr><th>Type</th><th>Asset</th><th>Amount</th><th>Price</th><th>Total</th><th>Date</th><th>Status</th></tr></thead>
-                <tbody>
-                  {txs.map(tx=>(
-                    <tr key={tx.id}>
-                      <td><span className={`tbadge ${tx.type==="buy"?"badge-green":tx.type==="sell"?"badge-red":tx.type==="deposit"?"badge-blue":"badge-purple"}`}>{tx.type}</span></td>
-                      <td style={{display:"flex",alignItems:"center",gap:8,color:"var(--text)",fontWeight:700}}><CoinIcon symbol={tx.symbol} size={20}/>{tx.symbol}</td>
-                      <td>{tx.amount}</td>
-                      <td>${(tx.price||0).toLocaleString()}</td>
-                      <td style={{color:tx.type==="buy"||tx.type==="withdraw"?"var(--red)":"var(--green)",fontWeight:700}}>{tx.type==="buy"||tx.type==="withdraw"?"-":"+"}${(tx.total||0).toLocaleString()}</td>
-                      <td>{(tx.created_at||"").slice(0,10)}</td>
-                      <td><span className={`badge ${txStatusBadge(tx.status).cls}`}>{txStatusBadge(tx.status).icon} {tx.status}</span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="txcards" style={{padding:"12px 14px 16px"}}>
-              {txs.map(tx=>(
-                <div key={tx.id} className="txc">
-                  <div className="txctop">
-                    <div style={{display:"flex",alignItems:"center",gap:8}}>
-                      <span className={`tbadge ${tx.type==="buy"?"badge-green":tx.type==="sell"?"badge-red":tx.type==="deposit"?"badge-blue":"badge-purple"}`}>{tx.type}</span>
-                      <div style={{display:"flex",alignItems:"center",gap:6}}><CoinIcon symbol={tx.symbol} size={18}/><span className="txcsym" style={{color:COINS[tx.symbol]?.color||"var(--text)"}}>{tx.symbol}</span></div>
-                    </div>
-                    <span className="txcdate">{(tx.created_at||"").slice(0,10)}</span>
-                  </div>
-                  <div className="txcbot">
-                    <span className="txcamt">{tx.amount} @ ${(tx.price||0).toLocaleString()}</span>
-                    <span className="txctot" style={{color:tx.type==="buy"||tx.type==="withdraw"?"var(--red)":"var(--green)"}}>{tx.type==="buy"||tx.type==="withdraw"?"-":"+"}${(tx.total||0).toLocaleString()}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {page==="history"&&<HistoryPage transactions={txs} mobile={mob}/>}
+
 
         {/* ══ SETTINGS ══ */}
         {page==="settings"&&(
@@ -3299,104 +2804,31 @@ export default function App(){
         )}
 
         {/* ══ NOTIFICATIONS ══ */}
-        {page==="notifications"&&(
-          <div className="product-notifications-page" style={{maxWidth:600}}>
-            <div className="gcard" style={{marginBottom:14}}>
-              <div className="panel-eyebrow" style={{marginBottom:4}}><AppIcon name="notifications" size={15}/>Notification Preferences</div>
-              <div style={{fontSize:12,color:"var(--text3)",marginBottom:16}}>Control what alerts you receive</div>
+        {page==="notifications"&&<NotificationsPage
+          settings={appSettings}
+          isAdmin={isAdmin}
+          balancePushSubscribed={!!balancePushSubscribed}
+          balancePushBusy={balancePushBusy}
+          pushSubscribed={!!pushSubscribed}
+          pushBusy={pushBusy}
+          loading={notifLoading}
+          siteUpdates={siteUpdates}
+          loginHistory={loginHistory}
+          activities={activities}
+          onToggleLoginNotifications={()=>{
+            setAppSettings(previous=>({...previous,notifications:!previous.notifications}));
+            toast2(`Login notifications ${!appSettings.notifications?"enabled":"disabled"}`,"🔔");
+          }}
+          onTradeAlerts={()=>toast2("Trade alerts always on for security","🔒")}
+          onManagePriceAlerts={()=>setPriceAlertsOpen(true)}
+          onToggleBalancePush={()=>balancePushSubscribed?disableBalancePush():enableBalancePush()}
+          onToggleAdminPush={()=>pushSubscribed?disableAdminPush():enableAdminPush()}
+          onSignOutDevice={signOutDevice}
+          onRevokeDeviceTrust={revokeDeviceTrust}
+          onLogout={doLogout}
+        />}
 
-              <div className="setting-row">
-                <div><div className="setting-label">Login Notifications</div><div className="setting-desc">Email alert whenever a new sign-in is detected</div></div>
-                <Toggle on={appSettings.notifications} onToggle={()=>{
-                  setAppSettings(p=>({...p,notifications:!p.notifications}));
-                  toast2(`Login notifications ${!appSettings.notifications?"enabled":"disabled"}`,"🔔");
-                }}/>
-              </div>
-              <div className="setting-row">
-                <div><div className="setting-label">Trade Alerts</div><div className="setting-desc">Notify when a buy/sell order is completed</div></div>
-                <Toggle on={true} onToggle={()=>toast2("Trade alerts always on for security","🔒")}/>
-              </div>
-              <div className="setting-row">
-                <div><div className="setting-label">Price Alerts</div><div className="setting-desc">Get notified when a coin or stock hits your target price</div></div>
-                <button className="btn btn-ghost btn-sm" onClick={()=>setPriceAlertsOpen(true)}>Manage</button>
-              </div>
-              <div className="setting-row" style={{borderBottom:isAdmin?undefined:"none"}}>
-                <div><div className="setting-label">Live Balance Updates</div><div className="setting-desc">See your balance update on this device the moment a deposit is confirmed, even if you're already on the page</div></div>
-                <Toggle label="Toggle live balance updates" on={!!balancePushSubscribed} onToggle={()=>balancePushBusy?null:(balancePushSubscribed?disableBalancePush():enableBalancePush())}/>
-              </div>
-              {isAdmin&&<div className="setting-row" style={{borderBottom:"none"}}>
-                <div><div className="setting-label">Admin Device Alerts</div><div className="setting-desc">Push notification on this device for new pending requests</div></div>
-                <Toggle label="Toggle admin device alerts" on={!!pushSubscribed} onToggle={()=>pushBusy?null:(pushSubscribed?disableAdminPush():enableAdminPush())}/>
-              </div>}
-            </div>
 
-            <div className="gcard" style={{marginBottom:14}}>
-              <div className="panel-eyebrow" style={{marginBottom:16}}><ProductIcon name="sparkle" size={15}/>Site Updates</div>
-              {notifLoading?<PanelLoading rows={3} label="Loading site updates"/>
-              :siteUpdates.length===0?<div style={{fontSize:12,color:"var(--text3)"}}>No updates yet — you'll see new Wave features and announcements here.</div>
-              :siteUpdates.map((u,i)=>(
-                <div key={u.id} className="setting-row" style={{alignItems:"flex-start",borderBottom:i<siteUpdates.length-1?"1px solid var(--border)":"none",display:"block",paddingTop:12,paddingBottom:12}}>
-                  <div style={{fontSize:13,fontWeight:700,color:"var(--text)",marginBottom:2}}>{u.title}</div>
-                  <div style={{fontSize:12,color:"var(--text2)",lineHeight:1.5,marginBottom:4}}>{u.body}</div>
-                  <div style={{fontSize:11,color:"var(--text3)"}}>{new Date(u.created_at).toLocaleString()}</div>
-                </div>
-              ))}
-            </div>
-
-            <div className="gcard" style={{marginBottom:14}}>
-              <div className="panel-eyebrow" style={{marginBottom:16}}><ProductIcon name="activity" size={15}/>Login Activity</div>
-              {notifLoading?<PanelLoading rows={3} label="Loading login activity"/>
-              :loginHistory.length===0?<div style={{fontSize:12,color:"var(--text3)"}}>No login history yet — sign-ins across your devices will appear here.</div>
-              :loginHistory.map((s,i)=>(
-                <div key={s.id} className="setting-row" style={{borderBottom:i<loginHistory.length-1?"1px solid var(--border)":"none",paddingTop:12,paddingBottom:12}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10}}>
-                    <div style={{width:34,height:34,borderRadius:"50%",background:"rgba(99,102,241,.12)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>
-                      {/\bmobile\b/i.test(s.device)?"📱":"💻"}
-                    </div>
-                    <div>
-                      <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{s.device}{s.current&&<span className="badge badge-green" style={{marginLeft:8,fontSize:9}}>This device</span>}{s.trusted&&<span className="badge badge-blue" style={{marginLeft:8,fontSize:9}}>Trusted</span>}</div>
-                      <div style={{fontSize:11,color:"var(--text3)"}}>Signed in {new Date(s.login_at).toLocaleString()}</div>
-                      <div style={{display:"flex",gap:8,marginTop:8}}>
-                        <button className="btn btn-danger btn-sm" onClick={()=>signOutDevice(s)}>{s.current?"Sign out":"Sign out device"}</button>
-                        {s.trusted&&!s.current&&<button className="btn btn-ghost btn-sm" onClick={()=>revokeDeviceTrust(s)}>Revoke trust</button>}
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{fontSize:11,color:"var(--text3)",fontWeight:600,textAlign:"right"}}>
-                    {s.logout_at?`Signed out ${new Date(s.logout_at).toLocaleString()}`:<span style={{color:"var(--green)"}}>● Active</span>}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="gcard">
-              <div className="panel-eyebrow" style={{marginBottom:16}}><ProductIcon name="activity" size={15}/>Recent Activity</div>
-              {activities.slice(0,5).map((tx,i)=>(
-                <div key={i} className="setting-row" style={{borderBottom:i<4?"1px solid var(--border)":"none",paddingTop:12,paddingBottom:12}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10}}>
-                    <div style={{width:34,height:34,borderRadius:"50%",background:tx.type==="buy"||tx.type==="deposit"?"rgba(16,185,129,.15)":"rgba(239,68,68,.1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>
-                      {tx.type==="buy"?"🟢":tx.type==="sell"?"🔴":tx.type==="deposit"?"Deposit":""}
-                    </div>
-                    <div>
-                      <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{tx.type==="investment"?`${tx.label} activated`:`${tx.type.charAt(0).toUpperCase()+tx.type.slice(1)} ${tx.label}`}</div>
-                      <div style={{fontSize:11,color:"var(--text3)"}}>{new Date(tx.created_at).toLocaleString()}</div>
-                    </div>
-                  </div>
-                  <div style={{fontSize:13,fontWeight:700,color:tx.type==="buy"||tx.type==="withdraw"?"var(--red)":"var(--green)"}}>
-                    {tx.type==="buy"||tx.type==="withdraw"||tx.type==="investment"?"-":"+"}${Number(tx.amount||0).toLocaleString()}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div style={{marginTop:14}}>
-              <button className="btn btn-danger" style={{width:"100%",justifyContent:"center"}} onClick={doLogout}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-                Sign Out
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Bottom nav */}
