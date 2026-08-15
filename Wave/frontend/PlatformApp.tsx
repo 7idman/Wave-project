@@ -105,12 +105,12 @@ function TerminalChart({data,symbol}:{data:ChartPt[];symbol:string}){
   const labels=Array.from({length:4},(_,index)=>ceiling-((ceiling-floor)*index/3));
 
   return(
-    <div className="terminal-chart" role="img" aria-label={`${symbol} candlestick chart`}>
-      <div className="terminal-chart-plot">
+    <div className="market-terminal-chart" role="img" aria-label={`${symbol} candlestick chart`}>
+      <div className="market-terminal-chart-plot">
         <svg viewBox="0 0 1000 320" preserveAspectRatio="none" aria-hidden="true">
           {[0,1,2,3,4].map(index=>{
             const yPos=plotTop+(plotHeight/4)*index;
-            return <line key={`grid-${index}`} className="terminal-gridline" x1="0" x2="1000" y1={yPos} y2={yPos}/>;
+            return <line key={`grid-${index}`} className="market-terminal-gridline" x1="0" x2="1000" y1={yPos} y2={yPos}/>;
           })}
           {candles.map((candle,index)=>{
             const x=candleGap*index+candleGap/2;
@@ -120,19 +120,19 @@ function TerminalChart({data,symbol}:{data:ChartPt[];symbol:string}){
             const lowY=y(candle.low);
             const bodyTop=Math.min(openY,closeY);
             const bodyHeight=Math.max(2,Math.abs(closeY-openY));
-            return <g key={`${points[index].t}-${index}`} className={candle.up?"terminal-candle up":"terminal-candle down"}>
+            return <g key={`${points[index].t}-${index}`} className={candle.up?"market-terminal-candle up":"market-terminal-candle down"}>
               <line x1={x} x2={x} y1={highY} y2={lowY}/>
               <rect x={x-candleWidth/2} y={bodyTop} width={candleWidth} height={bodyHeight} rx="1"/>
-              <rect className="terminal-volume" x={x-candleWidth/2} y={300-candle.volume} width={candleWidth} height={candle.volume} rx="1"/>
+              <rect className="market-terminal-volume" x={x-candleWidth/2} y={300-candle.volume} width={candleWidth} height={candle.volume} rx="1"/>
             </g>;
           })}
-          <line className="terminal-latest-line" x1="0" x2="1000" y1={y(candles[candles.length-1].close)} y2={y(candles[candles.length-1].close)}/>
+          <line className="market-terminal-latest-line" x1="0" x2="1000" y1={y(candles[candles.length-1].close)} y2={y(candles[candles.length-1].close)}/>
         </svg>
-        <div className="terminal-price-scale" aria-hidden="true">
+        <div className="market-terminal-price-scale" aria-hidden="true">
           {labels.map((label,index)=><span key={index}>{formatPrice(label)}</span>)}
         </div>
       </div>
-      <div className="terminal-chart-axis" aria-hidden="true"><span>09:00</span><span>12:00</span><span>15:00</span><span>18:00</span><span>Now</span></div>
+      <div className="market-terminal-chart-axis" aria-hidden="true"><span>09:00</span><span>12:00</span><span>15:00</span><span>18:00</span><span>Now</span></div>
     </div>
   );
 }
@@ -149,6 +149,35 @@ function MarketSparkline({data,positive}:{data:ChartPt[];positive:boolean}){
     return `${index===0?"M":"L"}${x.toFixed(2)} ${y.toFixed(2)}`;
   }).join(" ");
   return <svg className={`market-sparkline ${positive?"positive":"negative"}`} viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"><path d={d}/></svg>;
+}
+
+type ProductIconName="sparkle"|"deposit"|"withdraw"|"logout"|"arrowRight"|"trendUp"|"trendDown"|"activity"|"wallet"|"watch";
+function ProductIcon({name,size=18}:{name:ProductIconName;size?:number}){
+  const paths:Record<ProductIconName,JSX.Element>={
+    sparkle:<><path d="m12 3 .9 4.1L17 8l-4.1.9L12 13l-.9-4.1L7 8l4.1-.9L12 3Z"/><path d="m18.5 14 .5 2.1 2 .4-2 .5-.5 2.1-.5-2.1-2-.5 2-.4.5-2.1Z"/><path d="m5.5 15 .5 2.1 2 .4-2 .5-.5 2.1-.5-2.1-2-.5 2-.4.5-2.1Z"/></>,
+    deposit:<><path d="M12 3v13"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></>,
+    withdraw:<><path d="M12 21V8"/><path d="m7 13 5-5 5 5"/><path d="M5 4h14"/></>,
+    logout:<><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></>,
+    arrowRight:<path d="M5 12h14m-5-5 5 5-5 5"/>,
+    trendUp:<><path d="M4 17 9 12l3 3 7-8"/><path d="M14 7h5v5"/></>,
+    trendDown:<><path d="m4 7 5 5 3-3 7 8"/><path d="M14 17h5v-5"/></>,
+    activity:<><circle cx="12" cy="12" r="8.5"/><path d="M7 12h2l1.2-3 2.3 6 1.5-3H17"/></>,
+    wallet:<><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6.5A2.5 2.5 0 0 1 4 16.5z"/><path d="M4 9h13a2 2 0 0 1 2 2v2H14a2 2 0 0 0 0 4h5"/><circle cx="14" cy="15" r=".7" fill="currentColor" stroke="none"/></>,
+    watch:<path d="m12 3 2.78 5.63 6.22.9-4.5 4.38 1.06 6.19L12 17.18 6.44 20.1 7.5 13.9 3 9.53l6.22-.9L12 3Z"/>,
+  };
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
+}
+
+function ActivityGlyph({type}:{type:string}){
+  const isPositive=type==="buy"||type==="deposit";
+  const icon=type==="buy"||type==="sell"
+    ?<AppIcon name="trade" size={16}/>
+    :type==="deposit"
+      ?<ProductIcon name="deposit" size={16}/>
+      :type==="withdraw"
+        ?<ProductIcon name="withdraw" size={16}/>
+        :<ProductIcon name="sparkle" size={16}/>;
+  return <span className={`activity-glyph ${isPositive?"positive":"negative"}`}>{icon}</span>;
 }
 /* ════════════════ APP ════════════════ */
 export default function App(){
@@ -278,7 +307,7 @@ export default function App(){
   const[email,setEmail]       =useState("");
   const[pw,setPw]             =useState("");
   const[sbOpen,setSbOpen]     =useState(false);      // mobile: sidebar slid in/out
-  const[sbCollapsed,setSbCollapsed]=useState(true);  // desktop: sidebar hidden/shown
+  const[sbCollapsed,setSbCollapsed]=useState(false); // desktop: full navigation is the default; users can collapse it to a rail
   const sidebarRef=useRef<HTMLDivElement>(null);
   const sidebarTouchRef=useRef<{y:number;scrollTop:number}|null>(null);
   const onSidebarKeyDown=(e:any)=>{
@@ -1414,13 +1443,13 @@ export default function App(){
             <div style={{fontSize:10,color:"var(--text3)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{user?.email}</div>
           </div>
           <div className="sitem" style={{margin:"1px 0",borderRadius:10}} onClick={()=>{nav("settings");setProfileOpen(false);}}>
-            <span className="sicon">⚙</span>Profile &amp; Settings
+            <span className="sicon"><AppIcon name="settings" size={16}/></span>Profile &amp; Settings
           </div>
           <div className="sitem" style={{margin:"1px 0",borderRadius:10}} onClick={()=>{nav("notifications");setProfileOpen(false);}}>
-            <span className="sicon">🔔</span>Notifications
+            <span className="sicon"><AppIcon name="notifications" size={16}/></span>Notifications
           </div>
           <div className="sitem" style={{margin:"1px 0",borderRadius:10,color:"var(--red)"}} onClick={()=>{setProfileOpen(false);doLogout();}}>
-            <span className="sicon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>
+            <span className="sicon"><ProductIcon name="logout" size={16}/></span>
             Log Out
           </div>
         </div>
@@ -1430,11 +1459,16 @@ export default function App(){
 
   /* ═══════════ LOGIN ═══════════ */
   if(authChecking||accountLoading) return(
-    <div className="app" style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-      <div style={{textAlign:"center"}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:10,marginBottom:14}}><WaveLogo size={38}/><span style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontWeight:800,fontSize:28,color:"var(--text)"}}>Wave</span></div>
-        <p style={{color:"var(--text3)",fontSize:14}}>{authChecking?"Restoring your session…":"Loading your account…"}</p>
+    <div className="app app-loading" role="status" aria-live="polite">
+      <div className="loading-aurora loading-aurora-a"/><div className="loading-aurora loading-aurora-b"/>
+      <div className="loading-stage">
+        <div className="loading-orbit loading-orbit-outer"><i/><i/><i/></div>
+        <div className="loading-orbit loading-orbit-inner"><i/><i/></div>
+        <div className="loading-mark"><WaveLogo size={62}/></div>
       </div>
+      <div className="loading-wordmark"><WaveLogo size={31}/><span>ave</span></div>
+      <p className="loading-copy"><span className="loading-status-dot"/>{authChecking?"Restoring your secure session…":"Preparing your market desk…"}</p>
+      <div className="loading-progress" aria-hidden="true"><i/></div>
     </div>
   );
   if(!user) return(
@@ -1942,8 +1976,8 @@ export default function App(){
           <div>
             <div className="slogo" style={{fontSize:21}}>Wave</div>
           </div>
-          <div className="sb-close" onClick={()=>{setSbOpen(false);setSbCollapsed(true);}} onKeyDown={e=>onActivate(e,()=>{setSbOpen(false);setSbCollapsed(true);})} title="Close sidebar" role="button" tabIndex={0} aria-label="Close sidebar">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          <div className="sb-close" onClick={()=>{setSbOpen(false);setSbCollapsed(true);}} onKeyDown={e=>onActivate(e,()=>{setSbOpen(false);setSbCollapsed(true);})} title="Collapse navigation" role="button" tabIndex={0} aria-label="Collapse navigation">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14.5 18-6-6 6-6"/><path d="m20 18-6-6 6-6"/></svg>
           </div>
         </div>
         <div className="ssec">Main</div>
@@ -1961,12 +1995,12 @@ export default function App(){
         {isAdmin&&<>
           <div className="ssec" style={{marginTop:18}}>Admin</div>
           <div className={`sitem ${page==="admin"?"active":""}`} onClick={()=>nav("admin")} onKeyDown={e=>onActivate(e,()=>nav("admin"))} role="button" tabIndex={0} aria-current={page==="admin"?"page":undefined} aria-label="Admin Center" title={sbCollapsed?"Admin Center":undefined}>
-            <span className="sicon">+</span><span className="slabel">Admin Center</span>
+            <span className="sicon"><AppIcon name="plus" size={17}/></span><span className="slabel">Admin Center</span>
           </div>
         </>}
         <div className="ssec" style={{marginTop:8}}>Account</div>
         <div className={`sitem ${page==="settings"?"active":""}`} onClick={()=>nav("settings")} onKeyDown={e=>onActivate(e,()=>nav("settings"))} role="button" tabIndex={0} aria-current={page==="settings"?"page":undefined} aria-label="Settings" title={sbCollapsed?"Settings":undefined}>
-          <span className="sicon">⚙</span><span className="slabel">Settings</span>
+          <span className="sicon"><AppIcon name="settings" size={17}/></span><span className="slabel">Settings</span>
         </div>
         <div className={`sitem ${page==="notifications"?"active":""}`} onClick={()=>nav("notifications")} onKeyDown={e=>onActivate(e,()=>nav("notifications"))} role="button" tabIndex={0} aria-current={page==="notifications"?"page":undefined} style={{position:"relative"}} aria-label="Notifications" title={sbCollapsed?"Notifications":undefined}>
           <span className="sicon">
@@ -2001,8 +2035,8 @@ export default function App(){
             </div>
             <WaveLogo size={24}/><div className="mlogo">Wave</div>
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <button type="button" className="mchip balance-chip" onClick={goToDeposit} title={`Cash balance: ${cur(port.cashBalance)}. Add funds.`} aria-label={`Cash balance: ${cur(port.cashBalance)}. Add funds.`}>{compactCur(port.cashBalance)}</button>
+          <div className="mobile-topbar-actions">
+            <button type="button" className="mchip balance-chip mobile-balance-chip" onClick={goToDeposit} title={`Total balance: ${cur(port.totalValue)}. Add funds.`} aria-label={`Total balance: ${cur(port.totalValue)}. Add funds.`}><span>Balance</span><strong>{compactCur(port.totalValue)}</strong></button>
             <ProfileMenu size={30} fontSize={12}/>
           </div>
         </div>
@@ -2011,10 +2045,11 @@ export default function App(){
         {mob&&(
           page==="dashboard"?(
             <div className="product-mobile-greeting">
-              <div style={{fontFamily:"'Plus Jakarta Sans',sans-serif",fontWeight:800,fontSize:20,color:"var(--text)"}}>
-                Good {new Date().getHours()<12?t("morning"):new Date().getHours()<17?t("afternoon"):t("evening")}, {user.name.split(" ")[0]} 👋
+              <div className="mobile-greeting-kicker">Market overview</div>
+              <div className="mobile-greeting-title">
+                Good {new Date().getHours()<12?t("morning"):new Date().getHours()<17?t("afternoon"):t("evening")}, {user.name.split(" ")[0]} <span className="greeting-sparkle"><ProductIcon name="sparkle" size={19}/></span>
               </div>
-              <div style={{fontSize:12,color:"var(--text3)",marginTop:4,fontWeight:500}}>
+              <div className="mobile-greeting-date">
                 {new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}
               </div>
             </div>
@@ -2031,14 +2066,15 @@ export default function App(){
         
         {/* Desktop topbar */}
 <div className="topbar product-topbar">
-  <div className="product-topbar-intro" style={{display:"flex",alignItems:"center",gap:14}}>
-    <div className="sb-open" style={{visibility:sbCollapsed?"visible":"hidden"}} onClick={()=>setSbCollapsed(false)} onKeyDown={e=>onActivate(e,()=>setSbCollapsed(false))} title="Open sidebar" role="button" tabIndex={0} aria-label="Open sidebar">
+  <div className="product-topbar-intro">
+    {sbCollapsed&&<button type="button" className="sb-open" onClick={()=>setSbCollapsed(false)} title="Expand navigation" aria-label="Expand navigation">
       <svg width="18" height="14" viewBox="0 0 22 16" fill="none"><rect y="0" width="22" height="2.5" rx="1.25" fill="currentColor"/><rect y="6.75" width="16" height="2.5" rx="1.25" fill="currentColor"/><rect y="13.5" width="22" height="2.5" rx="1.25" fill="currentColor"/></svg>
-    </div>
-    <div>
+    </button>}
+    <div className="product-greeting-block">
+      {page==="dashboard"&&<div className="greeting-kicker"><span/>Market overview</div>}
       <div className="ttl">
         {page==="dashboard"
-          ? `Good ${new Date().getHours()<12?t("morning"):new Date().getHours()<17?t("afternoon"):t("evening")}, ${user.name.split(" ")[0]} 👋`
+          ? <>Good {new Date().getHours()<12?t("morning"):new Date().getHours()<17?t("afternoon"):t("evening")}, <span>{user.name.split(" ")[0]}</span><i className="greeting-sparkle"><ProductIcon name="sparkle" size={23}/></i></>
           : page==="coin"
             ? `${COINS[selCoin]?.name||selCoin} (${selCoin})`
             : (LANG[appSettings.language]?.[page]||LABELS[page]||pageTitle[page])
@@ -2047,7 +2083,7 @@ export default function App(){
       <div className="tdate">{new Date().toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div>
     </div>
   </div>
-  <div className="product-topbar-actions" style={{display:"flex",alignItems:"center",gap:12}}>
+  <div className="product-topbar-actions">
     <button type="button" className="tchip balance-chip dashboard-total-balance" onClick={goToDeposit} title="Add funds or view your cash balance">
       <span>Total balance</span><strong>{cur(port.totalValue)}</strong>
     </button>
@@ -2091,16 +2127,16 @@ export default function App(){
                   {s.signed&&s.raw<0?"-":s.signed?"+":""}
                   <AnimatedStat value={Math.abs(s.raw)} format={mob?compactCur:cur}/>
                 </div>
-                <div className="stat-sub" style={{color:s.pos===true?"var(--green)":s.pos===false?"var(--red)":"var(--text3)"}}>{s.pos===true&&"▲ "}{s.s}</div>
+                <div className="stat-sub" style={{color:s.pos===true?"var(--green)":s.pos===false?"var(--red)":"var(--text3)"}}>{s.pos===true&&<ProductIcon name="trendUp" size={12}/>} {s.pos===false&&<ProductIcon name="trendDown" size={12}/>} {s.s}</div>
               </div>
             ))}
           </div>
 
           <div className="quick-actions dashboard-actions" style={{display:"flex",gap:10,flexWrap:"wrap",margin:"16px 0"}}>
-            <button className="btn btn-primary btn-sm" onClick={()=>{setTtype("buy");nav("trade");}} title="Buy crypto">+ Buy</button>
-            <button className="btn btn-ghost btn-sm" onClick={goToDeposit} title="Add funds to your cash balance">↓ Deposit</button>
-            <button className="btn btn-ghost btn-sm" onClick={()=>{setTtype("withdraw");nav("transactions");}} title="Withdraw cash">↑ Withdraw</button>
-            <button className="btn btn-ghost btn-sm" onClick={()=>nav("portfolio")} title="View full portfolio">▤ Portfolio</button>
+            <button className="btn btn-primary btn-sm" onClick={()=>{setTtype("buy");nav("trade");}} title="Buy crypto"><AppIcon name="plus" size={15}/>Buy</button>
+            <button className="btn btn-ghost btn-sm" onClick={goToDeposit} title="Add funds to your cash balance"><ProductIcon name="deposit" size={15}/>Deposit</button>
+            <button className="btn btn-ghost btn-sm" onClick={()=>{setTtype("withdraw");nav("transactions");}} title="Withdraw cash"><ProductIcon name="withdraw" size={15}/>Withdraw</button>
+            <button className="btn btn-ghost btn-sm" onClick={()=>nav("portfolio")} title="View full portfolio"><AppIcon name="portfolio" size={15}/>Portfolio</button>
           </div>
 
           <div className="crow dashboard-market-layout">
@@ -2110,7 +2146,7 @@ export default function App(){
                   <div style={{fontSize:12,color:"var(--text3)",fontWeight:500,marginBottom:4}}>{COINS[selCoin]?.name} / USD</div>
                   <div className="pbig">${lp.toLocaleString()}</div>
                   <div className="pchg" style={{color:(prices[selCoin]?.change24h||0)>=0?"var(--green)":"var(--red)"}}>
-                    {priceDir[selCoin]?"▲":"▼"} {Math.abs(prices[selCoin]?.change24h||0).toFixed(2)}% <span style={{color:"var(--text3)",fontSize:11}}>24h</span>
+                    <ProductIcon name={priceDir[selCoin]?"trendUp":"trendDown"} size={14}/> {Math.abs(prices[selCoin]?.change24h||0).toFixed(2)}% <span style={{color:"var(--text3)",fontSize:11}}>24h</span>
                   </div>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:8,alignItems:"flex-end"}}>
@@ -2134,7 +2170,7 @@ export default function App(){
             <div className="gcard dashboard-market-list" style={{padding:mob?"14px":"20px"}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:14}}>
                 <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,letterSpacing:".8px",textTransform:"uppercase"}}>Live Markets</div>
-                <button className="btn btn-ghost btn-sm" onClick={()=>setShowWatchlist(v=>!v)} style={{padding:"5px 9px",fontSize:10}}>{showWatchlist?"All markets":"★ Watchlist"}</button>
+                <button className="btn btn-ghost btn-sm" onClick={()=>setShowWatchlist(v=>!v)} style={{padding:"5px 9px",fontSize:10}}>{showWatchlist?"All markets":<><ProductIcon name="watch" size={13}/>Watchlist</>}</button>
               </div>
               <div className="mlist">
                 {(showWatchlist?watchlist:Object.keys(COINS)).map(s=>{
@@ -2143,7 +2179,7 @@ export default function App(){
                     <div key={s} className="mitem" onClick={()=>openCoin(s)}>
                       <div style={{display:"flex",alignItems:"center",gap:10}}><CoinIcon symbol={s} size={32}/><div><div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{mob?s:m.name}</div><div style={{fontSize:10,color:"var(--text3)",fontWeight:500}}>{s}</div></div></div>
                       <MarketSparkline data={ld} positive={pos}/>
-                      <button aria-label={`${watchlist.includes(s)?"Remove":"Add"} ${s} ${watchlist.includes(s)?"from":"to"} watchlist`} onClick={e=>{e.stopPropagation();toggleWatch(s);}} style={{border:"none",background:"transparent",cursor:"pointer",fontSize:17,padding:"4px",color:watchlist.includes(s)?"#F59E0B":"var(--text3)"}}>{watchlist.includes(s)?"★":"☆"}</button>
+                      <button className={`market-watch-toggle ${watchlist.includes(s)?"active":""}`} aria-label={`${watchlist.includes(s)?"Remove":"Add"} ${s} ${watchlist.includes(s)?"from":"to"} watchlist`} onClick={e=>{e.stopPropagation();toggleWatch(s);}}><ProductIcon name="watch" size={15}/></button>
                       <div style={{textAlign:"right"}}><div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>${lv.toLocaleString()}</div><div style={{fontSize:10,fontWeight:700,color:pos?"var(--green)":"var(--red)",marginTop:2}}>{pos?"+":""}{(prices[s]?.change24h||0).toFixed(2)}%</div></div>
                     </div>
                   );
@@ -2175,17 +2211,15 @@ export default function App(){
           <div className="dashboard-bottom-grid">
           <div className="gcard dashboard-activity-card" style={{marginTop:20}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
-              <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)"}}>⚡ Recent Activity</div>
-              <button className="btn btn-ghost btn-sm" style={{padding:"5px 9px",fontSize:10}} onClick={()=>nav("notifications")}>View all →</button>
+              <div className="panel-eyebrow"><ProductIcon name="activity" size={15}/>Recent Activity</div>
+              <button className="btn btn-ghost btn-sm panel-link" onClick={()=>nav("notifications")}>View all <ProductIcon name="arrowRight" size={13}/></button>
             </div>
             {notifLoading?<div style={{fontSize:12,color:"var(--text3)"}}>Loading…</div>
             :activities.length===0?<div style={{fontSize:12,color:"var(--text3)"}}>No activity yet — your trades and transfers will show up here.</div>
             :activities.slice(0,5).map((tx,i)=>(
               <div key={i} className="setting-row" style={{borderBottom:i<Math.min(4,activities.length-1)?"1px solid var(--border)":"none",paddingTop:12,paddingBottom:12}}>
                 <div style={{display:"flex",alignItems:"center",gap:10}}>
-                  <div style={{width:34,height:34,borderRadius:"50%",background:tx.type==="buy"||tx.type==="deposit"?"rgba(16,185,129,.15)":"rgba(239,68,68,.1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>
-                    {tx.type==="buy"?"🟢":tx.type==="sell"?"🔴":tx.type==="deposit"?"💵":"⚡"}
-                  </div>
+                  <ActivityGlyph type={tx.type}/>
                   <div>
                     <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{tx.type==="investment"?`${tx.label} activated`:`${tx.type.charAt(0).toUpperCase()+tx.type.slice(1)} ${tx.label}`}</div>
                     <div style={{fontSize:11,color:"var(--text3)"}}>{new Date(tx.created_at).toLocaleString()}</div>
@@ -2204,16 +2238,16 @@ export default function App(){
             const topPct=topHolding&&port.totalPortfolioValue>0?(topHolding.value/port.totalPortfolioValue*100):0;
             const cashPct=port.totalValue>0?(port.cashBalance/port.totalValue*100):0;
             const insights=[
-              topHolding?{icon:"🏆",text:<>Your largest position is <b>{topHolding.symbol}</b>, {topPct.toFixed(0)}% of your portfolio.</>}:{icon:"👋",text:<>You don't hold any assets yet — head to Trade to make your first buy.</>},
-              {icon:dayPnl>=0?"📈":"📉",text:<>Your holdings are <b style={{color:dayPnl>=0?"var(--green)":"var(--red)"}}>{dayPnl>=0?"up":"down"} {Math.abs(dayPnlPct).toFixed(2)}%</b> over the last 24h.</>},
-              cashPct>40?{icon:"💰",text:<><b>{cashPct.toFixed(0)}%</b> of your account is sitting in cash — consider putting it to work.</>}:{icon:"⚖️",text:<>{cashPct.toFixed(0)}% of your account is in cash — the rest is invested.</>},
+              topHolding?{icon:<AppIcon name="portfolio" size={17}/>,tone:"violet",text:<>Your largest position is <b>{topHolding.symbol}</b>, {topPct.toFixed(0)}% of your portfolio.</>}:{icon:<ProductIcon name="sparkle" size={17}/>,tone:"violet",text:<>You don't hold any assets yet — head to Trade to make your first buy.</>},
+              {icon:<ProductIcon name={dayPnl>=0?"trendUp":"trendDown"} size={17}/>,tone:dayPnl>=0?"green":"red",text:<>Your holdings are <b style={{color:dayPnl>=0?"var(--green)":"var(--red)"}}>{dayPnl>=0?"up":"down"} {Math.abs(dayPnlPct).toFixed(2)}%</b> over the last 24h.</>},
+              {icon:<ProductIcon name="wallet" size={17}/>,tone:"cyan",text:cashPct>40?<><b>{cashPct.toFixed(0)}%</b> of your account is sitting in cash — consider putting it to work.</>:<>{cashPct.toFixed(0)}% of your account is in cash — the rest is invested.</>},
             ];
             return(
               <div className="gcard dashboard-insights-card" style={{marginTop:20}}>
-                <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)",marginBottom:16}}>💡 Insights</div>
+                <div className="panel-eyebrow"><ProductIcon name="sparkle" size={15}/>Insights</div>
                 {insights.map((ins,i)=>(
                   <div key={i} style={{display:"flex",alignItems:"flex-start",gap:12,padding:"10px 0",borderBottom:i<insights.length-1?"1px solid var(--border)":"none"}}>
-                    <span style={{fontSize:18,flexShrink:0}}>{ins.icon}</span>
+                    <span className={`insight-glyph ${ins.tone}`}>{ins.icon}</span>
                     <span style={{fontSize:13,color:"var(--text2)",lineHeight:1.5}}>{ins.text}</span>
                   </div>
                 ))}
@@ -2223,8 +2257,8 @@ export default function App(){
 
           <div className="gcard dashboard-notifications-card" style={{marginTop:20}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
-              <div style={{fontSize:11,fontWeight:700,letterSpacing:".8px",textTransform:"uppercase",color:"var(--text3)"}}>🔔 Notifications</div>
-              <button className="btn btn-ghost btn-sm" style={{padding:"5px 9px",fontSize:10}} onClick={()=>nav("notifications")}>View all →</button>
+              <div className="panel-eyebrow"><AppIcon name="notifications" size={15}/>Notifications</div>
+              <button className="btn btn-ghost btn-sm panel-link" onClick={()=>nav("notifications")}>View all <ProductIcon name="arrowRight" size={13}/></button>
             </div>
             {notifLoading?<div style={{fontSize:12,color:"var(--text3)"}}>Loading…</div>
             :siteUpdates.length===0?<div style={{fontSize:12,color:"var(--text3)"}}>No notifications right now.</div>
