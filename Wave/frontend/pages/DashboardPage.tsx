@@ -8,7 +8,7 @@ import { ErrorBoundary } from "../components/ErrorBoundary";
 import { AppIcon, CoinIcon } from "../components/PlatformPrimitives";
 import { AnimatedStat, MarketSparkline, TerminalChart } from "../components/PlatformCharts";
 import { ActivityGlyph, ProductIcon } from "../components/ProductIcons";
-import { PanelLoading } from "../components/PlatformFeedback";
+import { EmptyState, PanelLoading } from "../components/PlatformFeedback";
 
 type DashboardPageProps={
   mobile:boolean;
@@ -107,7 +107,7 @@ export function DashboardPage({
               <div style={{textAlign:"right"}}><div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>${value.toLocaleString()}</div><div style={{fontSize:10,fontWeight:700,color:positive?"var(--green)":"var(--red)",marginTop:2}}>{positive?"+":""}{(prices[symbol]?.change24h||0).toFixed(2)}%</div></div>
             </div>;
           })}
-          {showWatchlist&&watchlist.length===0&&<div style={{padding:"18px 0",textAlign:"center",fontSize:12,color:"var(--text3)"}}>Star a market to add it to your watchlist.</div>}
+          {showWatchlist&&watchlist.length===0&&<EmptyState compact title="Your watchlist is empty" description="Star a market to keep it close."/>}
         </div>
       </div>
     </div>
@@ -134,7 +134,7 @@ export function DashboardPage({
     <div className="dashboard-bottom-grid">
       <div className="gcard dashboard-activity-card" style={{marginTop:20}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}><div className="panel-eyebrow"><ProductIcon name="activity" size={15}/>Recent Activity</div><button className="btn btn-ghost btn-sm panel-link" onClick={()=>nav("notifications")}>View all <ProductIcon name="arrowRight" size={13}/></button></div>
-        {notifLoading?<PanelLoading rows={4} label="Loading recent activity"/>:activities.length===0?<div style={{fontSize:12,color:"var(--text3)"}}>No activity yet — your trades and transfers will show up here.</div>:activities.slice(0,5).map((activity,index)=><div key={index} className="setting-row" style={{borderBottom:index<Math.min(4,activities.length-1)?"1px solid var(--border)":"none",paddingTop:12,paddingBottom:12}}>
+        {notifLoading?<PanelLoading rows={4} label="Loading recent activity"/>:activities.length===0?<EmptyState compact title="No activity yet" description="Trades and transfers will appear here."/>:activities.slice(0,5).map((activity,index)=><div key={index} className="setting-row" style={{borderBottom:index<Math.min(4,activities.length-1)?"1px solid var(--border)":"none",paddingTop:12,paddingBottom:12}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}><ActivityGlyph type={activity.type}/><div><div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{activity.type==="investment"?`${activity.label} activated`:`${activity.type.charAt(0).toUpperCase()+activity.type.slice(1)} ${activity.label}`}</div><div style={{fontSize:11,color:"var(--text3)"}}>{new Date(activity.created_at).toLocaleString()}</div></div></div>
           <div style={{fontSize:13,fontWeight:700,color:activity.type==="buy"||activity.type==="withdraw"?"var(--red)":"var(--green)"}}>{activity.type==="buy"||activity.type==="withdraw"||activity.type==="investment"?"-":"+"}${Number(activity.amount||0).toLocaleString()}</div>
         </div>)}
@@ -144,7 +144,7 @@ export function DashboardPage({
 
       <div className="gcard dashboard-notifications-card" style={{marginTop:20}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}><div className="panel-eyebrow"><AppIcon name="notifications" size={15}/>Notifications</div><button className="btn btn-ghost btn-sm panel-link" onClick={()=>nav("notifications")}>View all <ProductIcon name="arrowRight" size={13}/></button></div>
-        {notifLoading?<PanelLoading rows={3} label="Loading notifications"/>:siteUpdates.length===0?<div style={{fontSize:12,color:"var(--text3)"}}>No notifications right now.</div>:siteUpdates.slice(0,3).map((update,index)=><div key={index} style={{padding:"10px 0",borderBottom:index<Math.min(2,siteUpdates.length-1)?"1px solid var(--border)":"none"}}><div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{update.title}</div><div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>{update.body}</div></div>)}
+        {notifLoading?<PanelLoading rows={3} label="Loading notifications"/>:siteUpdates.length===0?<EmptyState compact title="You're all caught up" description="New account notices will appear here."/>:siteUpdates.slice(0,3).map((update,index)=><div key={index} style={{padding:"10px 0",borderBottom:index<Math.min(2,siteUpdates.length-1)?"1px solid var(--border)":"none"}}><div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{update.title}</div><div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>{update.body}</div></div>)}
       </div>
     </div>
   </div>;

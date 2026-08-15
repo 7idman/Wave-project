@@ -1,4 +1,4 @@
-import { PanelLoading } from "../components/PlatformFeedback";
+import { EmptyState, PanelLoading } from "../components/PlatformFeedback";
 
 export type ReferralData={
   code:string|null;
@@ -38,7 +38,7 @@ export function ReferralsPage({data:referralData,loading:referralLoading,mobile:
     <div className="gcard" style={{padding:0,overflow:"hidden"}}>
       <div style={{padding:mob?"14px 16px 12px":"22px 24px 16px",borderBottom:"1px solid var(--border)"}}><div className="stitle" style={{marginBottom:0}}>Your Referrals</div></div>
       {referralLoading?<PanelLoading rows={3} label="Loading referrals"/>
-        :!referralData?.referrals.length?<div style={{padding:24,color:"var(--text3)",fontSize:13}}>No referrals yet — share your code to start earning.</div>
+        :!referralData?.referrals.length?<EmptyState title="No referrals yet" description="Share your code to start earning rewards together."/>
         :<div style={{padding:mob?"8px 16px 16px":"8px 24px 20px"}}>
           {referralData.referrals.map(referral=><div key={referral.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 0",borderBottom:"1px solid var(--border)"}}>
             <div><div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{referral.refereeName}</div><div style={{fontSize:11,color:"var(--text3)"}}>Joined {new Date(referral.createdAt).toLocaleDateString()}</div></div>

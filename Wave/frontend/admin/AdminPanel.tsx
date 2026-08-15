@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import { Modal } from "../components/PlatformPrimitives";
+import { PanelLoading } from "../components/PlatformFeedback";
 import type { User } from "../types";
 
 type Tab="requests"|"members"|"roles"|"violations"|"updates"|"search"|"strategies"|"managed"|"promotions"|"security"|"activity";
@@ -193,7 +194,7 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
 
   if(error)return <div className="gcard admin-denied"><div className="stitle">Admin Center</div><p className="admin-note">{error}</p></div>;
   return <div>
-    <div className="topbar">
+    <div className="admin-heading">
       <div>
         <div className="ttl">Admin Center</div>
         <div className="tdate">Requests, roles, admins, violations, and platform updates.</div>
@@ -208,7 +209,7 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
 
     <div className="admin-tabs">{(["requests","members","roles","violations","updates","search","strategies","managed","promotions","security","activity"] as Tab[]).map(x=><button key={x} className={`chip ${tab===x?"active":""}`} onClick={()=>setTab(x)}>{x}</button>)}</div>
 
-    {loading?<div className="gcard">Loading admin data...</div>:<>
+    {loading?<div className="gcard"><PanelLoading rows={5} label="Loading admin data"/></div>:<>
       {tab==="requests"&&<>
         <div className="admin-tabs" style={{marginBottom:14}}>
           <button className={`chip ${reqView==="pending"?"active":""}`} onClick={()=>setReqView("pending")}>Pending ({pendingRequests.length})</button>
@@ -270,7 +271,7 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
 
       {tab==="strategies"&&<div className="admin-grid">
         <div className="gcard admin-table-wrap">
-          {strategiesLoading?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>Loading…</div>:
+          {strategiesLoading?<PanelLoading rows={4} label="Loading strategies"/>:
           adminStrategies.length===0?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>No strategies yet — create one.</div>:
           <table className="admin-table"><thead><tr><th>Strategy</th><th>Fee</th><th>Account value</th><th>Subscribers</th><th></th></tr></thead><tbody>
             {adminStrategies.map(s=><tr key={s.id}>
@@ -298,7 +299,7 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
 
       {tab==="managed"&&<div className="admin-grid">
         <div className="gcard admin-table-wrap">
-          {managedTabLoading?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>Loading…</div>:
+          {managedTabLoading?<PanelLoading rows={4} label="Loading managed accounts"/>:
           adminManaged.length===0?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>No managed accounts yet — create one for a user.</div>:
           <table className="admin-table"><thead><tr><th>User</th><th>Account value</th><th></th></tr></thead><tbody>
             {adminManaged.map(m=><tr key={m.portfolioId}>
@@ -326,7 +327,7 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
 
       {tab==="promotions"&&<div className="admin-grid">
         <div className="gcard admin-table-wrap">
-          {promotionsLoading?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>Loading…</div>:
+          {promotionsLoading?<PanelLoading rows={4} label="Loading promotions"/>:
           promotions.length===0?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>No promotions yet.</div>:
           <table className="admin-table"><thead><tr><th>Promotion</th><th>Terms</th><th>Window</th><th></th></tr></thead><tbody>
             {promotions.map(p=>{const active=new Date(p.end_at)>new Date()&&new Date(p.start_at)<=new Date();return(
@@ -367,7 +368,7 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
               {["LOGIN_SUCCESS","LOGIN_FAILED","LOGIN_BLOCKED","TURNSTILE_FAILED","SIGNUP_SUCCESS","SIGNUP_BLOCKED","NEW_DEVICE_LOGIN","RISK_ASSESSED","WITHDRAWAL_COMPLETED","WITHDRAWAL_BLOCKED","PASSWORD_CHANGED","TWOFA_DISABLED","PHONE_VERIFIED","DEVICE_TRUST_REVOKED"].map(t=><option key={t} value={t}>{t}</option>)}
             </select>
           </div>
-          {securityLoading?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>Loading…</div>:
+          {securityLoading?<PanelLoading rows={4} label="Loading security events"/>:
           securityEvents.length===0?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>No events yet.</div>:
           <table className="admin-table"><thead><tr><th>Type</th><th>User</th><th>IP</th><th>Details</th><th>When</th></tr></thead><tbody>
             {securityEvents.map(ev=>(
@@ -383,7 +384,7 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
         </div>
         <div className="gcard admin-table-wrap">
           <div className="stitle">Frontend Crash Reports</div>
-          {clientErrorsLoading?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>Loading…</div>:
+          {clientErrorsLoading?<PanelLoading rows={4} label="Loading client errors"/>:
           clientErrors.length===0?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>No crashes reported — good sign.</div>:
           <table className="admin-table"><thead><tr><th>Message</th><th>Boundary</th><th>User</th><th>When</th></tr></thead><tbody>
             {clientErrors.map(ce=>(
@@ -401,7 +402,7 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
       {tab==="activity"&&<div className="admin-grid">
         <div className="gcard admin-table-wrap">
           <div className="stitle">Referrals</div>
-          {activityLoading?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>Loading…</div>:
+          {activityLoading?<PanelLoading rows={4} label="Loading referral activity"/>:
           adminReferrals.length===0?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>No referrals yet.</div>:
           <table className="admin-table"><thead><tr><th>Referrer</th><th>Referee</th><th>Status</th><th>When</th></tr></thead><tbody>
             {adminReferrals.map(r=>(
@@ -416,7 +417,7 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
         </div>
         <div className="gcard admin-table-wrap">
           <div className="stitle">Auto-Invest Plans</div>
-          {activityLoading?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>Loading…</div>:
+          {activityLoading?<PanelLoading rows={4} label="Loading auto-invest activity"/>:
           adminAutoInvest.length===0?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>No plans yet.</div>:
           <table className="admin-table"><thead><tr><th>User</th><th>Plan</th><th>Status</th><th>Next run</th></tr></thead><tbody>
             {adminAutoInvest.map(p=>(
@@ -465,7 +466,7 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
     </Modal>}
 
     {tradesView&&<Modal open={!!tradesView} onClose={()=>setTradesView(null)} title={`${tradesView.name} — trade history`}>
-      {tradesLoading?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>Loading…</div>:
+      {tradesLoading?<PanelLoading rows={4} label="Loading strategy trades"/>:
       strategyTrades.length===0?<div className="admin-note" style={{padding:"18px 0",textAlign:"center"}}>No trades logged yet.</div>:
       <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Symbol</th><th>Side</th><th>Amount</th><th>Price</th><th>When</th></tr></thead><tbody>
         {strategyTrades.map(t=><tr key={t.id}>

@@ -1,6 +1,6 @@
 import type { Activity, AppSettings, LoginEvent, SiteUpdate } from "../types/platform";
 import { AppIcon, Toggle } from "../components/PlatformPrimitives";
-import { PanelLoading } from "../components/PlatformFeedback";
+import { EmptyState, PanelLoading } from "../components/PlatformFeedback";
 import { ActivityGlyph, ProductIcon } from "../components/ProductIcons";
 
 type NotificationsPageProps={
@@ -58,7 +58,7 @@ export function NotificationsPage({
 
     <div className="gcard" style={{marginBottom:14}}>
       <div className="panel-eyebrow" style={{marginBottom:16}}><ProductIcon name="sparkle" size={15}/>Site Updates</div>
-      {notificationLoading?<PanelLoading rows={3} label="Loading site updates"/>:siteUpdates.length===0?<div style={{fontSize:12,color:"var(--text3)"}}>No updates yet — you'll see new Wave features and announcements here.</div>:siteUpdates.map((update,index)=><div key={update.id} className="setting-row" style={{alignItems:"flex-start",borderBottom:index<siteUpdates.length-1?"1px solid var(--border)":"none",display:"block",paddingTop:12,paddingBottom:12}}>
+      {notificationLoading?<PanelLoading rows={3} label="Loading site updates"/>:siteUpdates.length===0?<EmptyState title="No platform updates" description="Product news and announcements will appear here."/>:siteUpdates.map((update,index)=><div key={update.id} className="setting-row" style={{alignItems:"flex-start",borderBottom:index<siteUpdates.length-1?"1px solid var(--border)":"none",display:"block",paddingTop:12,paddingBottom:12}}>
         <div style={{fontSize:13,fontWeight:700,color:"var(--text)",marginBottom:2}}>{update.title}</div>
         <div style={{fontSize:12,color:"var(--text2)",lineHeight:1.5,marginBottom:4}}>{update.body}</div>
         <div style={{fontSize:11,color:"var(--text3)"}}>{new Date(update.created_at).toLocaleString()}</div>
@@ -67,7 +67,7 @@ export function NotificationsPage({
 
     <div className="gcard" style={{marginBottom:14}}>
       <div className="panel-eyebrow" style={{marginBottom:16}}><ProductIcon name="activity" size={15}/>Login Activity</div>
-      {notificationLoading?<PanelLoading rows={3} label="Loading login activity"/>:loginHistory.length===0?<div style={{fontSize:12,color:"var(--text3)"}}>No login history yet — sign-ins across your devices will appear here.</div>:loginHistory.map((session,index)=><div key={session.id} className="setting-row" style={{borderBottom:index<loginHistory.length-1?"1px solid var(--border)":"none",paddingTop:12,paddingBottom:12}}>
+      {notificationLoading?<PanelLoading rows={3} label="Loading login activity"/>:loginHistory.length===0?<EmptyState title="No login history" description="Sign-ins across your devices will appear here."/>:loginHistory.map((session,index)=><div key={session.id} className="setting-row" style={{borderBottom:index<loginHistory.length-1?"1px solid var(--border)":"none",paddingTop:12,paddingBottom:12}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           <div style={{width:34,height:34,borderRadius:"50%",background:"rgba(99,102,241,.12)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{/\bmobile\b/i.test(session.device)?"📱":"💻"}</div>
           <div>

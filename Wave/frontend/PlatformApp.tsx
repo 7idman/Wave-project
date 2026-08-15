@@ -1,6 +1,7 @@
 import React, { Suspense, lazy, useState, useEffect, useCallback, useRef } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import "./styles/platform.css";
+import "./styles/authenticated.css";
 import { api } from "./api/client";
 import type { User, Price, Portfolio, Tx, Strategy, CopierPortfolio, ManagedPortfolio, TierInfo, BalancePoint, WalletAnalytics } from "./types";
 import type { AppSettings, SiteUpdate, LoginEvent, Activity, ChartPt } from "./types/platform";
@@ -2109,7 +2110,7 @@ export default function App(){
                   <div className="trow"><span className="trl">Fee (0.1%)</span><span className="trv">${tfee}</span></div>
                   <div className="trow"><span className="trl">{ttype==="buy"?"Total Cost":"You Receive"}</span><span className="trt">${ttot}</span></div>
                 </div>
-                <button className="btn btn-primary btn-lg" style={{width:"100%",background:ttype==="buy"?"linear-gradient(135deg,#10B981,#059669)":"linear-gradient(135deg,#EF4444,#DC2626)",boxShadow:ttype==="buy"?"0 4px 20px rgba(16,185,129,.35)":"0 4px 20px rgba(239,68,68,.35)"}} onClick={doTrade} disabled={loading}>
+                <button className={`btn btn-primary btn-lg ${ttype==="buy"?"btn-positive":"btn-negative"}`} style={{width:"100%"}} onClick={doTrade} disabled={loading}>
                   {loading?<BusyText>Processing…</BusyText>:`${ttype==="buy"?"Buy":"Sell"} ${tcoin}`}
                 </button>
                 <div className="tbal">Available cash: <span>{cur(port.cashBalance)}</span></div>
@@ -2208,7 +2209,7 @@ export default function App(){
                   <div className="trow"><span className="trl">Price</span><span className="trv">{cur(prices[selStock]?.price||0)}</span></div>
                   <div className="trow"><span className="trl">{stockSide==="buy"?"Total Cost":"You Receive"}</span><span className="trt">{cur((parseFloat(stockAmt)||0)*(prices[selStock]?.price||0))}</span></div>
                 </div>
-                <button className="btn btn-primary btn-lg" style={{width:"100%",background:stockSide==="buy"?"linear-gradient(135deg,#10B981,#059669)":"linear-gradient(135deg,#EF4444,#DC2626)"}} onClick={doStockTrade} disabled={loading||!prices[selStock]}>
+                <button className={`btn btn-primary btn-lg ${stockSide==="buy"?"btn-positive":"btn-negative"}`} style={{width:"100%"}} onClick={doStockTrade} disabled={loading||!prices[selStock]}>
                   {loading?<BusyText>Processing…</BusyText>:`${stockSide==="buy"?"Buy":"Sell"} ${selStock}`}
                 </button>
                 <div className="tbal">Available cash: <span>{cur(port.cashBalance)}</span></div>
@@ -2394,7 +2395,7 @@ export default function App(){
                     <div className="trow"><span className="trl">You'll be charged</span><span className="trt">${tamt?(parseFloat(tamt)*1.005).toFixed(2):"0.00"}</span></div>
                   </div>}
                   {ttype==="withdraw"&&<Turnstile key={withdrawTurnstileKey} onVerify={setWithdrawTurnstileToken} onError={()=>setWithdrawTurnstileToken("")}/>}
-                  <button className="btn btn-primary btn-lg" style={{width:"100%",background:ttype==="deposit"?"linear-gradient(135deg,#10B981,#059669)":"linear-gradient(135deg,#EF4444,#DC2626)"}} onClick={doTrade} disabled={loading}>
+                  <button className={`btn btn-primary btn-lg ${ttype==="deposit"?"btn-positive":"btn-negative"}`} style={{width:"100%"}} onClick={doTrade} disabled={loading}>
                     {loading?<BusyText>Processing…</BusyText>:`${ttype==="deposit"?"Deposit":"Withdraw"}`}
                   </button>
                   <div className="tbal">Available cash: <span>{cur(port.cashBalance)}</span></div>
@@ -2850,7 +2851,7 @@ export default function App(){
 
       {/* Toast */}
       {toast&&(
-        <div style={{position:"fixed",bottom:mob?"calc(96px + env(safe-area-inset-bottom,16px))":"24px",right:mob?"12px":"24px",left:mob?"12px":"auto",maxWidth:mob?"none":"380px",padding:"13px 20px",borderRadius:100,background:toast.ok===false?"rgba(239,68,68,.92)":"rgba(16,185,129,.92)",color:"#fff",fontSize:13,fontWeight:700,zIndex:1001,display:"flex",alignItems:"center",gap:9,backdropFilter:"blur(12px)",boxShadow:"0 8px 30px rgba(0,0,0,.3)"}}>
+        <div role="status" aria-live="polite" className={`toast ${toast.ok===false?"toast-error":"toast-success"}`} style={{position:"fixed",bottom:mob?"calc(96px + env(safe-area-inset-bottom,16px))":"24px",right:mob?"12px":"24px",left:mob?"12px":"auto",maxWidth:mob?"none":"380px",padding:"13px 20px",zIndex:1001,display:"flex",alignItems:"center",gap:9,backdropFilter:"blur(12px)"}}>
           <span>{toast.icon}</span>{toast.msg}
         </div>
       )}

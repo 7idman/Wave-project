@@ -1,6 +1,7 @@
 import type { Tx } from "../types";
 import { COINS } from "../data/market";
 import { CoinIcon } from "../components/PlatformPrimitives";
+import { EmptyState } from "../components/PlatformFeedback";
 
 function statusBadge(status:string){
   if(status==="completed")return{cls:"badge-green",icon:"✓"};
@@ -14,6 +15,7 @@ export function HistoryPage({transactions:txs,mobile:mob}:{transactions:Tx[];mob
       <div className="stitle" style={{marginBottom:0}}>All Transactions</div>
       <span style={{fontSize:11,color:"var(--text3)",fontWeight:600}}>{txs.length} total</span>
     </div>
+    {txs.length===0?<EmptyState title="No transactions yet" description="Your completed trades and transfers will be recorded here."/>:<>
     <div className="txwrap">
       <table className="txt">
         <thead><tr><th>Type</th><th>Asset</th><th>Amount</th><th>Price</th><th>Total</th><th>Date</th><th>Status</th></tr></thead>
@@ -48,5 +50,6 @@ export function HistoryPage({transactions:txs,mobile:mob}:{transactions:Tx[];mob
         </div>
       </div>)}
     </div>
+    </>}
   </div>;
 }
