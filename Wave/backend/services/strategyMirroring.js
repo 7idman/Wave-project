@@ -8,6 +8,8 @@
  */
 
 const { queryAll, queryOne, withTransaction } = require("../db");
+const { runWithSchedulerLease } = require("./schedulerLease");
+const { dollarsFromCents, roundMoneyToCents } = require("../utils/money");
 
 const MAX_ATTEMPTS = 5;
 const STALE_CLAIM_MINUTES = 5;
@@ -106,16 +108,16 @@ async function applyClaimedJob(jobId) {
     }
 
     const value = await tx.queryOne(
-      `SELECT p.cash_balance AS cash_balance,
+      `SELECT p.cash_balance_cents AS cash_balance_cents,
               COALESCE(SUM(ph.amount * pc.price), 0) AS holdings_value
        FROM portfolios p
        LEFT JOIN portfolio_holdings ph ON ph.portfolio_id = p.id
        LEFT JOIN price_cache pc ON pc.symbol = ph.symbol
        WHERE p.id = ?
-       GROUP BY p.id, p.cash_balance`,
+       GROUP BY p.id, p.cash_balance_cents`,
       [job.portfolio_id]
     );
-    const totalValue = Number(value?.cash_balance || 0) + Number(value?.holdings_value || 0);
+    const totalValue = dollarsFromCents(Number(value?.cash_balance_cents || 0)) + Number(value?.holdings_value || 0);
     const price = Number(job.price);
     const proportion = Number(job.proportion);
     if (!Number.isFinite(totalValue) || totalValue <= 0 || !Number.isFinite(price) || price <= 0 || !Number.isFinite(proportion) || proportion <= 0) {
@@ -124,7 +126,8 @@ async function applyClaimedJob(jobId) {
       return { jobId, portfolioId: job.portfolio_id, status: "skipped", reason };
     }
 
-    const mirroredDollar = Number((totalValue * proportion).toFixed(8));
+    const mirroredCents = roundMoneyToCents(totalValue * proportion);
+    const mirroredDollar = dollarsFromCents(mirroredCents);
     const mirroredQty = Number((mirroredDollar / price).toFixed(8));
     if (mirroredDollar <= 0 || mirroredQty <= 0) {
       const reason = "Mirror amount rounds to zero";
@@ -134,8 +137,8 @@ async function applyClaimedJob(jobId) {
 
     if (job.side === "buy") {
       const deduction = await tx.execute(
-        "UPDATE portfolios SET cash_balance = cash_balance - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance >= ?",
-        [mirroredDollar, job.portfolio_id, mirroredDollar]
+        "UPDATE portfolios SET cash_balance_cents = cash_balance_cents - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance_cents >= ?",
+        [mirroredCents, job.portfolio_id, mirroredCents]
       );
       if (deduction.rowsAffected === 0) {
         const reason = "Insufficient cash";
@@ -160,8 +163,8 @@ async function applyClaimedJob(jobId) {
         return { jobId, portfolioId: job.portfolio_id, status: "skipped", reason };
       }
       await tx.execute(
-        "UPDATE portfolios SET cash_balance = cash_balance + ?, updated_at = datetime('now') WHERE id = ?",
-        [mirroredDollar, job.portfolio_id]
+        "UPDATE portfolios SET cash_balance_cents = cash_balance_cents + ?, updated_at = datetime('now') WHERE id = ?",
+        [mirroredCents, job.portfolio_id]
       );
     }
 
@@ -341,9 +344,14 @@ async function listStrategyMirrorJobs({ status = null, limit = 100 } = {}) {
 }
 
 function startStrategyMirrorSchedule(intervalMs = 30 * 1000) {
-  processPendingStrategyMirrorJobs().catch(error => console.error("Strategy mirror recovery failed:", error.message));
+  const run = () => runWithSchedulerLease(
+    "strategy-mirror-recovery",
+    intervalMs,
+    processPendingStrategyMirrorJobs
+  );
+  run().catch(error => console.error("Strategy mirror recovery failed:", error.message));
   const handle = setInterval(() => {
-    processPendingStrategyMirrorJobs().catch(error => console.error("Strategy mirror recovery failed:", error.message));
+    run().catch(error => console.error("Strategy mirror recovery failed:", error.message));
   }, intervalMs);
   return handle;
 }

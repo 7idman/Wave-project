@@ -8,6 +8,7 @@ const router = require("express").Router();
 const crypto = require("crypto");
 const { queryOne, queryAll, withTransaction } = require("../db");
 const { valuePortfolio } = require("../services/portfolioValuation");
+const { dollarsFromCents } = require("../utils/money");
 
 function generateReferenceId() {
   return "TRF-" + crypto.randomBytes(6).toString("hex").toUpperCase();
@@ -43,10 +44,10 @@ router.get("/my", async (req, res) => {
     for (const row of rows) {
       const value = await valuePortfolio(row.portfolio_id);
       const contributedRow = await queryOne(
-        "SELECT COALESCE(SUM(amount),0) AS total FROM internal_transfers WHERE portfolio_id = ? AND direction = 'to_portfolio'",
+        "SELECT COALESCE(SUM(amount_cents),0) AS total FROM internal_transfers WHERE portfolio_id = ? AND direction = 'to_portfolio'",
         [row.portfolio_id]
       );
-      const contributed = contributedRow.total;
+      const contributed = dollarsFromCents(Number(contributedRow.total));
       const trades = await queryAll(
         `SELECT st.symbol, st.side, stm.mirrored_amount, stm.mirrored_price, stm.created_at
          FROM strategy_trade_mirrors stm JOIN strategy_trades st ON st.id = stm.strategy_trade_id
@@ -89,7 +90,7 @@ router.post("/:id/subscribe", async (req, res) => {
     const referenceId = generateReferenceId();
     const outcome = await withTransaction(async tx => {
       const strategy = await tx.queryOne(
-        "SELECT id, name, fee, status FROM strategies WHERE id = ?",
+        "SELECT id, name, fee, fee_cents, status FROM strategies WHERE id = ?",
         [strategyId]
       );
       if (!strategy) return { error: "Strategy not found", status: 404 };
@@ -104,27 +105,27 @@ router.post("/:id/subscribe", async (req, res) => {
       if (existing) return { error: "You're already connected to this strategy", status: 409 };
 
       const deduction = await tx.execute(
-        "UPDATE users SET cash_balance = cash_balance - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance >= ?",
-        [strategy.fee, userId, strategy.fee]
+        "UPDATE users SET cash_balance_cents = cash_balance_cents - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance_cents >= ?",
+        [strategy.fee_cents, userId, strategy.fee_cents]
       );
       if (deduction.rowsAffected === 0) return { error: "Insufficient balance", status: 400 };
 
       const created = await tx.execute(
-        "INSERT INTO portfolios (user_id, type, strategy_id, cash_balance) VALUES (?, 'copier', ?, ?)",
-        [userId, strategyId, strategy.fee]
+        "INSERT INTO portfolios (user_id, type, strategy_id, cash_balance, cash_balance_cents) VALUES (?, 'copier', ?, ?, ?)",
+        [userId, strategyId, strategy.fee, strategy.fee_cents]
       );
       const portfolioId = created.lastInsertRowid;
       await tx.execute(
-        `INSERT INTO internal_transfers (user_id, direction, portfolio_id, amount, reference_id, verification_status, status)
-         VALUES (?, 'to_portfolio', ?, ?, ?, 'not_required', 'completed')`,
-        [userId, portfolioId, strategy.fee, referenceId]
+        `INSERT INTO internal_transfers (user_id, direction, portfolio_id, amount, amount_cents, reference_id, verification_status, status)
+         VALUES (?, 'to_portfolio', ?, ?, ?, ?, 'not_required', 'completed')`,
+        [userId, portfolioId, strategy.fee, strategy.fee_cents, referenceId]
       );
       await tx.execute(
-        "INSERT INTO activity_log (user_id, type, label, amount) VALUES (?, 'transfer', ?, ?)",
-        [userId, `Connected to ${strategy.name} (${referenceId})`, strategy.fee]
+        "INSERT INTO activity_log (user_id, type, label, amount, amount_cents) VALUES (?, 'transfer', ?, ?, ?)",
+        [userId, `Connected to ${strategy.name} (${referenceId})`, strategy.fee, strategy.fee_cents]
       );
-      const user = await tx.queryOne("SELECT cash_balance FROM users WHERE id = ?", [userId]);
-      return { portfolioId, cashBalance: user.cash_balance, strategyName: strategy.name };
+      const user = await tx.queryOne("SELECT cash_balance_cents FROM users WHERE id = ?", [userId]);
+      return { portfolioId, cashBalance: dollarsFromCents(user.cash_balance_cents), strategyName: strategy.name };
     });
     if (outcome.error) return res.status(outcome.status).json({ error: outcome.error });
     res.status(201).json({

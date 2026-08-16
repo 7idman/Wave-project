@@ -24,6 +24,7 @@ const { queryOne, queryAll, execute } = require("../db");
 const { signAccessToken, signRefreshToken, JWT_SECRET, authenticate, TERMINATED_MESSAGE } = require("../middleware/auth");
 const { generateReferralCode, linkReferral } = require("../services/referrals");
 const { checkAndRecord: recordRate, peek: peekRate } = require("../services/rateLimit");
+const { dollarsFromCents } = require("../utils/money");
 const { verifyTurnstileToken } = require("../services/turnstile");
 const { logSecurityEvent } = require("../middleware/security");
 const { getOrSetDeviceId, isDeviceTrusted, trustDevice } = require("../services/deviceTrust");
@@ -97,7 +98,7 @@ const safeUser = async (u) => {
     try {
       permissions = JSON.parse(roleRow.permissions);
     } catch (err) {
-      console.error(`Malformed permissions JSON for role "${u.role}" — defaulting to no permissions:`, err.message);
+      console.error(`Malformed permissions JSON for role "${u.role}"; defaulting to no permissions:`, err.message);
     }
   }
   return {
@@ -107,7 +108,7 @@ const safeUser = async (u) => {
     firstName:     u.first_name    || null,
     lastName:      u.last_name     || null,
     emailVerified: Boolean(u.email_verified),
-    cashBalance:   u.cash_balance,
+    cashBalance:   dollarsFromCents(Number(u.cash_balance_cents || 0)),
     phone:         u.phone          || null,
     phoneVerified: u.phone_verified || 0,
     avatarUrl:     u.avatar_url     || null,
@@ -653,7 +654,7 @@ router.post("/login", async (req, res) => {
       // If Twilio itself is unreachable, fail through to Turnstile-only
       // protection rather than blocking a legitimate login entirely on an
       // external service outage — Turnstile has already been enforced above.
-      console.error("High-risk login OTP send failed — proceeding on Turnstile alone:", user.id);
+      console.error("High-risk login OTP send failed; proceeding on Turnstile alone:", user.id);
     }
 
     await trustDevice(user.id, deviceId, parseDevice(req.headers["user-agent"]));
@@ -971,7 +972,7 @@ async function beginSecondFactorStage(user, req, res, { deviceTrusted, deviceId,
     if (!otpLimit.allowed) return res.status(429).json({ error: "Too many verification requests. Please try again later." });
     const sendResult = await sendVerificationCode(user.phone);
     smsSent = sendResult.success;
-    if (!smsSent) console.error("Login SMS code send failed — proceeding on email-only for this login:", user.id);
+    if (!smsSent) console.error("Login SMS code send failed; proceeding on email-only for this login:", user.id);
   }
 
   const factors = smsSent ? ["sms", "email"] : ["email"];

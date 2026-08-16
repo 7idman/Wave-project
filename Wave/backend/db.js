@@ -188,6 +188,7 @@ async function initSchema() {
       kyc_id_status    TEXT    NOT NULL DEFAULT 'pending',
       kyc_addr_status  TEXT    NOT NULL DEFAULT 'pending',
       cash_balance     REAL    NOT NULL DEFAULT 0.00,
+      cash_balance_cents INTEGER NOT NULL DEFAULT 0,
       created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
       updated_at       TEXT    NOT NULL DEFAULT (datetime('now'))
     )`,
@@ -237,9 +238,12 @@ async function initSchema() {
       type       TEXT    NOT NULL CHECK(type IN ('buy','sell','deposit','withdraw')),
       symbol     TEXT    NOT NULL,
       amount     REAL    NOT NULL,
+      amount_cents INTEGER,
       price      REAL    NOT NULL,
       fee        REAL    NOT NULL DEFAULT 0,
+      fee_cents  INTEGER NOT NULL DEFAULT 0,
       total      REAL    NOT NULL,
+      total_cents INTEGER NOT NULL DEFAULT 0,
       status     TEXT    NOT NULL DEFAULT 'completed',
       created_at TEXT    NOT NULL DEFAULT (datetime('now'))
     )`,    `CREATE TABLE IF NOT EXISTS price_cache (
@@ -256,6 +260,35 @@ async function initSchema() {
       login_at   TEXT    NOT NULL DEFAULT (datetime('now')),
       logout_at  TEXT
     )`,
+    `CREATE TABLE IF NOT EXISTS http_sessions (
+      sid          TEXT PRIMARY KEY,
+      session_json TEXT NOT NULL,
+      expires_at   TEXT NOT NULL,
+      updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS scheduler_leases (
+      job_name    TEXT PRIMARY KEY,
+      owner_id    TEXT NOT NULL,
+      lease_until TEXT NOT NULL,
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS stock_refresh_jobs (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      requested_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      source       TEXT NOT NULL DEFAULT 'scheduled' CHECK(source IN ('scheduled','admin')),
+      status       TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','processing','completed','failed')),
+      active_key   INTEGER UNIQUE CHECK(active_key IS NULL OR active_key = 1),
+      total        INTEGER NOT NULL DEFAULT 0,
+      processed    INTEGER NOT NULL DEFAULT 0,
+      updated      INTEGER NOT NULL DEFAULT 0,
+      skipped      INTEGER NOT NULL DEFAULT 0,
+      last_symbol  TEXT,
+      last_error   TEXT,
+      claimed_at   TEXT,
+      completed_at TEXT,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
     `CREATE TABLE IF NOT EXISTS site_updates (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       title      TEXT NOT NULL,
@@ -268,6 +301,7 @@ async function initSchema() {
       type       TEXT    NOT NULL,
       label      TEXT    NOT NULL,
       amount     REAL    NOT NULL DEFAULT 0,
+      amount_cents INTEGER NOT NULL DEFAULT 0,
       created_at TEXT    NOT NULL DEFAULT (datetime('now'))
     )`,
     `CREATE TABLE IF NOT EXISTS admin_requests (
@@ -279,6 +313,7 @@ async function initSchema() {
       title             TEXT    NOT NULL,
       details           TEXT,
       amount            REAL,
+      amount_cents      INTEGER,
       payload           TEXT    NOT NULL DEFAULT '{}',
       status            TEXT    NOT NULL DEFAULT 'pending',
       reviewed_by       INTEGER,
@@ -314,6 +349,7 @@ async function initSchema() {
       type         TEXT    NOT NULL CHECK(type IN ('copier','managed','strategy')),
       strategy_id  INTEGER REFERENCES strategies(id),
       cash_balance REAL    NOT NULL DEFAULT 0,
+      cash_balance_cents INTEGER NOT NULL DEFAULT 0,
       created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
       updated_at   TEXT    NOT NULL DEFAULT (datetime('now'))
     )`,
@@ -322,6 +358,7 @@ async function initSchema() {
       name         TEXT    NOT NULL,
       description  TEXT,
       fee          REAL    NOT NULL DEFAULT 0,
+      fee_cents    INTEGER NOT NULL DEFAULT 0,
       portfolio_id INTEGER REFERENCES portfolios(id),
       status       TEXT    NOT NULL DEFAULT 'active',
       created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
@@ -371,6 +408,7 @@ async function initSchema() {
       direction           TEXT    NOT NULL CHECK(direction IN ('to_portfolio','from_portfolio')),
       portfolio_id        INTEGER NOT NULL REFERENCES portfolios(id),
       amount              REAL    NOT NULL,
+      amount_cents        INTEGER NOT NULL DEFAULT 0,
       reference_id        TEXT    NOT NULL UNIQUE,
       verification_status TEXT    NOT NULL DEFAULT 'not_required',
       status              TEXT    NOT NULL DEFAULT 'completed',
@@ -408,6 +446,7 @@ async function initSchema() {
       bonus_pct   REAL    NOT NULL,
       min_tier    TEXT    NOT NULL DEFAULT 'bronze',
       min_deposit REAL    NOT NULL DEFAULT 0,
+      min_deposit_cents INTEGER NOT NULL DEFAULT 0,
       lock_days   INTEGER NOT NULL DEFAULT 0,
       start_at    TEXT    NOT NULL,
       end_at      TEXT    NOT NULL,
@@ -423,6 +462,7 @@ async function initSchema() {
       promotion_id   INTEGER NOT NULL REFERENCES promotions(id),
       transaction_id INTEGER REFERENCES transactions(id),
       amount         REAL    NOT NULL,
+      amount_cents   INTEGER NOT NULL DEFAULT 0,
       unlock_at      TEXT    NOT NULL,
       created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
     )`,
@@ -437,6 +477,7 @@ async function initSchema() {
       referral_id INTEGER NOT NULL REFERENCES referrals(id),
       role        TEXT    NOT NULL, -- 'referrer' | 'referee'
       amount      REAL    NOT NULL,
+      amount_cents INTEGER NOT NULL DEFAULT 0,
       unlock_at   TEXT    NOT NULL,
       created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
     )`,
@@ -450,6 +491,7 @@ async function initSchema() {
       referee_id       INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
       status           TEXT    NOT NULL DEFAULT 'pending', -- 'pending' | 'completed'
       threshold_amount REAL    NOT NULL DEFAULT 100,
+      threshold_amount_cents INTEGER NOT NULL DEFAULT 10000,
       completed_at     TEXT,
       created_at       TEXT    NOT NULL DEFAULT (datetime('now'))
     )`,
@@ -516,6 +558,7 @@ async function initSchema() {
       user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       symbol        TEXT    NOT NULL,
       weekly_amount REAL    NOT NULL,
+      weekly_amount_cents INTEGER NOT NULL DEFAULT 0,
       status        TEXT    NOT NULL DEFAULT 'active', -- 'active' | 'paused' | 'cancelled'
       last_run_at   TEXT,
       next_run_at   TEXT    NOT NULL,
@@ -544,6 +587,17 @@ async function initSchema() {
       price       REAL    NOT NULL,
       change_24h  REAL,
       recorded_at TEXT    NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS money_migration_adjustments (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      table_name  TEXT NOT NULL,
+      row_id      INTEGER NOT NULL,
+      column_name TEXT NOT NULL,
+      old_value   REAL NOT NULL,
+      new_cents   INTEGER NOT NULL,
+      delta       REAL NOT NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(table_name, row_id, column_name)
     )`,
   ];
 
@@ -577,9 +631,26 @@ async function initSchema() {
     ["transactions", "source", "ALTER TABLE transactions ADD COLUMN source TEXT"],
     ["transactions", "email_otp_hash", "ALTER TABLE transactions ADD COLUMN email_otp_hash TEXT"],
     ["transactions", "email_otp_expires_at", "ALTER TABLE transactions ADD COLUMN email_otp_expires_at TEXT"],
+    ["users", "cash_balance_cents", "ALTER TABLE users ADD COLUMN cash_balance_cents INTEGER NOT NULL DEFAULT 0"],
+    ["portfolios", "cash_balance_cents", "ALTER TABLE portfolios ADD COLUMN cash_balance_cents INTEGER NOT NULL DEFAULT 0"],
+    ["transactions", "amount_cents", "ALTER TABLE transactions ADD COLUMN amount_cents INTEGER"],
+    ["transactions", "fee_cents", "ALTER TABLE transactions ADD COLUMN fee_cents INTEGER NOT NULL DEFAULT 0"],
+    ["transactions", "total_cents", "ALTER TABLE transactions ADD COLUMN total_cents INTEGER NOT NULL DEFAULT 0"],
+    ["activity_log", "amount_cents", "ALTER TABLE activity_log ADD COLUMN amount_cents INTEGER NOT NULL DEFAULT 0"],
+    ["admin_requests", "amount_cents", "ALTER TABLE admin_requests ADD COLUMN amount_cents INTEGER"],
+    ["strategies", "fee_cents", "ALTER TABLE strategies ADD COLUMN fee_cents INTEGER NOT NULL DEFAULT 0"],
+    ["internal_transfers", "amount_cents", "ALTER TABLE internal_transfers ADD COLUMN amount_cents INTEGER NOT NULL DEFAULT 0"],
+    ["promotions", "min_deposit_cents", "ALTER TABLE promotions ADD COLUMN min_deposit_cents INTEGER NOT NULL DEFAULT 0"],
+    ["bonus_grants", "amount_cents", "ALTER TABLE bonus_grants ADD COLUMN amount_cents INTEGER NOT NULL DEFAULT 0"],
+    ["referral_bonus_grants", "amount_cents", "ALTER TABLE referral_bonus_grants ADD COLUMN amount_cents INTEGER NOT NULL DEFAULT 0"],
+    ["referrals", "threshold_amount_cents", "ALTER TABLE referrals ADD COLUMN threshold_amount_cents INTEGER NOT NULL DEFAULT 10000"],
+    ["auto_invest_plans", "weekly_amount_cents", "ALTER TABLE auto_invest_plans ADD COLUMN weekly_amount_cents INTEGER NOT NULL DEFAULT 0"],
   ];
 
   const indexMigrations = [
+    "CREATE INDEX IF NOT EXISTS idx_http_sessions_expires ON http_sessions(expires_at)",
+    "CREATE INDEX IF NOT EXISTS idx_stock_refresh_jobs_status_claimed ON stock_refresh_jobs(status, claimed_at, id)",
+    "CREATE INDEX IF NOT EXISTS idx_stock_refresh_jobs_created ON stock_refresh_jobs(created_at, id)",
     "CREATE INDEX IF NOT EXISTS idx_price_history_symbol_time ON price_history(symbol, recorded_at)",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code)",
     "CREATE INDEX IF NOT EXISTS idx_rate_limit_scope_id_time ON rate_limit_entries(scope, identifier, created_at)",
@@ -596,12 +667,32 @@ async function initSchema() {
     "CREATE INDEX IF NOT EXISTS idx_strategy_mirror_jobs_trade ON strategy_mirror_jobs(strategy_trade_id, id)",
   ];
 
+  // Fiat values are persisted as integer cents. The legacy REAL columns stay
+  // in sync for API compatibility while callers are migrated, but cents are
+  // the source of truth whenever both values are supplied.
+  const moneyColumns = [
+    { table: "users", legacy: "cash_balance", cents: "cash_balance_cents" },
+    { table: "portfolios", legacy: "cash_balance", cents: "cash_balance_cents" },
+    { table: "transactions", legacy: "amount", cents: "amount_cents", nullable: true, where: "symbol = 'USD' AND type IN ('deposit', 'withdraw')" },
+    { table: "transactions", legacy: "fee", cents: "fee_cents" },
+    { table: "transactions", legacy: "total", cents: "total_cents" },
+    { table: "activity_log", legacy: "amount", cents: "amount_cents" },
+    { table: "admin_requests", legacy: "amount", cents: "amount_cents", nullable: true, where: "amount IS NOT NULL" },
+    { table: "strategies", legacy: "fee", cents: "fee_cents" },
+    { table: "internal_transfers", legacy: "amount", cents: "amount_cents" },
+    { table: "promotions", legacy: "min_deposit", cents: "min_deposit_cents" },
+    { table: "bonus_grants", legacy: "amount", cents: "amount_cents" },
+    { table: "referral_bonus_grants", legacy: "amount", cents: "amount_cents" },
+    { table: "referrals", legacy: "threshold_amount", cents: "threshold_amount_cents" },
+    { table: "auto_invest_plans", legacy: "weekly_amount", cents: "weekly_amount_cents" },
+  ];
+
   // The migration definition is the version. Editing any table, column
   // migration, or index automatically produces a new fingerprint and reruns
   // the idempotent migration block—there is no manual version to forget.
   const schemaVersion = crypto
     .createHash("sha1")
-    .update(JSON.stringify({ tables, columnMigrations, indexMigrations }))
+    .update(JSON.stringify({ tables, columnMigrations, indexMigrations, moneyColumns }))
     .digest("hex")
     .slice(0, 12);
 
@@ -668,6 +759,62 @@ async function initSchema() {
     }
     for (const sql of indexMigrations) await db.execute(sql);
 
+    for (const mapping of moneyColumns) {
+      const condition = mapping.where ? ` AND (${mapping.where})` : "";
+      const nonNull = mapping.nullable ? ` AND ${mapping.legacy} IS NOT NULL` : "";
+      await execute(
+        `INSERT OR IGNORE INTO money_migration_adjustments
+           (table_name, row_id, column_name, old_value, new_cents, delta)
+         SELECT ?, id, ?, ${mapping.legacy}, CAST(ROUND(${mapping.legacy} * 100.0) AS INTEGER),
+                (CAST(ROUND(${mapping.legacy} * 100.0) AS INTEGER) / 100.0) - ${mapping.legacy}
+         FROM ${mapping.table}
+         WHERE ABS((${mapping.legacy} * 100.0) - ROUND(${mapping.legacy} * 100.0)) > 0.0000001${nonNull}${condition}`,
+        [mapping.table, mapping.legacy]
+      );
+      await execute(
+        `UPDATE ${mapping.table}
+         SET ${mapping.cents} = CAST(ROUND(${mapping.legacy} * 100.0) AS INTEGER),
+             ${mapping.legacy} = CAST(ROUND(${mapping.legacy} * 100.0) AS INTEGER) / 100.0
+         WHERE 1 = 1${nonNull}${condition}`
+      );
+
+      const triggerBase = `sync_money_${mapping.table}_${mapping.cents}`;
+      for (const suffix of ["insert", "cents", "legacy"]) {
+        await execute(`DROP TRIGGER IF EXISTS ${triggerBase}_${suffix}`);
+      }
+      const insertCents = mapping.nullable
+        ? `CASE WHEN NEW.${mapping.cents} IS NULL AND NEW.${mapping.legacy} IS NOT NULL THEN CAST(ROUND(NEW.${mapping.legacy} * 100.0) AS INTEGER) ELSE NEW.${mapping.cents} END`
+        : `CASE WHEN NEW.${mapping.cents} = 0 AND NEW.${mapping.legacy} <> 0 THEN CAST(ROUND(NEW.${mapping.legacy} * 100.0) AS INTEGER) ELSE NEW.${mapping.cents} END`;
+      await execute(
+        `CREATE TRIGGER ${triggerBase}_insert AFTER INSERT ON ${mapping.table}
+         BEGIN
+           UPDATE ${mapping.table}
+           SET ${mapping.cents} = ${insertCents},
+               ${mapping.legacy} = (${insertCents}) / 100.0
+           WHERE id = NEW.id;
+         END`
+      );
+      await execute(
+        `CREATE TRIGGER ${triggerBase}_cents AFTER UPDATE OF ${mapping.cents} ON ${mapping.table}
+         BEGIN
+           UPDATE ${mapping.table}
+           SET ${mapping.legacy} = NEW.${mapping.cents} / 100.0
+           WHERE id = NEW.id;
+         END`
+      );
+      await execute(
+        `CREATE TRIGGER ${triggerBase}_legacy AFTER UPDATE OF ${mapping.legacy} ON ${mapping.table}
+         WHEN NEW.${mapping.cents} IS OLD.${mapping.cents}
+              AND NEW.${mapping.legacy} IS NOT (NEW.${mapping.cents} / 100.0)
+         BEGIN
+           UPDATE ${mapping.table}
+           SET ${mapping.cents} = CAST(ROUND(NEW.${mapping.legacy} * 100.0) AS INTEGER),
+               ${mapping.legacy} = CAST(ROUND(NEW.${mapping.legacy} * 100.0) AS INTEGER) / 100.0
+           WHERE id = NEW.id;
+         END`
+      );
+    }
+
     await execute(
       `UPDATE users
        SET first_name = CASE WHEN instr(trim(name), ' ') > 0 THEN substr(trim(name), 1, instr(trim(name), ' ') - 1) ELSE trim(name) END,
@@ -698,16 +845,16 @@ async function initSchema() {
   const vipPromoExists = await queryOne("SELECT id FROM promotions WHERE name = 'VIP Deposit Bonus'");
   if (!vipPromoExists) {
     await execute(
-      "INSERT INTO promotions (name, bonus_pct, min_tier, min_deposit, lock_days, start_at, end_at) VALUES (?,?,?,?,?,?,?)",
-      ["VIP Deposit Bonus", 0.12, "platinum", 0, 7, "2020-01-01 00:00:00", "2099-01-01 00:00:00"]
+      "INSERT INTO promotions (name, bonus_pct, min_tier, min_deposit, min_deposit_cents, lock_days, start_at, end_at) VALUES (?,?,?,?,?,?,?,?)",
+      ["VIP Deposit Bonus", 0.12, "platinum", 0, 0, 7, "2020-01-01 00:00:00", "2099-01-01 00:00:00"]
     );
   }
   const ownerEmail = (process.env.OWNER_EMAIL || "").trim().toLowerCase();
   if (ownerEmail) {
     const result = await execute("UPDATE users SET role='owner' WHERE lower(email)=?", [ownerEmail]);
-    console.log(`Owner check: OWNER_EMAIL=${ownerEmail} → ${result.rowsAffected} row(s) updated to owner`);
-    } else {
-    console.warn("⚠️  OWNER_EMAIL is not set — no account will be assigned the owner role.");
+    console.log(`[info] Owner role sync: ${result.rowsAffected} account(s) updated`);
+  } else {
+    console.warn("[warn] OWNER_EMAIL is not set; no account will be assigned the owner role.");
     }
   // ── Seed price cache ──────────────────────────────────────────────────────
   const count = await queryOne("SELECT COUNT(*) as c FROM price_cache");
@@ -736,7 +883,7 @@ async function initSchema() {
     );
   }
 
-  console.log("✅ Database ready");
+  console.log("[info] Database ready");
 }
 
 module.exports = { execute, queryOne, queryAll, batch, withTransaction, initSchema, closeDatabase };

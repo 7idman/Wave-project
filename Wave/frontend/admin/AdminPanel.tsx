@@ -21,6 +21,7 @@ type SecurityEvent={id:number;type:string;user_id?:number;user_email?:string;ip?
 type ClientError={id:number;user_id?:number;user_email?:string;message:string;stack?:string;boundary?:string;url?:string;created_at:string};
 type AdminReferral={id:number;status:string;threshold_amount:number;completed_at?:string;created_at:string;referrer_email:string;referrer_name:string;referee_email:string;referee_name:string};
 type AdminAutoInvestPlan={id:number;symbol:string;weekly_amount:number;status:string;last_run_at?:string;next_run_at:string;user_email:string};
+type StockRefreshJob={id:number;source:"scheduled"|"admin";status:"pending"|"processing"|"completed"|"failed";total:number;processed:number;updated:number;skipped:number;lastSymbol?:string|null;error?:string|null;createdAt:string;updatedAt:string;completedAt?:string|null};
 
 function AdminAvatar({name,avatarUrl}:{name:string;avatarUrl?:string}){
   const initials=(name||"?").trim().split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
@@ -55,6 +56,7 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
   const[securityEvents,setSecurityEvents]=useState<SecurityEvent[]>([]),[securityLoading,setSecurityLoading]=useState(false),[securityTypeFilter,setSecurityTypeFilter]=useState("");
   const[clientErrors,setClientErrors]=useState<ClientError[]>([]),[clientErrorsLoading,setClientErrorsLoading]=useState(false);
   const[adminReferrals,setAdminReferrals]=useState<AdminReferral[]>([]),[adminAutoInvest,setAdminAutoInvest]=useState<AdminAutoInvestPlan[]>([]),[activityLoading,setActivityLoading]=useState(false);
+  const[stockRefresh,setStockRefresh]=useState<StockRefreshJob|null>(null),[stockRefreshBusy,setStockRefreshBusy]=useState(false);
   const canOwner=currentUser?.role==="owner";
   const can=(perm:string)=>canOwner||!!currentUser?.permissions?.[perm];
   const pendingCount=useMemo(()=>requests.filter(r=>r.status==="pending").length,[requests]);
@@ -173,6 +175,30 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
       api.get("/admin/auto-invest-plans").then(d=>setAdminAutoInvest(d.plans||[])),
     ]).catch(e=>notify(e.message,"!",false)).finally(()=>setActivityLoading(false));
   },[tab]);
+  useEffect(()=>{
+    if(tab!=="activity")return;
+    let cancelled=false;
+    const poll=async()=>{
+      try{
+        const data=await api.get("/admin/stocks/refresh/latest");
+        if(!cancelled)setStockRefresh(data.job||null);
+      }catch(error:any){
+        if(!cancelled&&error?.status===404)setStockRefresh(null);
+      }
+    };
+    poll();
+    const handle=window.setInterval(poll,3000);
+    return()=>{cancelled=true;window.clearInterval(handle);};
+  },[tab]);
+  const startStockRefresh=async()=>{
+    setStockRefreshBusy(true);
+    try{
+      const data=await api.post("/admin/stocks/refresh",{});
+      setStockRefresh(data.job||null);
+      notify(data.message||"Stock refresh queued","OK");
+    }catch(error:any){notify(error.message,"!",false);}
+    finally{setStockRefreshBusy(false);}
+  };
   const createPromotion=async()=>{
     const bonusPct=Number(promoBonusPct)/100;
     const minDeposit=Number(promoMinDeposit);
@@ -436,6 +462,31 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
       </div>}
 
       {tab==="activity"&&<div className="admin-grid">
+        <div className="gcard" style={{gridColumn:"1 / -1"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:16,flexWrap:"wrap"}}>
+            <div>
+              <div className="stitle">Stock Market Data</div>
+              <div className="admin-note" style={{marginTop:6}}>
+                {stockRefresh
+                  ? `${stockRefresh.status} · ${stockRefresh.processed}/${stockRefresh.total} checked · ${stockRefresh.updated} updated · ${stockRefresh.skipped} skipped${stockRefresh.lastSymbol?` · last ${stockRefresh.lastSymbol}`:""}`
+                  : "No refresh history yet."}
+              </div>
+              {stockRefresh?.error&&<div style={{color:"var(--red)",fontSize:12,marginTop:6}}>{stockRefresh.error}</div>}
+            </div>
+            <button
+              className="btn btn-primary"
+              onClick={startStockRefresh}
+              disabled={stockRefreshBusy||stockRefresh?.status==="pending"||stockRefresh?.status==="processing"}
+            >
+              {stockRefreshBusy?"Queueing…":stockRefresh?.status==="pending"||stockRefresh?.status==="processing"?"Refresh running…":"Refresh stock prices"}
+            </button>
+          </div>
+          {stockRefresh&&stockRefresh.total>0&&(
+            <div style={{height:6,borderRadius:99,background:"var(--surface2)",overflow:"hidden",marginTop:14}}>
+              <div style={{height:"100%",width:`${Math.min(100,Math.round((stockRefresh.processed/stockRefresh.total)*100))}%`,background:"var(--indigo)",transition:"width .25s ease"}}/>
+            </div>
+          )}
+        </div>
         <div className="gcard admin-table-wrap">
           <div className="stitle">Referrals</div>
           {activityLoading?<PanelLoading rows={4} label="Loading referral activity"/>:

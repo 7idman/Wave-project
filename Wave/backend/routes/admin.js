@@ -12,6 +12,13 @@ const {
   listStrategyMirrorJobs,
 }=require("../services/strategyMirroring");
 const { generateReferenceId }=require("../utils/referenceId");
+const { parseMoneyToCents, roundMoneyToCents, dollarsFromCents }=require("../utils/money");
+const {
+  enqueueStockRefresh,
+  getStockRefreshJob,
+  getLatestStockRefreshJob,
+  triggerStockRefreshProcessing,
+}=require("../services/stockRefreshJobs");
 const slug=s=>String(s||"").trim().toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"").slice(0,40)||"role";
 const parse=v=>{try{return JSON.parse(v||"{}");}catch{return {};}};
 // Writes a row the user will see in Notifications > Recent Activity. Reuses
@@ -29,23 +36,24 @@ async function applyRequest(r,admin,action,note){
     let result=null;
     if(action==="approve"){
       if(r.type==="deposit"){
-        const amount=Number(r.amount||0);
-        if(!Number.isFinite(amount)||amount<=0)throw requestError("Deposit request has an invalid amount",400);
-        const credited=await tx.execute("UPDATE users SET cash_balance=cash_balance+?,updated_at=datetime('now') WHERE id=?",[amount,r.user_id]);
+        const amountCents=Number(r.amount_cents||0);
+        if(!Number.isSafeInteger(amountCents)||amountCents<=0)throw requestError("Deposit request has an invalid amount",400);
+        const amount=dollarsFromCents(amountCents);
+        const credited=await tx.execute("UPDATE users SET cash_balance_cents=cash_balance_cents+?,updated_at=datetime('now') WHERE id=?",[amountCents,r.user_id]);
         if(credited.rowsAffected===0)throw requestError("Deposit user no longer exists",404);
-        const inserted=await tx.execute("INSERT INTO transactions (user_id,type,symbol,amount,price,fee,total,status,reference_id) VALUES (?,?,?,?,?,?,?,'completed',?)",[r.user_id,"deposit","USD",amount,1,0,amount,generateReferenceId("DEP")]);
-        const user=await tx.queryOne("SELECT cash_balance FROM users WHERE id=?",[r.user_id]);
-        result={type:"deposit",amount,transactionId:inserted.lastInsertRowid,cashBalance:user.cash_balance};
+        const inserted=await tx.execute("INSERT INTO transactions (user_id,type,symbol,amount,amount_cents,price,fee,fee_cents,total,total_cents,status,reference_id) VALUES (?,?,?,?,?,1,0,0,?,?,'completed',?)",[r.user_id,"deposit","USD",amount,amountCents,amount,amountCents,generateReferenceId("DEP")]);
+        const user=await tx.queryOne("SELECT cash_balance_cents FROM users WHERE id=?",[r.user_id]);
+        result={type:"deposit",amount,transactionId:inserted.lastInsertRowid,cashBalance:dollarsFromCents(user.cash_balance_cents)};
       }else if(r.type==="withdraw"){
         const payload=parse(r.payload);
-        const transaction=await tx.queryOne("SELECT id FROM transactions WHERE id=? AND status='awaiting_review'",[payload.transactionId]);
+        const transaction=await tx.queryOne("SELECT id,amount_cents,total_cents FROM transactions WHERE id=? AND status='awaiting_review'",[payload.transactionId]);
         if(!transaction)throw requestError("This withdrawal is no longer awaiting review — it may have already been processed.");
-        const deducted=await tx.execute(`UPDATE users SET cash_balance=cash_balance-?,updated_at=datetime('now') WHERE id=? AND cash_balance>=? AND (cash_balance-(SELECT COALESCE(SUM(amount),0) FROM bonus_grants WHERE user_id=? AND unlock_at>datetime('now'))-(SELECT COALESCE(SUM(amount),0) FROM referral_bonus_grants WHERE user_id=? AND unlock_at>datetime('now')))>=?`,[payload.total,r.user_id,payload.total,r.user_id,r.user_id,payload.total]);
+        const deducted=await tx.execute(`UPDATE users SET cash_balance_cents=cash_balance_cents-?,updated_at=datetime('now') WHERE id=? AND cash_balance_cents>=? AND (cash_balance_cents-(SELECT COALESCE(SUM(amount_cents),0) FROM bonus_grants WHERE user_id=? AND unlock_at>datetime('now'))-(SELECT COALESCE(SUM(amount_cents),0) FROM referral_bonus_grants WHERE user_id=? AND unlock_at>datetime('now')))>=?`,[transaction.total_cents,r.user_id,transaction.total_cents,r.user_id,r.user_id,transaction.total_cents]);
         if(deducted.rowsAffected===0)throw requestError("Cannot approve — this user no longer has sufficient available balance for this withdrawal.",400);
         const completed=await tx.execute("UPDATE transactions SET status='completed' WHERE id=? AND status='awaiting_review'",[payload.transactionId]);
         if(completed.rowsAffected===0)throw requestError("This withdrawal was processed by another reviewer.");
-        const user=await tx.queryOne("SELECT cash_balance FROM users WHERE id=?",[r.user_id]);
-        result={type:"withdraw",amount:Number(payload.amount),cashBalance:user.cash_balance};
+        const user=await tx.queryOne("SELECT cash_balance_cents FROM users WHERE id=?",[r.user_id]);
+        result={type:"withdraw",amount:dollarsFromCents(transaction.amount_cents),cashBalance:dollarsFromCents(user.cash_balance_cents)};
       }else if(r.type==="kyc"){
         const payload=parse(r.payload);
         if(payload.kind==="id")await tx.execute("UPDATE users SET kyc_id_status='verified',updated_at=datetime('now') WHERE id=?",[r.user_id]);
@@ -91,12 +99,12 @@ async function applyRequest(r,admin,action,note){
 // The strategy trade writes durable subscriber jobs in the same database
 // transaction. services/strategyMirroring.js applies each job atomically and
 // resumes pending or stale work after a restart.
-router.post("/strategies",requirePermission("access_admin"),async(req,res)=>{try{const name=String(req.body.name||"").trim();const description=String(req.body.description||"").trim();const fee=Number(req.body.fee);if(!name||!Number.isFinite(fee)||fee<0)return res.status(400).json({error:"Name and a valid non-negative fee are required"});const created=await withTransaction(async tx=>{const portfolio=await tx.execute("INSERT INTO portfolios (user_id,type,cash_balance) VALUES (NULL,'strategy',0)");const strategy=await tx.execute("INSERT INTO strategies (name,description,fee,portfolio_id,status) VALUES (?,?,?,?,'active')",[name,description,fee,portfolio.lastInsertRowid]);await tx.execute("INSERT INTO admin_actions (admin_id,admin_email,action,target_user_id,reason) VALUES (?,?,?,?,?)",[req.user.id,req.user.email,"create_strategy",req.user.id,name]);return {strategyId:strategy.lastInsertRowid,portfolioId:portfolio.lastInsertRowid};});res.status(201).json({message:"Strategy created",...created});}catch(err){res.status(500).json({error:err.message});}});
+router.post("/strategies",requirePermission("access_admin"),async(req,res)=>{try{const name=String(req.body.name||"").trim();const description=String(req.body.description||"").trim();const feeCents=parseMoneyToCents(req.body.fee,{allowZero:true});const fee=dollarsFromCents(feeCents);if(!name)return res.status(400).json({error:"Name and a valid non-negative fee are required"});const created=await withTransaction(async tx=>{const portfolio=await tx.execute("INSERT INTO portfolios (user_id,type,cash_balance,cash_balance_cents) VALUES (NULL,'strategy',0,0)");const strategy=await tx.execute("INSERT INTO strategies (name,description,fee,fee_cents,portfolio_id,status) VALUES (?,?,?,?,?,'active')",[name,description,fee,feeCents,portfolio.lastInsertRowid]);await tx.execute("INSERT INTO admin_actions (admin_id,admin_email,action,target_user_id,reason) VALUES (?,?,?,?,?)",[req.user.id,req.user.email,"create_strategy",req.user.id,name]);return {strategyId:strategy.lastInsertRowid,portfolioId:portfolio.lastInsertRowid};});res.status(201).json({message:"Strategy created",...created});}catch(err){res.status(err instanceof TypeError||err instanceof RangeError?400:500).json({error:err.message});}});
 
 // Fund the strategy's own trading account so it can actually hold a real
 // position (separate from a user's transfer — this is the platform seeding
 // its own paper account, e.g. "give Apex Momentum $10,000 to trade with").
-router.post("/strategies/:id/fund",requirePermission("access_admin"),async(req,res)=>{try{const amount=Number(req.body.amount);if(!Number.isFinite(amount)||amount<=0)return res.status(400).json({error:"A positive amount is required"});const outcome=await withTransaction(async tx=>{const strategy=await tx.queryOne("SELECT id,portfolio_id FROM strategies WHERE id=?",[req.params.id]);if(!strategy)return {error:"Strategy not found"};await tx.execute("UPDATE portfolios SET cash_balance=cash_balance+?,updated_at=datetime('now') WHERE id=?",[amount,strategy.portfolio_id]);await tx.execute("INSERT INTO admin_actions (admin_id,admin_email,action,target_user_id,reason) VALUES (?,?,?,?,?)",[req.user.id,req.user.email,"fund_strategy",req.user.id,`$${amount} to strategy ${strategy.id}`]);return {};});if(outcome.error)return res.status(404).json({error:outcome.error});res.json({message:`Funded strategy with $${amount.toLocaleString()}`});}catch(err){res.status(500).json({error:err.message});}});
+router.post("/strategies/:id/fund",requirePermission("access_admin"),async(req,res)=>{try{const amountCents=parseMoneyToCents(req.body.amount);const amount=dollarsFromCents(amountCents);const outcome=await withTransaction(async tx=>{const strategy=await tx.queryOne("SELECT id,portfolio_id FROM strategies WHERE id=?",[req.params.id]);if(!strategy)return {error:"Strategy not found"};await tx.execute("UPDATE portfolios SET cash_balance_cents=cash_balance_cents+?,updated_at=datetime('now') WHERE id=?",[amountCents,strategy.portfolio_id]);await tx.execute("INSERT INTO admin_actions (admin_id,admin_email,action,target_user_id,reason) VALUES (?,?,?,?,?)",[req.user.id,req.user.email,"fund_strategy",req.user.id,`$${amount} to strategy ${strategy.id}`]);return {};});if(outcome.error)return res.status(404).json({error:outcome.error});res.json({message:`Funded strategy with $${amount.toLocaleString()}`});}catch(err){res.status(err instanceof TypeError||err instanceof RangeError?400:500).json({error:err.message});}});
 
 router.post("/strategies/:id/trades",requirePermission("access_admin"),async(req,res)=>{
   try{
@@ -114,6 +122,7 @@ router.post("/strategies/:id/trades",requirePermission("access_admin"),async(req
     if(!priceRow)return res.status(404).json({error:`Unknown symbol: ${symbol}`});
     const price=priceRow.price;
     const subtotal=amount*price;
+    const subtotalCents=roundMoneyToCents(subtotal);
 
     const before=await valuePortfolio(strategy.portfolio_id);
     if(!before||before.totalValue<=0)
@@ -122,13 +131,13 @@ router.post("/strategies/:id/trades",requirePermission("access_admin"),async(req
 
     const outcome=await withTransaction(async tx=>{
       if(side==="buy"){
-        const deduct=await tx.execute("UPDATE portfolios SET cash_balance=cash_balance-?,updated_at=datetime('now') WHERE id=? AND cash_balance>=?",[subtotal,strategy.portfolio_id,subtotal]);
+        const deduct=await tx.execute("UPDATE portfolios SET cash_balance_cents=cash_balance_cents-?,updated_at=datetime('now') WHERE id=? AND cash_balance_cents>=?",[subtotalCents,strategy.portfolio_id,subtotalCents]);
         if(deduct.rowsAffected===0)return {error:"Strategy account has insufficient cash for this trade"};
         await tx.execute("INSERT INTO portfolio_holdings (portfolio_id,symbol,amount,updated_at) VALUES (?,?,?,datetime('now')) ON CONFLICT(portfolio_id,symbol) DO UPDATE SET amount=amount+excluded.amount,updated_at=excluded.updated_at",[strategy.portfolio_id,symbol,amount]);
       }else{
         const deduct=await tx.execute("UPDATE portfolio_holdings SET amount=amount-?,updated_at=datetime('now') WHERE portfolio_id=? AND symbol=? AND amount>=?",[amount,strategy.portfolio_id,symbol,amount]);
         if(deduct.rowsAffected===0)return {error:"Strategy account doesn't hold enough of this symbol to sell"};
-        await tx.execute("UPDATE portfolios SET cash_balance=cash_balance+?,updated_at=datetime('now') WHERE id=?",[subtotal,strategy.portfolio_id]);
+        await tx.execute("UPDATE portfolios SET cash_balance_cents=cash_balance_cents+?,updated_at=datetime('now') WHERE id=?",[subtotalCents,strategy.portfolio_id]);
       }
       const inserted=await tx.execute("INSERT INTO strategy_trades (strategy_id,symbol,side,amount,price,admin_id) VALUES (?,?,?,?,?,?)",[strategyId,symbol,side,amount,price,req.user.id]);
       await tx.execute("INSERT INTO admin_actions (admin_id,admin_email,action,target_user_id,reason) VALUES (?,?,?,?,?)",[req.user.id,req.user.email,"log_strategy_trade",req.user.id,`${side} ${amount} ${symbol} on ${strategy.name}`]);
@@ -182,7 +191,7 @@ async function getOrCreateManagedPortfolio(userId){
   return withTransaction(async tx=>{
     const portfolio=await tx.queryOne("SELECT id FROM portfolios WHERE user_id=? AND type='managed'",[userId]);
     if(portfolio)return portfolio.id;
-    const created=await tx.execute("INSERT INTO portfolios (user_id,type,cash_balance) VALUES (?, 'managed', 0)",[userId]);
+    const created=await tx.execute("INSERT INTO portfolios (user_id,type,cash_balance,cash_balance_cents) VALUES (?, 'managed', 0, 0)",[userId]);
     return created.lastInsertRowid;
   });
 }
@@ -203,13 +212,13 @@ router.post("/managed/:userId",requirePermission("access_admin"),async(req,res)=
 }catch(err){res.status(500).json({error:err.message});}});
 
 router.post("/managed/:userId/fund",requirePermission("access_admin"),async(req,res)=>{try{
-  const amount=Number(req.body.amount);
-  if(!Number.isFinite(amount)||amount<=0)return res.status(400).json({error:"A positive amount is required"});
+  const amountCents=parseMoneyToCents(req.body.amount);
+  const amount=dollarsFromCents(amountCents);
   const targetUser=await queryOne("SELECT id,email FROM users WHERE id=?",[req.params.userId]);
   if(!targetUser)return res.status(404).json({error:"User not found"});
   const portfolioId=await getOrCreateManagedPortfolio(targetUser.id);
   await withTransaction(async tx=>{
-    await tx.execute("UPDATE portfolios SET cash_balance=cash_balance+?,updated_at=datetime('now') WHERE id=?",[amount,portfolioId]);
+    await tx.execute("UPDATE portfolios SET cash_balance_cents=cash_balance_cents+?,updated_at=datetime('now') WHERE id=?",[amountCents,portfolioId]);
     await tx.execute("INSERT INTO admin_actions (admin_id,admin_email,action,target_user_id,reason) VALUES (?,?,?,?,?)",[req.user.id,req.user.email,"fund_managed_account",targetUser.id,`$${amount} to ${targetUser.email}`]);
   });
   res.json({message:`Added $${amount.toLocaleString()} to ${targetUser.email}'s managed account`});
@@ -228,8 +237,9 @@ router.post("/managed/:userId/allocate",requirePermission("access_admin"),async(
   if(!priceRow)return res.status(404).json({error:`Unknown symbol: ${symbol}`});
   const portfolioId=await getOrCreateManagedPortfolio(targetUser.id);
   const cost=amount*priceRow.price;
+  const costCents=roundMoneyToCents(cost);
   const outcome=await withTransaction(async tx=>{
-    const deduct=await tx.execute("UPDATE portfolios SET cash_balance=cash_balance-?,updated_at=datetime('now') WHERE id=? AND cash_balance>=?",[cost,portfolioId,cost]);
+    const deduct=await tx.execute("UPDATE portfolios SET cash_balance_cents=cash_balance_cents-?,updated_at=datetime('now') WHERE id=? AND cash_balance_cents>=?",[costCents,portfolioId,costCents]);
     if(deduct.rowsAffected===0)return {error:"Managed account has insufficient cash — fund it first"};
     await tx.execute("INSERT INTO portfolio_holdings (portfolio_id,symbol,amount,updated_at) VALUES (?,?,?,datetime('now')) ON CONFLICT(portfolio_id,symbol) DO UPDATE SET amount=amount+excluded.amount,updated_at=excluded.updated_at",[portfolioId,symbol,amount]);
     await tx.execute("INSERT INTO admin_actions (admin_id,admin_email,action,target_user_id,reason) VALUES (?,?,?,?,?)",[req.user.id,req.user.email,"allocate_managed_account",targetUser.id,`${amount} ${symbol} for ${targetUser.email}`]);
@@ -262,14 +272,15 @@ router.post("/promotions",requirePermission("access_admin"),async(req,res)=>{try
   const name=String(req.body.name||"").trim();
   const bonusPct=Number(req.body.bonusPct);
   const minTier=String(req.body.minTier||"bronze");
-  const minDeposit=Number(req.body.minDeposit)||0;
+  const minDepositCents=parseMoneyToCents(req.body.minDeposit||0,{allowZero:true});
+  const minDeposit=dollarsFromCents(minDepositCents);
   const lockDays=Number(req.body.lockDays)||0;
   const startAt=String(req.body.startAt||"");
   const endAt=String(req.body.endAt||"");
   if(!name||!Number.isFinite(bonusPct)||bonusPct<=0||bonusPct>1)return res.status(400).json({error:"Name and a bonus % between 0 and 1 (e.g. 0.10 for 10%) are required"});
   if(!["bronze","silver","gold","platinum"].includes(minTier))return res.status(400).json({error:"Invalid minTier"});
   if(!startAt||!endAt||new Date(endAt)<=new Date(startAt))return res.status(400).json({error:"A valid start/end range is required, with end after start"});
-  const inserted=await execute("INSERT INTO promotions (name,bonus_pct,min_tier,min_deposit,lock_days,start_at,end_at) VALUES (?,?,?,?,?,?,?)",[name,bonusPct,minTier,minDeposit,lockDays,startAt,endAt]);
+  const inserted=await execute("INSERT INTO promotions (name,bonus_pct,min_tier,min_deposit,min_deposit_cents,lock_days,start_at,end_at) VALUES (?,?,?,?,?,?,?,?)",[name,bonusPct,minTier,minDeposit,minDepositCents,lockDays,startAt,endAt]);
   try{await logAdminAction(req.user,"create_promotion",req.user.id,`${name} (${(bonusPct*100).toFixed(0)}%)`);}catch(logErr){console.error("Promotion created but admin-action log failed:",logErr.message);}
   res.status(201).json({message:"Promotion created",promotionId:inserted.lastInsertRowid});
 }catch(err){res.status(500).json({error:err.message});}});
@@ -283,14 +294,28 @@ router.delete("/promotions/:id",requirePermission("access_admin"),async(req,res)
 }catch(err){res.status(500).json({error:err.message});}});
 
 router.post("/stocks/refresh",requirePermission("access_admin"),async(req,res)=>{try{
-  const { fetchStockQuote, STOCK_SYMBOLS }=require("../services/stocks");
   if(!process.env.FINNHUB_API_KEY)return res.status(400).json({error:"FINNHUB_API_KEY is not set on the server"});
-  const results=[];
-  for(const symbol of STOCK_SYMBOLS){
-    try{const q=await fetchStockQuote(symbol);await execute("INSERT INTO price_cache (symbol,price,change_24h,asset_type,updated_at) VALUES (?,?,?,'stock',datetime('now')) ON CONFLICT(symbol) DO UPDATE SET price=excluded.price,change_24h=excluded.change_24h,asset_type='stock',updated_at=excluded.updated_at",[q.symbol,q.price,q.change24h]);results.push({symbol,ok:true,price:q.price});}
-    catch(err){results.push({symbol,ok:false,error:err.message});}
-  }
-  res.json({results,updated:results.filter(r=>r.ok).length,failed:results.filter(r=>!r.ok).length});
+  const {job,created}=await enqueueStockRefresh({requestedBy:req.user.id,source:"admin"});
+  triggerStockRefreshProcessing();
+  res.status(202).json({
+    message:created?"Stock refresh queued":"A stock refresh is already active",
+    job,
+    statusUrl:`/api/admin/stocks/refresh/${job.id}`,
+  });
+}catch(err){res.status(500).json({error:err.message});}});
+
+router.get("/stocks/refresh/latest",requirePermission("access_admin"),async(req,res)=>{try{
+  const job=await getLatestStockRefreshJob();
+  if(!job)return res.status(404).json({error:"No stock refresh has run yet"});
+  res.json({job});
+}catch(err){res.status(500).json({error:err.message});}});
+
+router.get("/stocks/refresh/:id",requirePermission("access_admin"),async(req,res)=>{try{
+  const jobId=Number(req.params.id);
+  if(!Number.isSafeInteger(jobId)||jobId<=0)return res.status(400).json({error:"Invalid stock refresh job id"});
+  const job=await getStockRefreshJob(jobId);
+  if(!job)return res.status(404).json({error:"Stock refresh job not found"});
+  res.json({job});
 }catch(err){res.status(500).json({error:err.message});}});
 
 // ── Monitoring tabs: security events, client crash reports, referrals, auto-invest ──

@@ -9,12 +9,16 @@
  */
 
 const { queryOne, queryAll, execute, withTransaction } = require("../db");
-const { getLifetimeDeposits } = require("./tier");
+const { getLifetimeDepositsCents } = require("./tier");
+const { dollarsFromCents } = require("../utils/money");
 
 const REFERRER_BONUS = 10;
 const REFEREE_BONUS  = 5;
 const REFERRAL_LOCK_DAYS = 7;
 const DEPOSIT_THRESHOLD  = 100;
+const REFERRER_BONUS_CENTS = REFERRER_BONUS * 100;
+const REFEREE_BONUS_CENTS = REFEREE_BONUS * 100;
+const DEPOSIT_THRESHOLD_CENTS = DEPOSIT_THRESHOLD * 100;
 
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I — avoids misreads
 
@@ -57,8 +61,8 @@ async function linkReferral(refereeId, code) {
   try {
     return await withTransaction(async tx => {
       await tx.execute(
-        "INSERT INTO referrals (referrer_id, referee_id, status, threshold_amount) VALUES (?, ?, 'pending', ?)",
-        [referrer.id, refereeId, DEPOSIT_THRESHOLD]
+        "INSERT INTO referrals (referrer_id, referee_id, status, threshold_amount, threshold_amount_cents) VALUES (?, ?, 'pending', ?, ?)",
+        [referrer.id, refereeId, DEPOSIT_THRESHOLD, DEPOSIT_THRESHOLD_CENTS]
       );
       await tx.execute("UPDATE users SET referred_by = ? WHERE id = ?", [referrer.id, refereeId]);
       return referrer.id;
@@ -79,8 +83,8 @@ async function checkReferralBonus(refereeId) {
   );
   if (!referral) return null;
 
-  const lifetimeDeposits = await getLifetimeDeposits(refereeId);
-  if (lifetimeDeposits < referral.threshold_amount) return null;
+  const lifetimeDepositsCents = await getLifetimeDepositsCents(refereeId);
+  if (lifetimeDepositsCents < referral.threshold_amount_cents) return null;
 
   const unlockAt = new Date(Date.now() + REFERRAL_LOCK_DAYS * 24 * 60 * 60 * 1000)
     .toISOString().slice(0, 19).replace("T", " ");
@@ -92,18 +96,18 @@ async function checkReferralBonus(refereeId) {
     );
     if (flipped.rowsAffected === 0) return null;
 
-    for (const [userId, role, amount] of [
-      [referral.referrer_id, "referrer", REFERRER_BONUS],
-      [referral.referee_id,  "referee",  REFEREE_BONUS],
+    for (const [userId, role, amount, amountCents] of [
+      [referral.referrer_id, "referrer", REFERRER_BONUS, REFERRER_BONUS_CENTS],
+      [referral.referee_id,  "referee",  REFEREE_BONUS, REFEREE_BONUS_CENTS],
     ]) {
       const credited = await tx.execute(
-        "UPDATE users SET cash_balance = cash_balance + ?, updated_at = datetime('now') WHERE id = ?",
-        [amount, userId]
+        "UPDATE users SET cash_balance_cents = cash_balance_cents + ?, updated_at = datetime('now') WHERE id = ?",
+        [amountCents, userId]
       );
       if (credited.rowsAffected === 0) throw new Error("Referral bonus recipient no longer exists");
       await tx.execute(
-        "INSERT INTO referral_bonus_grants (user_id, referral_id, role, amount, unlock_at) VALUES (?, ?, ?, ?, ?)",
-        [userId, referral.id, role, amount, unlockAt]
+        "INSERT INTO referral_bonus_grants (user_id, referral_id, role, amount, amount_cents, unlock_at) VALUES (?, ?, ?, ?, ?, ?)",
+        [userId, referral.id, role, amount, amountCents, unlockAt]
       );
     }
 
@@ -114,18 +118,22 @@ async function checkReferralBonus(refereeId) {
 // Sum of still-locked referral bonus money — added into the withdrawal
 // guard alongside bonus_grants (see trades.js and promotions.js).
 async function getLockedReferralBonusTotal(userId) {
+  return dollarsFromCents(await getLockedReferralBonusTotalCents(userId));
+}
+
+async function getLockedReferralBonusTotalCents(userId) {
   const row = await queryOne(
-    "SELECT COALESCE(SUM(amount),0) AS total FROM referral_bonus_grants WHERE user_id = ? AND unlock_at > datetime('now')",
+    "SELECT COALESCE(SUM(amount_cents),0) AS total FROM referral_bonus_grants WHERE user_id = ? AND unlock_at > datetime('now')",
     [userId]
   );
-  return row.total;
+  return Number(row.total);
 }
 
 // Everything a user needs for their own Referrals page.
 async function getReferralSummary(userId) {
   const user = await queryOne("SELECT referral_code FROM users WHERE id = ?", [userId]);
   const referrals = await queryAll(
-    `SELECT r.id, r.status, r.threshold_amount, r.completed_at, r.created_at,
+    `SELECT r.id, r.status, r.threshold_amount, r.threshold_amount_cents, r.completed_at, r.created_at,
             u.name AS refereeName
      FROM referrals r JOIN users u ON u.id = r.referee_id
      WHERE r.referrer_id = ?
@@ -133,17 +141,17 @@ async function getReferralSummary(userId) {
     [userId]
   );
   const earnedRow = await queryOne(
-    "SELECT COALESCE(SUM(amount),0) AS total FROM referral_bonus_grants WHERE user_id = ? AND role = 'referrer'",
+    "SELECT COALESCE(SUM(amount_cents),0) AS total FROM referral_bonus_grants WHERE user_id = ? AND role = 'referrer'",
     [userId]
   );
   return {
     code: user?.referral_code || null,
-    totalEarned: earnedRow.total,
+    totalEarned: dollarsFromCents(Number(earnedRow.total)),
     referrals: referrals.map(r => ({
       id: r.id,
       refereeName: r.refereeName,
       status: r.status,
-      thresholdAmount: r.threshold_amount,
+      thresholdAmount: dollarsFromCents(Number(r.threshold_amount_cents)),
       completedAt: r.completed_at,
       createdAt: r.created_at,
     })),
@@ -153,5 +161,5 @@ async function getReferralSummary(userId) {
 module.exports = {
   REFERRER_BONUS, REFEREE_BONUS, REFERRAL_LOCK_DAYS, DEPOSIT_THRESHOLD,
   generateReferralCode, linkReferral, checkReferralBonus,
-  getLockedReferralBonusTotal, getReferralSummary,
+  getLockedReferralBonusTotal, getLockedReferralBonusTotalCents, getReferralSummary,
 };

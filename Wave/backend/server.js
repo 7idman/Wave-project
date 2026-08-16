@@ -28,11 +28,10 @@ validateProductionSecrets();
 const express        = require("express");
 const cors           = require("cors");
 const session        = require("express-session");
-const MemoryStore    = require("memorystore")(session);
 const passport       = require("passport");
-const rateLimit      = require("express-rate-limit");
 const { initSchema, execute } = require("./db");
 const { authenticate } = require("./middleware/auth");
+const { databaseRateLimit } = require("./middleware/databaseRateLimit");
 
 const authRoutes      = require("./routes/auth");
 const priceRoutes     = require("./routes/prices");
@@ -54,32 +53,27 @@ const priceAlertRoutes = require("./routes/priceAlerts");
 const { startAutoInvestSchedule } = require("./services/autoInvest");
 const { startPriceSnapshotSchedule } = require("./services/priceSnapshot");
 const { startStrategyMirrorSchedule } = require("./services/strategyMirroring");
-const { fetchStockPrices } = require("./services/stocks");
+const { startStockRefreshSchedule } = require("./services/stockRefreshJobs");
+const {
+  LibsqlSessionStore,
+  startSessionCleanupSchedule,
+} = require("./services/libsqlSessionStore");
+const { runWithSchedulerLease } = require("./services/schedulerLease");
 
 const app  = express();
 const PORT = process.env.PORT || 4000;
+const httpSessionStore = new LibsqlSessionStore();
 app.disable("x-powered-by");
 
-// Bug fix: Railway (and most hosts) put your app behind a reverse proxy, so
-// the real client IP arrives in an X-Forwarded-For header rather than as the
-// raw socket address. Without this, express-rate-limit's authLimiter either
-// throttles everyone as if they share one IP, or — on express-rate-limit v7+
-// — throws an "ERR_ERL_UNEXPECTED_X_FORWARDED_FOR" validation error outright.
-// It also means req.ip (now used for session device history) always resolved
-// to the proxy's address instead of the visitor's.
+// Railway puts the app behind a reverse proxy. Trust one proxy hop so the
+// shared database limiter and security logs use the actual visitor IP.
 app.set("trust proxy", 1);
 
 // ── Rate limiter ──────────────────────────────────────────────────────────────
 // Concept: limits each IP to 10 login/register attempts per 15 minutes.
 // Only applied to /login and /register — NOT to /me or other auth routes.
 // This prevents brute-force password attacks without locking out normal users.
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minute window
-  max: 10,                   // max 10 attempts per IP per window
-  message: { error: "Too many attempts, please try again later." },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+const authLimiter = databaseRateLimit({ scope: "auth_ip", max: 10, windowMinutes: 15 });
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
 const ALLOWED_ORIGINS = [
@@ -103,14 +97,10 @@ app.use(express.json({ limit: "10mb" }));
 app.use(require("cookie-parser")());
 
 // ── Session ───────────────────────────────────────────────────────────────────
-// Concept: memorystore keeps sessions in RAM like the default MemoryStore,
-// but automatically deletes expired sessions every hour via a cleanup timer.
-// This prevents the memory leak where sessions pile up forever and eventually
-// crash the server. No native C++ compilation needed — works on any OS.
+// Sessions live in libSQL rather than process memory. Railway restarts no
+// longer log Passport users out, and every replica sees the same session.
 app.use(session({
-  store: new MemoryStore({
-    checkPeriod: 60 * 60 * 1000, // clean up expired sessions every 1 hour
-  }),
+  store:             httpSessionStore,
   secret:            process.env.SESSION_SECRET || "wave_session_secret",
   resave:            false,
   saveUninitialized: false,
@@ -170,23 +160,29 @@ async function start() {
   try {
     await initSchema();
     const cleanup = await execute("DELETE FROM refresh_tokens WHERE expires_at < datetime('now')");
-if (cleanup.rowsAffected > 0) {
-  console.log(`🧹 Cleared ${cleanup.rowsAffected} expired refresh token(s)`);
-}
-    priceRoutes.fetchLivePrices().catch(console.warn);
-    fetchStockPrices().then(r=>console.log(`Stocks: ${r.updated} updated, ${r.skipped} skipped`)).catch(console.warn);
-    setInterval(() => { fetchStockPrices().catch(console.warn); }, 5 * 60 * 1000);
+    if (cleanup.rowsAffected > 0) {
+      console.log(`[info] Cleared ${cleanup.rowsAffected} expired refresh token(s)`);
+    }
+    runWithSchedulerLease(
+      "crypto-price-warmup",
+      60 * 1000,
+      priceRoutes.fetchLivePrices
+    ).catch(error => console.warn("Crypto price warmup failed:", error.message));
+    startStockRefreshSchedule();
     startPriceSnapshotSchedule();
     startAutoInvestSchedule();
     startStrategyMirrorSchedule();
+    startSessionCleanupSchedule(httpSessionStore);
     app.listen(PORT, () => {
-      console.log(`🚀 Wave API running on http://localhost:${PORT}`);
-      console.log(`📦 Database: ${process.env.LIBSQL_URL || "file:wave.db"}`);
+      console.log(`[info] Wave API running on http://localhost:${PORT}`);
+      console.log(`[info] Database: ${process.env.LIBSQL_URL || "file:wave.db"}`);
     });
   } catch (err) {
-    console.error("❌ Failed to start server:", err.message);
+    console.error("[error] Failed to start server:", err.message);
     process.exit(1);
   }
 }
 
-start();
+if (require.main === module) start();
+
+module.exports = { app, start };

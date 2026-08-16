@@ -35,7 +35,7 @@ router.post("/send-code", async (req, res) => {
 
     const lookup = await lookupLineType(phone);
     if (lookup.error === "twilio_not_configured") {
-      console.error("Twilio is not configured — failing closed on phone verification.");
+      console.error("Twilio is not configured; failing closed on phone verification.");
       return res.status(503).json({ error: "Phone verification is temporarily unavailable. Please try again later." });
     }
     if (!lookup.valid) return res.status(400).json({ error: "That doesn't look like a valid phone number." });

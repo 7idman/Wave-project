@@ -22,6 +22,8 @@ const {
   processStrategyMirrorJobsForTrade,
   retryStrategyMirrorJob,
 } = require("../services/strategyMirroring");
+const { checkAndRecord } = require("../services/rateLimit");
+const { parseMoneyToCents, roundMoneyToCents, centsFromRate, dollarsFromCents } = require("../utils/money");
 
 let sequence = 0;
 
@@ -111,11 +113,45 @@ test("schema fingerprint is automatic and required integrity indexes exist", asy
        )`
   );
   assert.equal(indexes.length, 3);
+
+  const infrastructureTables = await db.queryAll(
+    `SELECT name FROM sqlite_master
+     WHERE type = 'table'
+       AND name IN ('http_sessions', 'scheduler_leases', 'stock_refresh_jobs')`
+  );
+  assert.equal(infrastructureTables.length, 3);
+});
+
+test("fiat helpers parse and settle exact cents without floating-point drift", () => {
+  assert.equal(parseMoneyToCents("0.10") + parseMoneyToCents("0.20"), 30);
+  assert.equal(roundMoneyToCents(10.005), 1001);
+  assert.equal(centsFromRate(10000, 0.001), 10);
+  assert.equal(dollarsFromCents(12345), 123.45);
+  assert.throws(() => parseMoneyToCents("1.001"), /two decimal places/);
+});
+
+test("legacy fiat writes are deterministically rounded into the cents ledger", async () => {
+  const userId = await createUser({ cashBalance: 10.239 });
+  const user = await db.queryOne("SELECT cash_balance, cash_balance_cents FROM users WHERE id = ?", [userId]);
+  assert.equal(user.cash_balance_cents, 1024);
+  assert.equal(user.cash_balance, 10.24);
+});
+
+test("shared rate limits remain exact under concurrent replica-style calls", async () => {
+  const identifier = `ip:concurrent-${Date.now()}`;
+  const results = await Promise.all(Array.from({ length: 12 }, () =>
+    checkAndRecord("test_shared_ip", identifier, { max: 10, windowMinutes: 15 })
+  ));
+  assert.equal(results.filter(result => result.allowed).length, 10);
+  assert.equal(Math.max(...results.map(result => result.count)), 12);
 });
 
 test("a legacy schema marker reruns idempotent migrations automatically", async () => {
   await db.execute("DROP INDEX idx_bonus_grants_transaction");
   await db.execute("DROP TABLE strategy_mirror_jobs");
+  await db.execute("DROP TABLE http_sessions");
+  await db.execute("DROP TABLE scheduler_leases");
+  await db.execute("DROP TABLE stock_refresh_jobs");
   await db.execute("UPDATE schema_meta SET value = '1' WHERE key = 'schema_version'");
 
   await db.initSchema();
@@ -127,9 +163,15 @@ test("a legacy schema marker reruns idempotent migrations automatically", async 
   const bonusIndex = await db.queryOne(
     "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_bonus_grants_transaction'"
   );
+  const infrastructureTables = await db.queryAll(
+    `SELECT name FROM sqlite_master
+     WHERE type = 'table'
+       AND name IN ('http_sessions', 'scheduler_leases', 'stock_refresh_jobs')`
+  );
   assert.match(version.value, /^[a-f0-9]{12}$/);
   assert.ok(jobsTable);
   assert.ok(bonusIndex);
+  assert.equal(infrastructureTables.length, 3);
 });
 
 test("failed financial transactions roll back every write", async () => {
@@ -359,4 +401,172 @@ test("migration refuses to guess when historical duplicate mirrors exist", async
     "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_strategy_trade_mirrors_trade_portfolio'"
   );
   assert.ok(restored);
+});
+
+test("Finnhub quote requests are paced and a 429 is retried", async () => {
+  const originalFetch = global.fetch;
+  const originalWarn = console.warn;
+  const originalApiKey = process.env.FINNHUB_API_KEY;
+  const originalInterval = process.env.FINNHUB_REQUEST_INTERVAL_MS;
+  const originalCooldown = process.env.FINNHUB_RATE_LIMIT_COOLDOWN_MS;
+  const requestTimes = [];
+  const warnings = [];
+  let requestCount = 0;
+
+  process.env.FINNHUB_API_KEY = "financial-test-key";
+  process.env.FINNHUB_REQUEST_INTERVAL_MS = "10";
+  process.env.FINNHUB_RATE_LIMIT_COOLDOWN_MS = "25";
+  console.warn = (...parts) => warnings.push(parts.join(" "));
+  global.fetch = async () => {
+    requestTimes.push(Date.now());
+    requestCount += 1;
+    if (requestCount === 1) {
+      return {
+        ok: false,
+        status: 429,
+        headers: { get: () => null },
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => ({ c: 123.45, dp: 0.5 }),
+    };
+  };
+
+  try {
+    const { fetchStockQuote } = require("../services/stocks");
+    const [apple, microsoft] = await Promise.all([
+      fetchStockQuote("AAPL"),
+      fetchStockQuote("MSFT"),
+    ]);
+
+    assert.equal(requestCount, 3);
+    assert.deepEqual(apple, {
+      symbol: "AAPL",
+      price: 123.45,
+      change24h: 0.5,
+    });
+    assert.deepEqual(microsoft, {
+      symbol: "MSFT",
+      price: 123.45,
+      change24h: 0.5,
+    });
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /rate-limited AAPL/);
+    assert.ok(requestTimes[1] - requestTimes[0] >= 20);
+    assert.ok(requestTimes[2] - requestTimes[1] >= 7);
+  } finally {
+    global.fetch = originalFetch;
+    console.warn = originalWarn;
+    if (originalApiKey === undefined) delete process.env.FINNHUB_API_KEY;
+    else process.env.FINNHUB_API_KEY = originalApiKey;
+    if (originalInterval === undefined) delete process.env.FINNHUB_REQUEST_INTERVAL_MS;
+    else process.env.FINNHUB_REQUEST_INTERVAL_MS = originalInterval;
+    if (originalCooldown === undefined) delete process.env.FINNHUB_RATE_LIMIT_COOLDOWN_MS;
+    else process.env.FINNHUB_RATE_LIMIT_COOLDOWN_MS = originalCooldown;
+  }
+});
+
+test("HTTP sessions survive store instances and can be destroyed", async () => {
+  const { LibsqlSessionStore } = require("../services/libsqlSessionStore");
+  const firstStore = new LibsqlSessionStore();
+  const secondStore = new LibsqlSessionStore();
+  const sid = `session-${Date.now()}`;
+  const sessionData = {
+    cookie: {
+      expires: new Date(Date.now() + 60_000),
+      maxAge: 60_000,
+    },
+    passport: { user: 42 },
+  };
+  const callStore = (store, method, ...args) => new Promise((resolve, reject) => {
+    store[method](...args, (error, value) => error ? reject(error) : resolve(value));
+  });
+
+  await callStore(firstStore, "set", sid, sessionData);
+  const restored = await callStore(secondStore, "get", sid);
+  assert.deepEqual(restored.passport, { user: 42 });
+
+  restored.passport.user = 84;
+  await callStore(secondStore, "set", sid, restored);
+  await callStore(secondStore, "touch", sid, restored);
+  const touched = await callStore(firstStore, "get", sid);
+  assert.equal(touched.passport.user, 84);
+
+  await callStore(firstStore, "destroy", sid);
+  assert.equal(await callStore(secondStore, "get", sid), null);
+});
+
+test("distributed scheduler leases allow only one replica per interval", async () => {
+  const { tryAcquireSchedulerLease } = require("../services/schedulerLease");
+  const jobName = `lease-test-${Date.now()}`;
+
+  assert.equal(await tryAcquireSchedulerLease(jobName, 60_000, "replica-a"), true);
+  assert.equal(await tryAcquireSchedulerLease(jobName, 60_000, "replica-b"), false);
+
+  await db.execute(
+    "UPDATE scheduler_leases SET lease_until = datetime('now', '-1 second') WHERE job_name = ?",
+    [jobName]
+  );
+  assert.equal(await tryAcquireSchedulerLease(jobName, 60_000, "replica-b"), true);
+  await db.execute("DELETE FROM scheduler_leases WHERE job_name = ?", [jobName]);
+});
+
+test("concurrent stock refresh requests share one durable asynchronous job", async () => {
+  const originalFetch = global.fetch;
+  const originalLog = console.log;
+  const originalApiKey = process.env.FINNHUB_API_KEY;
+  const originalInterval = process.env.FINNHUB_REQUEST_INTERVAL_MS;
+  let requestCount = 0;
+
+  process.env.FINNHUB_API_KEY = "stock-job-test-key";
+  process.env.FINNHUB_REQUEST_INTERVAL_MS = "1";
+  console.log = () => {};
+  global.fetch = async () => {
+    requestCount += 1;
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => ({ c: 100 + requestCount, dp: 0.25 }),
+    };
+  };
+
+  const {
+    enqueueStockRefresh,
+    getStockRefreshJob,
+    processPendingStockRefreshJobs,
+  } = require("../services/stockRefreshJobs");
+
+  try {
+    const requests = await Promise.all([
+      enqueueStockRefresh({ source: "admin" }),
+      enqueueStockRefresh({ source: "admin" }),
+    ]);
+    assert.equal(requests.filter(result => result.created).length, 1);
+    assert.equal(requests[0].job.id, requests[1].job.id);
+
+    await processPendingStockRefreshJobs();
+    const completed = await getStockRefreshJob(requests[0].job.id);
+    assert.equal(completed.status, "completed");
+    assert.equal(completed.total, 46);
+    assert.equal(completed.processed, 46);
+    assert.equal(completed.updated, 46);
+    assert.equal(completed.skipped, 0);
+    assert.equal(requestCount, 46);
+
+    const next = await enqueueStockRefresh({ source: "admin" });
+    assert.equal(next.created, true);
+    assert.notEqual(next.job.id, completed.id);
+  } finally {
+    await db.execute("DELETE FROM stock_refresh_jobs");
+    global.fetch = originalFetch;
+    console.log = originalLog;
+    if (originalApiKey === undefined) delete process.env.FINNHUB_API_KEY;
+    else process.env.FINNHUB_API_KEY = originalApiKey;
+    if (originalInterval === undefined) delete process.env.FINNHUB_REQUEST_INTERVAL_MS;
+    else process.env.FINNHUB_REQUEST_INTERVAL_MS = originalInterval;
+  }
 });

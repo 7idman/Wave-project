@@ -5,6 +5,7 @@
  */
 
 const { queryOne } = require("../db");
+const { dollarsFromCents } = require("../utils/money");
 
 // Ordered lowest to highest. Thresholds are a starting point — easy to
 // tune later without touching the calculation logic.
@@ -16,11 +17,15 @@ const TIERS = [
 ];
 
 async function getLifetimeDeposits(userId) {
+  return dollarsFromCents(await getLifetimeDepositsCents(userId));
+}
+
+async function getLifetimeDepositsCents(userId) {
   const row = await queryOne(
-    "SELECT COALESCE(SUM(total),0) AS total FROM transactions WHERE user_id = ? AND type = 'deposit' AND status = 'completed'",
+    "SELECT COALESCE(SUM(total_cents),0) AS total FROM transactions WHERE user_id = ? AND type = 'deposit' AND status = 'completed'",
     [userId]
   );
-  return row.total;
+  return Number(row.total);
 }
 
 function tierForAmount(amount) {
@@ -50,4 +55,4 @@ async function getUserTier(userId) {
   return { lifetimeDeposits, ...tierForAmount(lifetimeDeposits) };
 }
 
-module.exports = { TIERS, getLifetimeDeposits, tierForAmount, getUserTier };
+module.exports = { TIERS, getLifetimeDeposits, getLifetimeDepositsCents, tierForAmount, getUserTier };

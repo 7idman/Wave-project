@@ -19,6 +19,7 @@ const { sendWithdrawalEmailCode } = require("../services/email");
 const { getDepositMethods, VALID_METHODS } = require("../services/depositMethods");
 const { logSecurityEvent } = require("../middleware/security");
 const { assessWithdrawalRisk } = require("../services/riskEngine");
+const { parseMoneyToCents, roundMoneyToCents, centsFromRate, dollarsFromCents } = require("../utils/money");
 
 function hashCode(code) {
   return crypto.createHash("sha256").update(String(code)).digest("hex");
@@ -26,7 +27,7 @@ function hashCode(code) {
 
 const FEE_RATE     = 0.001; // 0.1% buy/sell
 const WITHDRAW_FEE = 0.005; // 0.5% withdrawal
-const MIN_DEPOSIT = 100; // matches the Bronze tier threshold
+const MIN_DEPOSIT_CENTS = 10000; // matches the Bronze tier threshold
 const SENSITIVE_CHANGE_COOLDOWN_HOURS = parseInt(process.env.SENSITIVE_CHANGE_COOLDOWN_HOURS || "72", 10);
 
 // GET /api/trades/deposit-methods — returns whichever destination details
@@ -45,13 +46,15 @@ router.post("/", async (req, res) => {
 
     if (!["buy","sell","deposit","withdraw","investment"].includes(type))
       return res.status(400).json({ error: "type must be buy, sell, deposit, withdraw, or investment" });
-    if (!amount || isNaN(amount) || parseFloat(amount) <= 0)
+    const isAssetTrade = type === "buy" || type === "sell";
+    const qty = isAssetTrade ? Number(amount) : null;
+    if (isAssetTrade && (!Number.isFinite(qty) || qty <= 0))
       return res.status(400).json({ error: "amount must be a positive number" });
+    const moneyCents = isAssetTrade ? null : parseMoneyToCents(amount);
+    const moneyAmount = isAssetTrade ? null : dollarsFromCents(moneyCents);
 
-    const qty = parseFloat(amount);
-
-    if (type === "deposit" && qty < MIN_DEPOSIT)
-      return res.status(400).json({ error: `Minimum deposit is $${MIN_DEPOSIT}` });
+    if (type === "deposit" && moneyCents < MIN_DEPOSIT_CENTS)
+      return res.status(400).json({ error: `Minimum deposit is $${dollarsFromCents(MIN_DEPOSIT_CENTS)}` });
 
     // A plan activation reduces available cash, but it is not a withdrawal.
     // Keep it in a dedicated activity log so its notification is accurate.
@@ -59,18 +62,18 @@ router.post("/", async (req, res) => {
       const activityLabel = typeof label === "string" && label.trim() ? label.trim().slice(0, 120) : "Investment plan";
       const outcome = await withTransaction(async tx => {
         const result = await tx.execute(
-          "UPDATE users SET cash_balance = cash_balance - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance >= ?",
-          [qty, userId, qty]
+          "UPDATE users SET cash_balance_cents = cash_balance_cents - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance_cents >= ?",
+          [moneyCents, userId, moneyCents]
         );
         if (result.rowsAffected === 0) return { error: "Insufficient balance" };
         await tx.execute(
-          "INSERT INTO activity_log (user_id, type, label, amount) VALUES (?, ?, ?, ?)",
-          [userId, "investment", activityLabel, qty]
+          "INSERT INTO activity_log (user_id, type, label, amount, amount_cents) VALUES (?, ?, ?, ?, ?)",
+          [userId, "investment", activityLabel, moneyAmount, moneyCents]
         );
-        return tx.queryOne("SELECT cash_balance FROM users WHERE id = ?", [userId]);
+        return tx.queryOne("SELECT cash_balance_cents FROM users WHERE id = ?", [userId]);
       });
       if (outcome.error) return res.status(400).json(outcome);
-      return res.status(201).json({ message: `${activityLabel} activated`, cashBalance: outcome.cash_balance });
+      return res.status(201).json({ message: `${activityLabel} activated`, cashBalance: dollarsFromCents(outcome.cash_balance_cents) });
     }
 
     // ── DEPOSIT ────────────────────────────────────────────────────────────
@@ -109,13 +112,13 @@ router.post("/", async (req, res) => {
       const r = await createAdminRequest({
         userId,
         type: "deposit",
-        title: `Deposit request — $${qty.toLocaleString()} via ${methodLabel}`,
-        details: `$${qty.toLocaleString()} deposit via ${methodLabel}${reference ? ` — ref: ${reference}` : ""}`,
-        amount: qty,
-        payload: { amount: qty, method, coin, reference },
+        title: `Deposit request — $${moneyAmount.toLocaleString()} via ${methodLabel}`,
+        details: `$${moneyAmount.toLocaleString()} deposit via ${methodLabel}${reference ? ` — ref: ${reference}` : ""}`,
+        amount: moneyAmount,
+        payload: { amount: moneyAmount, amountCents: moneyCents, method, coin, reference },
       });
       return res.status(202).json({
-        message: `Deposit request for $${qty.toLocaleString()} sent for admin review`,
+        message: `Deposit request for $${moneyAmount.toLocaleString()} sent for admin review`,
         requestId: r.id,
       });
     }
@@ -171,8 +174,10 @@ router.post("/", async (req, res) => {
 
       const { tier } = await getUserTier(userId);
       const isVip = tier === "platinum";
-      const fee   = isVip ? 0 : parseFloat((qty * WITHDRAW_FEE).toFixed(2));
-      const total = parseFloat((qty + fee).toFixed(2));
+      const feeCents = isVip ? 0 : centsFromRate(moneyCents, WITHDRAW_FEE);
+      const totalCents = moneyCents + feeCents;
+      const fee = dollarsFromCents(feeCents);
+      const total = dollarsFromCents(totalCents);
       const referenceId = generateReferenceId("WD");
 
       // Read-only early check so someone without enough available balance
@@ -182,14 +187,14 @@ router.post("/", async (req, res) => {
       // conditional deduction runs again (and is the real gate) when an
       // admin approves the request in admin.js.
       const balanceRow = await queryOne(
-        `SELECT (cash_balance
-                 - (SELECT COALESCE(SUM(amount),0) FROM bonus_grants WHERE user_id = ? AND unlock_at > datetime('now'))
-                 - (SELECT COALESCE(SUM(amount),0) FROM referral_bonus_grants WHERE user_id = ? AND unlock_at > datetime('now'))
+        `SELECT (cash_balance_cents
+                 - (SELECT COALESCE(SUM(amount_cents),0) FROM bonus_grants WHERE user_id = ? AND unlock_at > datetime('now'))
+                 - (SELECT COALESCE(SUM(amount_cents),0) FROM referral_bonus_grants WHERE user_id = ? AND unlock_at > datetime('now'))
                 ) AS available
          FROM users WHERE id = ?`,
         [userId, userId, userId]
       );
-      if (!balanceRow || balanceRow.available < total) {
+      if (!balanceRow || Number(balanceRow.available) < totalCents) {
         const lockedBonus = (await getLockedBonusTotal(userId)) + (await getLockedReferralBonusTotal(userId));
         return res.status(400).json({
           error: lockedBonus > 0
@@ -203,11 +208,11 @@ router.post("/", async (req, res) => {
       // though it no longer gates whether OTP is required (everything
       // requires it now).
       const withdrawalRisk = await assessWithdrawalRisk({
-        userId, ip: req.ip, amount: qty,
+        userId, ip: req.ip, amount: moneyAmount,
         phoneVerified: true,
         sensitiveChangeRecent: false,
       });
-      await logSecurityEvent("RISK_ASSESSED", { userId, ip: req.ip, metadata: { context: "withdraw", score: withdrawalRisk.score, level: withdrawalRisk.level, reasons: withdrawalRisk.reasons, amount: qty } });
+      await logSecurityEvent("RISK_ASSESSED", { userId, ip: req.ip, metadata: { context: "withdraw", score: withdrawalRisk.score, level: withdrawalRisk.level, reasons: withdrawalRisk.reasons, amount: moneyAmount } });
 
       const otpLimit = await checkAndRecord("withdraw_otp_send", `user:${userId}`, { max: 5, windowMinutes: 30 });
       if (!otpLimit.allowed) return res.status(429).json({ error: "Too many verification requests. Please try again later." });
@@ -218,7 +223,7 @@ router.post("/", async (req, res) => {
       const emailCode = String(crypto.randomInt(100000, 1000000)); // 6 digits
       const emailCodeHash = hashCode(emailCode);
       try {
-        await sendWithdrawalEmailCode({ to: req.user.email, name: req.user.name, code: emailCode, amount: qty.toLocaleString() });
+        await sendWithdrawalEmailCode({ to: req.user.email, name: req.user.name, code: emailCode, amount: moneyAmount.toLocaleString() });
       } catch (emailErr) {
         console.error("Withdrawal email code send failed:", emailErr.message);
         return res.status(503).json({ error: "Couldn't send email verification code. Please try again." });
@@ -226,11 +231,11 @@ router.post("/", async (req, res) => {
 
       const pending = await execute(
         `INSERT INTO transactions
-           (user_id, type, symbol, amount, price, fee, total, status, reference_id, email_otp_hash, email_otp_expires_at)
-         VALUES (?, 'withdraw', 'USD', ?, 1, ?, ?, 'pending', ?, ?, datetime('now', '+10 minutes'))`,
-        [userId, qty, fee, total, referenceId, emailCodeHash]
+           (user_id, type, symbol, amount, amount_cents, price, fee, fee_cents, total, total_cents, status, reference_id, email_otp_hash, email_otp_expires_at)
+         VALUES (?, 'withdraw', 'USD', ?, ?, 1, ?, ?, ?, ?, 'pending', ?, ?, datetime('now', '+10 minutes'))`,
+        [userId, moneyAmount, moneyCents, fee, feeCents, total, totalCents, referenceId, emailCodeHash]
       );
-      await logSecurityEvent("WITHDRAWAL_VERIFICATION_SENT", { userId, ip: req.ip, metadata: { amount: qty, riskLevel: withdrawalRisk.level } });
+      await logSecurityEvent("WITHDRAWAL_VERIFICATION_SENT", { userId, ip: req.ip, metadata: { amount: moneyAmount, riskLevel: withdrawalRisk.level } });
 
       return res.status(202).json({
         message: "Verification required — check your phone and email for a code.",
@@ -246,15 +251,17 @@ router.post("/", async (req, res) => {
     if (!priceRow) return res.status(404).json({ error: `Unknown symbol: ${sym}` });
 
     const price    = priceRow.price;
-    const subtotal = qty * price;
-    const fee      = parseFloat((subtotal * FEE_RATE).toFixed(8));
-    const total    = parseFloat((subtotal + fee).toFixed(8));
+    const subtotalCents = roundMoneyToCents(qty * price);
+    const feeCents = centsFromRate(subtotalCents, FEE_RATE);
+    const totalCents = subtotalCents + feeCents;
+    const fee = dollarsFromCents(feeCents);
+    const total = dollarsFromCents(totalCents);
 
     const outcome = await withTransaction(async tx => {
       if (type === "buy") {
         const result = await tx.execute(
-          "UPDATE users SET cash_balance = cash_balance - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance >= ?",
-          [total, userId, total]
+          "UPDATE users SET cash_balance_cents = cash_balance_cents - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance_cents >= ?",
+          [totalCents, userId, totalCents]
         );
         if (result.rowsAffected === 0) return { error: "Insufficient cash balance" };
 
@@ -264,11 +271,12 @@ router.post("/", async (req, res) => {
           [userId, sym, qty]
         );
         await tx.execute(
-          "INSERT INTO transactions (user_id, type, symbol, amount, price, fee, total, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'completed')",
-          [userId, "buy", sym, qty, price, fee, total]
+          "INSERT INTO transactions (user_id, type, symbol, amount, price, fee, fee_cents, total, total_cents, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed')",
+          [userId, "buy", sym, qty, price, fee, feeCents, total, totalCents]
         );
       } else {
-        const proceeds = parseFloat((subtotal - fee).toFixed(8));
+        const proceedsCents = subtotalCents - feeCents;
+        const proceeds = dollarsFromCents(proceedsCents);
         const result = await tx.execute(
           "UPDATE holdings SET amount = amount - ?, updated_at = datetime('now') WHERE user_id = ? AND symbol = ? AND amount >= ?",
           [qty, userId, sym, qty]
@@ -276,18 +284,18 @@ router.post("/", async (req, res) => {
         if (result.rowsAffected === 0) return { error: "Insufficient holdings" };
 
         await tx.execute(
-          "UPDATE users SET cash_balance = cash_balance + ?, updated_at = datetime('now') WHERE id = ?",
-          [proceeds, userId]
+          "UPDATE users SET cash_balance_cents = cash_balance_cents + ?, updated_at = datetime('now') WHERE id = ?",
+          [proceedsCents, userId]
         );
         await tx.execute(
-          "INSERT INTO transactions (user_id, type, symbol, amount, price, fee, total, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'completed')",
-          [userId, "sell", sym, qty, price, fee, proceeds]
+          "INSERT INTO transactions (user_id, type, symbol, amount, price, fee, fee_cents, total, total_cents, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed')",
+          [userId, "sell", sym, qty, price, fee, feeCents, proceeds, proceedsCents]
         );
       }
 
-      const user = await tx.queryOne("SELECT cash_balance FROM users WHERE id = ?", [userId]);
+      const user = await tx.queryOne("SELECT cash_balance_cents FROM users WHERE id = ?", [userId]);
       const holding = await tx.queryOne("SELECT amount FROM holdings WHERE user_id = ? AND symbol = ?", [userId, sym]);
-      return { cashBalance: user.cash_balance, holding: holding?.amount ?? 0 };
+      return { cashBalance: dollarsFromCents(user.cash_balance_cents), holding: holding?.amount ?? 0 };
     });
     if (outcome.error) return res.status(400).json(outcome);
     res.status(201).json({
@@ -296,7 +304,7 @@ router.post("/", async (req, res) => {
       holding:     outcome.holding,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err instanceof TypeError || err instanceof RangeError ? 400 : 500).json({ error: err.message });
   }
 });
 

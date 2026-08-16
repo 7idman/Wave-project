@@ -11,13 +11,22 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        // Vendor code (React, recharts) changes far less often than the app
-        // itself — splitting it into its own chunk means a returning user's
-        // browser can keep it cached across deploys, only re-downloading
-        // the (smaller) app chunk when something in PlatformApp.tsx changes.
-        // This is a build-config-only change — no application code moved.
-        manualChunks: {
-          vendor: ['react', 'react-dom', 'recharts'],
+        // React and the charting stack change less often than application
+        // code, but combining both crossed Vite's 500 kB chunk threshold.
+        // Separate cache groups keep first-load parsing smaller while still
+        // preserving long-lived vendor caching across deployments.
+        onlyExplicitManualChunks: true,
+        manualChunks(id) {
+          const moduleId = id.replaceAll('\\', '/')
+          if (!moduleId.includes('/node_modules/')) return undefined
+          if (
+            moduleId.includes('/node_modules/react/') ||
+            moduleId.includes('/node_modules/react-dom/') ||
+            moduleId.includes('/node_modules/scheduler/')
+          ) {
+            return 'reactVendor'
+          }
+          return 'charts'
         },
       },
     },

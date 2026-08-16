@@ -9,16 +9,17 @@ const { getLockedBonusTotal } = require("../services/promotions");
 const { queryAll, queryOne, execute } = require("../db");
 const { uploadAvatar } = require("../services/cloudinaryUpload");
 const { checkAndRecord } = require("../services/rateLimit");
+const { dollarsFromCents } = require("../utils/money");
 
 router.get("/tier", async (req, res) => {
   try {
     const tier = await getUserTier(req.user.id);
     const lockedBonus = await getLockedBonusTotal(req.user.id);
     const bonusGrants = await queryAll(
-      "SELECT amount, unlock_at FROM bonus_grants WHERE user_id = ? AND unlock_at > datetime('now') ORDER BY unlock_at ASC",
+      "SELECT amount_cents, unlock_at FROM bonus_grants WHERE user_id = ? AND unlock_at > datetime('now') ORDER BY unlock_at ASC",
       [req.user.id]
     );
-    res.json({ ...tier, lockedBonus, bonusGrants });
+    res.json({ ...tier, lockedBonus, bonusGrants: bonusGrants.map(grant => ({ amount: dollarsFromCents(grant.amount_cents), unlock_at: grant.unlock_at })) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -35,25 +36,25 @@ router.get("/balance-history", async (req, res) => {
   try {
     const userId = req.user.id;
     const txs = await queryAll(
-      "SELECT type, total, created_at FROM transactions WHERE user_id = ? AND status = 'completed' ORDER BY created_at ASC",
+      "SELECT type, total_cents, created_at FROM transactions WHERE user_id = ? AND status = 'completed' ORDER BY created_at ASC",
       [userId]
     );
     const bonuses = await queryAll(
-      "SELECT amount, created_at FROM bonus_grants WHERE user_id = ? ORDER BY created_at ASC",
+      "SELECT amount_cents, created_at FROM bonus_grants WHERE user_id = ? ORDER BY created_at ASC",
       [userId]
     );
     const events = [
       ...txs.map(t => ({
         at: t.created_at,
-        delta: (t.type === "deposit") ? t.total : (t.type === "withdraw" || t.type === "buy") ? -t.total : t.type === "sell" ? t.total : 0,
+        delta: (t.type === "deposit") ? t.total_cents : (t.type === "withdraw" || t.type === "buy") ? -t.total_cents : t.type === "sell" ? t.total_cents : 0,
       })),
-      ...bonuses.map(b => ({ at: b.created_at, delta: b.amount })),
+      ...bonuses.map(b => ({ at: b.created_at, delta: b.amount_cents })),
     ].sort((a, b) => (a.at || "").localeCompare(b.at || ""));
 
     let running = 0;
     const points = events.map(e => {
       running += e.delta;
-      return { date: e.at, balance: parseFloat(running.toFixed(2)) };
+      return { date: e.at, balance: dollarsFromCents(running) };
     });
 
     res.json({ points });
@@ -68,11 +69,11 @@ router.get("/wallet-analytics", async (req, res) => {
   try {
     const userId = req.user.id;
     const deposits = await queryOne(
-      "SELECT COUNT(*) AS count, COALESCE(SUM(total),0) AS total, COALESCE(MAX(total),0) AS largest, COALESCE(AVG(total),0) AS avg FROM transactions WHERE user_id = ? AND type = 'deposit' AND status = 'completed'",
+      "SELECT COUNT(*) AS count, COALESCE(SUM(total_cents),0) AS total, COALESCE(MAX(total_cents),0) AS largest, COALESCE(AVG(total_cents),0) AS avg FROM transactions WHERE user_id = ? AND type = 'deposit' AND status = 'completed'",
       [userId]
     );
     const withdrawals = await queryOne(
-      "SELECT COUNT(*) AS count, COALESCE(SUM(total),0) AS total FROM transactions WHERE user_id = ? AND type = 'withdraw' AND status = 'completed'",
+      "SELECT COUNT(*) AS count, COALESCE(SUM(total_cents),0) AS total FROM transactions WHERE user_id = ? AND type = 'withdraw' AND status = 'completed'",
       [userId]
     );
     const failedWithdrawals = await queryOne(
@@ -80,19 +81,19 @@ router.get("/wallet-analytics", async (req, res) => {
       [userId]
     );
     const bonusTotal = await queryOne(
-      "SELECT COALESCE(SUM(amount),0) AS total FROM bonus_grants WHERE user_id = ?",
+      "SELECT COALESCE(SUM(amount_cents),0) AS total FROM bonus_grants WHERE user_id = ?",
       [userId]
     );
     res.json({
-      totalDeposited: deposits.total,
+      totalDeposited: dollarsFromCents(Number(deposits.total)),
       depositCount: deposits.count,
-      largestDeposit: deposits.largest,
-      averageDeposit: deposits.avg,
-      totalWithdrawn: withdrawals.total,
+      largestDeposit: dollarsFromCents(Number(deposits.largest)),
+      averageDeposit: dollarsFromCents(Math.round(Number(deposits.avg))),
+      totalWithdrawn: dollarsFromCents(Number(withdrawals.total)),
       withdrawalCount: withdrawals.count,
       failedWithdrawalAttempts: failedWithdrawals.count,
-      totalBonusEarned: bonusTotal.total,
-      netFlow: deposits.total - withdrawals.total,
+      totalBonusEarned: dollarsFromCents(Number(bonusTotal.total)),
+      netFlow: dollarsFromCents(Number(deposits.total) - Number(withdrawals.total)),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -113,7 +114,7 @@ router.post("/avatar", async (req, res) => {
     const result = await uploadAvatar(image, req.user.id);
     if (!result.success) {
       if (result.reason === "not_configured") {
-        console.error("Cloudinary is not configured — avatar upload unavailable.");
+        console.error("Cloudinary is not configured; avatar upload unavailable.");
         return res.status(503).json({ error: "Photo uploads are temporarily unavailable. Please try again later." });
       }
       const messages = {

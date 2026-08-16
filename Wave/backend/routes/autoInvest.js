@@ -7,16 +7,17 @@
 
 const router = require("express").Router();
 const { queryOne, queryAll, execute } = require("../db");
+const { parseMoneyToCents, dollarsFromCents } = require("../utils/money");
 
 const MIN_WEEKLY_AMOUNT = 25;
 
 router.post("/plans", async (req, res) => {
   try {
     const { symbol, weeklyAmount } = req.body;
-    const amount = parseFloat(weeklyAmount);
-
     if (!symbol) return res.status(400).json({ error: "symbol is required" });
-    if (!Number.isFinite(amount) || amount < MIN_WEEKLY_AMOUNT)
+    const amountCents = parseMoneyToCents(weeklyAmount);
+    const amount = dollarsFromCents(amountCents);
+    if (amount < MIN_WEEKLY_AMOUNT)
       return res.status(400).json({ error: `Minimum weekly amount is $${MIN_WEEKLY_AMOUNT}` });
 
     const sym = symbol.toUpperCase();
@@ -27,13 +28,13 @@ router.post("/plans", async (req, res) => {
     // a new plan starts investing right away rather than making the user
     // wait a full week for their first purchase.
     const plan = await execute(
-      "INSERT INTO auto_invest_plans (user_id, symbol, weekly_amount, status, next_run_at) VALUES (?, ?, ?, 'active', datetime('now'))",
-      [req.user.id, sym, amount]
+      "INSERT INTO auto_invest_plans (user_id, symbol, weekly_amount, weekly_amount_cents, status, next_run_at) VALUES (?, ?, ?, ?, 'active', datetime('now'))",
+      [req.user.id, sym, amount, amountCents]
     );
     const created = await queryOne("SELECT * FROM auto_invest_plans WHERE id = ?", [plan.lastInsertRowid]);
     res.status(201).json({ plan: created });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err instanceof TypeError || err instanceof RangeError ? 400 : 500).json({ error: err.message });
   }
 });
 

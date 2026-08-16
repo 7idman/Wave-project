@@ -7,6 +7,7 @@
 
 const { queryAll, batch } = require("../db");
 const { checkAlerts } = require("./priceAlerts");
+const { runWithSchedulerLease } = require("./schedulerLease");
 
 let inFlightSnapshot = null;
 async function takeSnapshot() {
@@ -45,9 +46,10 @@ async function runSnapshot() {
 // writing to the database excessively at low traffic (current scale: one
 // developer + a handful of testers).
 function startPriceSnapshotSchedule(intervalMs = 15 * 60 * 1000) {
-  takeSnapshot().catch(err => console.error("Price snapshot failed:", err.message));
+  const run = () => runWithSchedulerLease("price-snapshot", intervalMs, takeSnapshot);
+  run().catch(err => console.error("Price snapshot failed:", err.message));
   const handle = setInterval(() => {
-    takeSnapshot().catch(err => console.error("Price snapshot failed:", err.message));
+    run().catch(err => console.error("Price snapshot failed:", err.message));
   }, intervalMs);
   return handle;
 }

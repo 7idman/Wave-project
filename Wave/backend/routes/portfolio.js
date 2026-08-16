@@ -5,6 +5,7 @@
 
 const router = require("express").Router();
 const { queryOne, queryAll } = require("../db");
+const { dollarsFromCents, roundMoneyToCents } = require("../utils/money");
 
 router.get("/", async (req, res) => {
   try {
@@ -30,12 +31,13 @@ router.get("/", async (req, res) => {
     const totalPortfolioValue = holdingsWithValue.reduce((s, h) => s + h.value, 0);
 
     // Get fresh cash balance
-    const userRow = await queryOne("SELECT cash_balance FROM users WHERE id = ?", [userId]);
+    const userRow = await queryOne("SELECT cash_balance_cents FROM users WHERE id = ?", [userId]);
+    const cashBalance = dollarsFromCents(userRow.cash_balance_cents);
 
     res.json({
-      cashBalance:         userRow.cash_balance,
+      cashBalance,
       totalPortfolioValue: parseFloat(totalPortfolioValue.toFixed(2)),
-      totalValue:          parseFloat((userRow.cash_balance + totalPortfolioValue).toFixed(2)),
+      totalValue:          dollarsFromCents(roundMoneyToCents(cashBalance + totalPortfolioValue)),
       holdings:            holdingsWithValue,
     });
   } catch (err) {

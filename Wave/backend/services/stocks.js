@@ -39,11 +39,95 @@ const STOCK_NAMES = {
 };
 const STOCK_SYMBOLS = Object.keys(STOCK_NAMES);
 
+// Finnhub counts requests in short windows, so sending the whole symbol list
+// concurrently can receive HTTP 429 even when the five-minute average looks
+// safe. All quote calls in this process share this queue and are kept below
+// one request per second by default. The values remain configurable for paid
+// plans without requiring a code change.
+const DEFAULT_REQUEST_INTERVAL_MS = 1100;
+const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 61_000;
+const MAX_RATE_LIMIT_RETRIES = 1;
+
+function positiveInteger(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function requestIntervalMs() {
+  return positiveInteger(
+    process.env.FINNHUB_REQUEST_INTERVAL_MS,
+    DEFAULT_REQUEST_INTERVAL_MS
+  );
+}
+
+function defaultCooldownMs() {
+  return positiveInteger(
+    process.env.FINNHUB_RATE_LIMIT_COOLDOWN_MS,
+    DEFAULT_RATE_LIMIT_COOLDOWN_MS
+  );
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function retryAfterMs(response) {
+  const raw = response.headers.get("retry-after");
+  if (!raw) return defaultCooldownMs();
+
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.max(1000, Math.ceil(seconds * 1000));
+  }
+
+  const retryAt = Date.parse(raw);
+  return Number.isFinite(retryAt)
+    ? Math.max(1000, retryAt - Date.now())
+    : defaultCooldownMs();
+}
+
+let requestQueue = Promise.resolve();
+let nextRequestAt = 0;
+let rateLimitUntil = 0;
+
+function queueFinnhubRequest(url) {
+  const request = requestQueue.then(async () => {
+    const waitMs = Math.max(nextRequestAt, rateLimitUntil) - Date.now();
+    if (waitMs > 0) await sleep(waitMs);
+
+    const response = await fetchWithTimeout(url);
+    nextRequestAt = Date.now() + requestIntervalMs();
+    if (response.status === 429) {
+      rateLimitUntil = Math.max(
+        rateLimitUntil,
+        Date.now() + retryAfterMs(response)
+      );
+    }
+    return response;
+  });
+
+  // A failed request must not poison the shared queue for later refreshes.
+  requestQueue = request.catch(() => undefined);
+  return request;
+}
+
 async function fetchStockQuote(symbol) {
   const apiKey = process.env.FINNHUB_API_KEY;
   if (!apiKey) throw new Error("FINNHUB_API_KEY is not set");
 
-  const res = await fetchWithTimeout(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${apiKey}`);
+  const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${encodeURIComponent(apiKey)}`;
+  let res;
+  for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt++) {
+    res = await queueFinnhubRequest(url);
+    if (res.status !== 429) break;
+    if (attempt === MAX_RATE_LIMIT_RETRIES) {
+      const error = new Error(`Finnhub rate limit persisted for ${symbol} after retry`);
+      error.code = "FINNHUB_RATE_LIMITED";
+      throw error;
+    }
+    console.warn(`Stocks: Finnhub rate-limited ${symbol}; waiting before one retry`);
+  }
+
   if (!res.ok) throw new Error(`Finnhub request failed for ${symbol}: HTTP ${res.status}`);
   const data = await res.json();
 
@@ -63,9 +147,9 @@ async function fetchStockQuote(symbol) {
 }
 
 let inFlightStockFetch = null;
-async function fetchStockPrices() {
+async function fetchStockPrices(options = {}) {
   if (inFlightStockFetch) return inFlightStockFetch;
-  inFlightStockFetch = runStockRefresh();
+  inFlightStockFetch = runStockRefresh(options);
   try {
     return await inFlightStockFetch;
   } finally {
@@ -73,33 +157,57 @@ async function fetchStockPrices() {
   }
 }
 
-async function runStockRefresh() {
+async function runStockRefresh({ onProgress } = {}) {
   if (!process.env.FINNHUB_API_KEY) {
-    console.warn("Stocks: FINNHUB_API_KEY not set — skipping stock price fetch");
-    return { updated: 0, skipped: STOCK_SYMBOLS.length };
+    console.warn("Stocks: FINNHUB_API_KEY not set; skipping stock price fetch");
+    return { total: STOCK_SYMBOLS.length, processed: 0, updated: 0, skipped: STOCK_SYMBOLS.length };
   }
   let updated = 0;
-  let nextIndex = 0;
-  async function worker() {
-    while (nextIndex < STOCK_SYMBOLS.length) {
-      const symbol = STOCK_SYMBOLS[nextIndex++];
-      try {
-        const quote = await fetchStockQuote(symbol);
-        await execute(
-          `INSERT INTO price_cache (symbol, price, change_24h, asset_type, updated_at)
-           VALUES (?, ?, ?, 'stock', datetime('now'))
-           ON CONFLICT(symbol) DO UPDATE SET price=excluded.price, change_24h=excluded.change_24h, asset_type='stock', updated_at=excluded.updated_at`,
-          [quote.symbol, quote.price, quote.change24h]
-        );
-        updated++;
-      } catch (err) {
+  let processed = 0;
+  let rateLimited = false;
+  for (const symbol of STOCK_SYMBOLS) {
+    try {
+      const quote = await fetchStockQuote(symbol);
+      await execute(
+        `INSERT INTO price_cache (symbol, price, change_24h, asset_type, updated_at)
+         VALUES (?, ?, ?, 'stock', datetime('now'))
+         ON CONFLICT(symbol) DO UPDATE SET price=excluded.price, change_24h=excluded.change_24h, asset_type='stock', updated_at=excluded.updated_at`,
+        [quote.symbol, quote.price, quote.change24h]
+      );
+      updated++;
+    } catch (err) {
+      if (err.code === "FINNHUB_RATE_LIMITED") {
+        console.warn(`Stocks: ${err.message}; ending this refresh early`);
+        rateLimited = true;
+      } else {
         // One bad symbol must never stop the rest of the refresh.
         console.error(`Stock price fetch failed for ${symbol}:`, err.message);
       }
+    } finally {
+      processed++;
+      if (onProgress) {
+        try {
+          await onProgress({
+            total: STOCK_SYMBOLS.length,
+            processed,
+            updated,
+            skipped: processed - updated,
+            lastSymbol: symbol,
+          });
+        } catch (progressError) {
+          console.error("Stock refresh progress update failed:", progressError.message);
+        }
+      }
     }
+    if (rateLimited) break;
   }
-  await Promise.all(Array.from({ length: 4 }, () => worker()));
-  return { updated, skipped: STOCK_SYMBOLS.length - updated };
+  return {
+    total: STOCK_SYMBOLS.length,
+    processed,
+    updated,
+    skipped: STOCK_SYMBOLS.length - updated,
+    rateLimited,
+  };
 }
 
 module.exports = { fetchStockPrices, fetchStockQuote, STOCK_SYMBOLS };

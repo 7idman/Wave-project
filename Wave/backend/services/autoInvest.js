@@ -4,6 +4,8 @@
  */
 
 const { queryAll, withTransaction } = require("../db");
+const { runWithSchedulerLease } = require("./schedulerLease");
+const { dollarsFromCents } = require("../utils/money");
 
 async function runDuePlan(plan) {
   const nextRunAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
@@ -33,11 +35,12 @@ async function runDuePlan(plan) {
       return { status: "skipped", reason: "no_price" };
     }
 
+    const weeklyAmount = dollarsFromCents(plan.weekly_amount_cents);
     const price = priceRow.price;
-    const shares = parseFloat((plan.weekly_amount / price).toFixed(8));
+    const shares = parseFloat((weeklyAmount / price).toFixed(8));
     const deduction = await tx.execute(
-      "UPDATE users SET cash_balance = cash_balance - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance >= ?",
-      [plan.weekly_amount, plan.user_id, plan.weekly_amount]
+      "UPDATE users SET cash_balance_cents = cash_balance_cents - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance_cents >= ?",
+      [plan.weekly_amount_cents, plan.user_id, plan.weekly_amount_cents]
     );
 
     if (deduction.rowsAffected === 0) {
@@ -54,8 +57,8 @@ async function runDuePlan(plan) {
       [plan.user_id, plan.symbol, shares]
     );
     await tx.execute(
-      "INSERT INTO transactions (user_id, type, symbol, amount, price, fee, total, status, source) VALUES (?, 'buy', ?, ?, ?, 0, ?, 'completed', 'auto_invest')",
-      [plan.user_id, plan.symbol, shares, price, plan.weekly_amount]
+      "INSERT INTO transactions (user_id, type, symbol, amount, price, fee, fee_cents, total, total_cents, status, source) VALUES (?, 'buy', ?, ?, ?, 0, 0, ?, ?, 'completed', 'auto_invest')",
+      [plan.user_id, plan.symbol, shares, price, weeklyAmount, plan.weekly_amount_cents]
     );
     await tx.execute(
       "INSERT INTO activity_log (user_id, type, label, amount) VALUES (?, ?, ?, 0)",
@@ -94,9 +97,10 @@ async function executeDuePlans() {
 }
 
 function startAutoInvestSchedule(intervalMs = 60 * 60 * 1000) {
-  runDuePlans().catch(err => console.error("Auto-invest run failed:", err.message));
+  const run = () => runWithSchedulerLease("auto-invest", intervalMs, runDuePlans);
+  run().catch(err => console.error("Auto-invest run failed:", err.message));
   const handle = setInterval(() => {
-    runDuePlans().catch(err => console.error("Auto-invest run failed:", err.message));
+    run().catch(err => console.error("Auto-invest run failed:", err.message));
   }, intervalMs);
   return handle;
 }

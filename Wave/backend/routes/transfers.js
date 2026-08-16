@@ -11,18 +11,19 @@ const { generateReferenceId } = require("../utils/referenceId");
 const { sendVerificationCode, checkVerificationCode } = require("../services/twilio");
 const { checkAndRecord } = require("../services/rateLimit");
 const { logSecurityEvent } = require("../middleware/security");
+const { parseMoneyToCents, dollarsFromCents } = require("../utils/money");
 
 // Transfers at or above this amount require a phone OTP confirmation
 // before any money moves — configurable rather than hardcoded, per the
 // security architecture's own requirement.
-const TRANSFER_VERIFICATION_THRESHOLD = parseFloat(process.env.TRANSFER_VERIFICATION_THRESHOLD || "500");
+const TRANSFER_VERIFICATION_THRESHOLD_CENTS = parseMoneyToCents(process.env.TRANSFER_VERIFICATION_THRESHOLD || "500");
 
 // Real implementation: transfers under the threshold pass straight through
 // (same as before). At or above it, the user's phone must already be
 // verified (see routes/phone.js) — if it isn't, we fail closed and tell
 // them to verify a phone first rather than silently skipping the check.
-async function checkTransferVerification(user, amount) {
-  if (amount < TRANSFER_VERIFICATION_THRESHOLD) return { required: false, status: "not_required" };
+async function checkTransferVerification(user, amountCents) {
+  if (amountCents < TRANSFER_VERIFICATION_THRESHOLD_CENTS) return { required: false, status: "not_required" };
   if (!user.phone_verified || !user.phone) return { required: false, status: "blocked_no_phone" };
   return { required: true, status: "pending" };
 }
@@ -31,10 +32,9 @@ router.post("/to-portfolio", async (req, res) => {
   try {
     const userId = req.user.id;
     const { portfolioId, amount } = req.body;
-    const amt = parseFloat(amount);
-
-    if (!portfolioId || !Number.isFinite(amt) || amt <= 0)
-      return res.status(400).json({ error: "portfolioId and a positive amount are required" });
+    if (!portfolioId) return res.status(400).json({ error: "portfolioId and a positive amount are required" });
+    const amountCents = parseMoneyToCents(amount);
+    const amt = dollarsFromCents(amountCents);
 
     const portfolio = await queryOne(
       "SELECT id, user_id, type FROM portfolios WHERE id = ?",
@@ -43,10 +43,10 @@ router.post("/to-portfolio", async (req, res) => {
     if (!portfolio || portfolio.user_id !== userId)
       return res.status(404).json({ error: "Portfolio not found" });
 
-    const verification = await checkTransferVerification(req.user, amt);
+    const verification = await checkTransferVerification(req.user, amountCents);
 
     if (verification.status === "blocked_no_phone") {
-      return res.status(403).json({ error: `Transfers of $${TRANSFER_VERIFICATION_THRESHOLD}+ require a verified phone number. Add one in Settings first.` });
+      return res.status(403).json({ error: `Transfers of $${dollarsFromCents(TRANSFER_VERIFICATION_THRESHOLD_CENTS)}+ require a verified phone number. Add one in Settings first.` });
     }
 
     if (verification.required) {
@@ -62,9 +62,9 @@ router.post("/to-portfolio", async (req, res) => {
       const referenceId = generateReferenceId();
       const pending = await execute(
         `INSERT INTO internal_transfers
-           (user_id, direction, portfolio_id, amount, reference_id, verification_status, status)
-         VALUES (?, 'to_portfolio', ?, ?, ?, 'pending', 'pending')`,
-        [userId, portfolioId, amt, referenceId]
+           (user_id, direction, portfolio_id, amount, amount_cents, reference_id, verification_status, status)
+         VALUES (?, 'to_portfolio', ?, ?, ?, ?, 'pending', 'pending')`,
+        [userId, portfolioId, amt, amountCents, referenceId]
       );
       await logSecurityEvent("TRANSFER_VERIFICATION_SENT", { userId, ip: req.ip, metadata: { amount: amt } });
 
@@ -75,32 +75,32 @@ router.post("/to-portfolio", async (req, res) => {
 
     const outcome = await withTransaction(async tx => {
       const result = await tx.execute(
-        "UPDATE users SET cash_balance = cash_balance - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance >= ?",
-        [amt, userId, amt]
+        "UPDATE users SET cash_balance_cents = cash_balance_cents - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance_cents >= ?",
+        [amountCents, userId, amountCents]
       );
       if (result.rowsAffected === 0) return { error: "Insufficient balance" };
 
       await tx.execute(
-        "UPDATE portfolios SET cash_balance = cash_balance + ?, updated_at = datetime('now') WHERE id = ?",
-        [amt, portfolioId]
+        "UPDATE portfolios SET cash_balance_cents = cash_balance_cents + ?, updated_at = datetime('now') WHERE id = ?",
+        [amountCents, portfolioId]
       );
       await tx.execute(
         `INSERT INTO internal_transfers
-           (user_id, direction, portfolio_id, amount, reference_id, verification_status, status)
-         VALUES (?, 'to_portfolio', ?, ?, ?, ?, 'completed')`,
-        [userId, portfolioId, amt, referenceId, verification.status]
+           (user_id, direction, portfolio_id, amount, amount_cents, reference_id, verification_status, status)
+         VALUES (?, 'to_portfolio', ?, ?, ?, ?, ?, 'completed')`,
+        [userId, portfolioId, amt, amountCents, referenceId, verification.status]
       );
       await tx.execute(
-        "INSERT INTO activity_log (user_id, type, label, amount) VALUES (?, 'transfer', ?, ?)",
-        [userId, `Transfer to ${portfolio.type} account (${referenceId})`, amt]
+        "INSERT INTO activity_log (user_id, type, label, amount, amount_cents) VALUES (?, 'transfer', ?, ?, ?)",
+        [userId, `Transfer to ${portfolio.type} account (${referenceId})`, amt, amountCents]
       );
-      return tx.queryOne("SELECT cash_balance FROM users WHERE id = ?", [userId]);
+      return tx.queryOne("SELECT cash_balance_cents FROM users WHERE id = ?", [userId]);
     });
     if (outcome.error) return res.status(400).json(outcome);
     res.status(201).json({
       message: `Transferred $${amt.toLocaleString()}`,
       referenceId,
-      cashBalance: outcome.cash_balance,
+      cashBalance: dollarsFromCents(outcome.cash_balance_cents),
       portfolioId,
     });
   } catch (err) {
@@ -139,8 +139,8 @@ router.post("/:id/confirm", async (req, res) => {
       if (claim.rowsAffected === 0) return { error: "This transfer is already being processed.", status: 409 };
 
       const result = await tx.execute(
-        "UPDATE users SET cash_balance = cash_balance - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance >= ?",
-        [pending.amount, userId, pending.amount]
+        "UPDATE users SET cash_balance_cents = cash_balance_cents - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance_cents >= ?",
+        [pending.amount_cents, userId, pending.amount_cents]
       );
       if (result.rowsAffected === 0) {
         await tx.execute("UPDATE internal_transfers SET status = 'failed' WHERE id = ?", [transferId]);
@@ -148,8 +148,8 @@ router.post("/:id/confirm", async (req, res) => {
       }
 
       await tx.execute(
-        "UPDATE portfolios SET cash_balance = cash_balance + ?, updated_at = datetime('now') WHERE id = ?",
-        [pending.amount, pending.portfolio_id]
+        "UPDATE portfolios SET cash_balance_cents = cash_balance_cents + ?, updated_at = datetime('now') WHERE id = ?",
+        [pending.amount_cents, pending.portfolio_id]
       );
       const portfolio = await tx.queryOne("SELECT type FROM portfolios WHERE id = ?", [pending.portfolio_id]);
       if (!portfolio) throw new Error("Transfer destination no longer exists");
@@ -158,17 +158,17 @@ router.post("/:id/confirm", async (req, res) => {
         [transferId]
       );
       await tx.execute(
-        "INSERT INTO activity_log (user_id, type, label, amount) VALUES (?, 'transfer', ?, ?)",
-        [userId, `Transfer to ${portfolio.type} account (${pending.reference_id})`, pending.amount]
+        "INSERT INTO activity_log (user_id, type, label, amount, amount_cents) VALUES (?, 'transfer', ?, ?, ?)",
+        [userId, `Transfer to ${portfolio.type} account (${pending.reference_id})`, pending.amount, pending.amount_cents]
       );
-      const user = await tx.queryOne("SELECT cash_balance FROM users WHERE id = ?", [userId]);
-      return { cashBalance: user.cash_balance };
+      const user = await tx.queryOne("SELECT cash_balance_cents FROM users WHERE id = ?", [userId]);
+      return { cashBalance: dollarsFromCents(user.cash_balance_cents) };
     });
     if (outcome.error) return res.status(outcome.status).json({ error: outcome.error });
     await logSecurityEvent("TRANSFER_VERIFIED", { userId, ip: req.ip, metadata: { transferId } });
     res.json({ message: `Transferred $${pending.amount.toLocaleString()}`, referenceId: pending.reference_id, cashBalance: outcome.cashBalance, portfolioId: pending.portfolio_id });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err instanceof TypeError || err instanceof RangeError ? 400 : 500).json({ error: err.message });
   }
 });
 

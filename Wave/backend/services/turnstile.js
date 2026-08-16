@@ -20,7 +20,7 @@ const { fetchWithTimeout } = require("../utils/http");
 async function verifyTurnstileToken(token, remoteIp) {
   const secret = process.env.TURNSTILE_SECRET_KEY;
   if (!secret) {
-    console.error("TURNSTILE_SECRET_KEY is not set — failing closed, verification rejected.");
+    console.error("TURNSTILE_SECRET_KEY is not set; failing closed, verification rejected.");
     return { success: false, reason: "not_configured" };
   }
   if (!token || typeof token !== "string") {
