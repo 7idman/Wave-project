@@ -14,6 +14,7 @@ type SearchUser={id:number;email:string;name:string;avatar_url?:string;phone?:st
 type ConfirmAction={kind:"reject"|"ban"|"revoke";id:number;label:string};
 type AdminStrategy={id:number;name:string;description:string;fee:number;status:string;cashBalance:number;holdingsValue:number;totalValue:number;subscribers:number};
 type StrategyTrade={id:number;symbol:string;side:string;amount:number;price:number;created_at:string};
+type StrategyMirrorJob={id:number;strategy_trade_id:number;portfolio_id:number;status:"failed"|"skipped";attempt_count:number;last_error?:string;created_at:string;strategy_name:string;symbol:string;side:string};
 type AdminManagedAccount={portfolioId:number;userId:number;email:string;name:string;cashBalance:number;holdingsValue:number;totalValue:number;createdAt:string};
 type Promotion={id:number;name:string;bonus_pct:number;min_tier:string;min_deposit:number;lock_days:number;start_at:string;end_at:string};
 type SecurityEvent={id:number;type:string;user_id?:number;user_email?:string;ip?:string;metadata:Record<string,any>;created_at:string};
@@ -44,6 +45,7 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
   const[fundTarget,setFundTarget]=useState<AdminStrategy|null>(null),[fundAmount,setFundAmount]=useState(""),[fundBusy,setFundBusy]=useState(false);
   const[tradeTarget,setTradeTarget]=useState<AdminStrategy|null>(null),[tradeSymbol,setTradeSymbol]=useState(""),[tradeSide,setTradeSide]=useState<"buy"|"sell">("buy"),[tradeAmount,setTradeAmount]=useState(""),[tradeBusy,setTradeBusy]=useState(false);
   const[tradesView,setTradesView]=useState<AdminStrategy|null>(null),[strategyTrades,setStrategyTrades]=useState<StrategyTrade[]>([]),[tradesLoading,setTradesLoading]=useState(false);
+  const[mirrorRecoveryJobs,setMirrorRecoveryJobs]=useState<StrategyMirrorJob[]>([]),[mirrorRecoveryLoading,setMirrorRecoveryLoading]=useState(false),[retryingMirrorJob,setRetryingMirrorJob]=useState<number|null>(null);
   const[adminManaged,setAdminManaged]=useState<AdminManagedAccount[]>([]),[managedTabLoading,setManagedTabLoading]=useState(false);
   const[managedPickQuery,setManagedPickQuery]=useState(""),[managedPickResults,setManagedPickResults]=useState<SearchUser[]>([]),[managedPicking,setManagedPicking]=useState(false);
   const[managedFundTarget,setManagedFundTarget]=useState<AdminManagedAccount|null>(null),[managedFundAmount,setManagedFundAmount]=useState(""),[managedFundBusy,setManagedFundBusy]=useState(false);
@@ -75,7 +77,17 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
   },[searchQuery]);
 
   const refreshStrategies=async()=>{setStrategiesLoading(true);try{const d=await api.get("/admin/strategies");setAdminStrategies(d.strategies||[]);}catch(e:any){notify(e.message,"!",false);}finally{setStrategiesLoading(false);}};
-  useEffect(()=>{if(tab==="strategies")refreshStrategies();},[tab]);
+  const refreshMirrorRecovery=async()=>{
+    setMirrorRecoveryLoading(true);
+    try{
+      const[failed,skipped]=await Promise.all([
+        api.get("/admin/strategies/mirror-jobs?status=failed&limit=100"),
+        api.get("/admin/strategies/mirror-jobs?status=skipped&limit=100"),
+      ]);
+      setMirrorRecoveryJobs([...(failed.jobs||[]),...(skipped.jobs||[])].sort((a,b)=>b.id-a.id));
+    }catch(e:any){notify(e.message,"!",false);}finally{setMirrorRecoveryLoading(false);}
+  };
+  useEffect(()=>{if(tab==="strategies"){refreshStrategies();refreshMirrorRecovery();}},[tab]);
 
   const createStrategy=async()=>{
     const fee=Number(newStratFee);
@@ -96,14 +108,23 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
     setTradeBusy(true);
     try{
       const d=await api.post(`/admin/strategies/${tradeTarget.id}/trades`,{symbol:tradeSymbol.trim().toUpperCase(),side:tradeSide,amount});
-      notify(`Logged — mirrored to ${d.mirrored} subscriber(s)${d.skipped?`, ${d.skipped} skipped`:""}`,"OK");
+      const pending=Math.max(0,(d.queued||0)-(d.mirrored||0)-(d.skipped||0));
+      notify(`Logged — ${d.mirrored} mirrored${d.skipped?`, ${d.skipped} need attention`:""}${pending?`, ${pending} queued`:""}`,"OK");
       setTradeTarget(null);setTradeSymbol("");setTradeAmount("");
-      refreshStrategies();
+      refreshStrategies();refreshMirrorRecovery();
     }catch(e:any){notify(e.message,"!",false);}finally{setTradeBusy(false);}
   };
   const openTradesView=async(s:AdminStrategy)=>{
     setTradesView(s);setTradesLoading(true);
     try{const d=await api.get(`/admin/strategies/${s.id}/trades`);setStrategyTrades(d.trades||[]);}catch(e:any){notify(e.message,"!",false);}finally{setTradesLoading(false);}
+  };
+  const retryMirrorJob=async(jobId:number)=>{
+    setRetryingMirrorJob(jobId);
+    try{
+      await api.post(`/admin/strategies/mirror-jobs/${jobId}/retry`,{});
+      setMirrorRecoveryJobs(current=>current.filter(job=>job.id!==jobId));
+      notify("Mirror job queued for recovery","OK");
+    }catch(e:any){notify(e.message,"!",false);}finally{setRetryingMirrorJob(null);}
   };
 
   const refreshManaged=async()=>{setManagedTabLoading(true);try{const d=await api.get("/admin/managed");setAdminManaged(d.accounts||[]);}catch(e:any){notify(e.message,"!",false);}finally{setManagedTabLoading(false);}};
@@ -294,6 +315,21 @@ export default function AdminPanel({currentUser,notify}:{currentUser:User|null;n
           <textarea className="inp" placeholder="Description shown to users" value={newStratDesc} onChange={e=>setNewStratDesc(e.target.value)} style={{minHeight:80,resize:"vertical",marginBottom:10}}/>
           <input className="inp" type="number" placeholder="Connect fee ($)" value={newStratFee} onChange={e=>setNewStratFee(e.target.value)} style={{marginBottom:12}}/>
           <button className="btn btn-primary" style={{width:"100%"}} onClick={createStrategy}>Create strategy</button>
+        </div>
+        <div className="gcard admin-table-wrap" style={{gridColumn:"1 / -1"}}>
+          <div className="stitle">Mirror recovery</div>
+          <div className="admin-note" style={{marginBottom:12}}>Failed or skipped subscriber mirrors stay here until reviewed. Fix the balance or holding issue, then retry safely.</div>
+          {mirrorRecoveryLoading?<PanelLoading rows={3} label="Loading mirror recovery jobs"/>:
+          mirrorRecoveryJobs.length===0?<div className="admin-note" style={{padding:"14px 0",textAlign:"center"}}>All strategy mirrors are healthy.</div>:
+          <table className="admin-table"><thead><tr><th>Strategy</th><th>Trade</th><th>Status</th><th>Reason</th><th></th></tr></thead><tbody>
+            {mirrorRecoveryJobs.map(job=><tr key={job.id}>
+              <td><b style={{color:"var(--text)"}}>{job.strategy_name}</b><div className="admin-note">Portfolio #{job.portfolio_id}</div></td>
+              <td>{job.side.toUpperCase()} {job.symbol}<div className="admin-note">Trade #{job.strategy_trade_id}</div></td>
+              <td><span className={`admin-status ${job.status}`}>{job.status}</span><div className="admin-note">{job.attempt_count} attempt{job.attempt_count===1?"":"s"}</div></td>
+              <td className="admin-note">{job.last_error||"No error detail"}</td>
+              <td><button className="btn btn-action btn-sm" disabled={retryingMirrorJob===job.id} onClick={()=>retryMirrorJob(job.id)}>{retryingMirrorJob===job.id?"Queuing…":"Retry"}</button></td>
+            </tr>)}
+          </tbody></table>}
         </div>
       </div>}
 

@@ -70,4 +70,4 @@ async function trustDevice(userId, deviceId, label) {
   );
 }
 
-module.exports = { getOrSetDeviceId, isDeviceTrusted, trustDevice, DEVICE_COOKIE_NAME };
+module.exports = { getOrSetDeviceId, isDeviceTrusted, trustDevice };

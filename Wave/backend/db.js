@@ -11,6 +11,7 @@
  */
 
 require("dotenv").config();
+const crypto = require("crypto");
 const { createClient } = require("@libsql/client");
 
 const databaseUrl = process.env.LIBSQL_URL || "file:wave.db";
@@ -150,20 +151,12 @@ async function withTransaction(callback) {
   }
 }
 
+async function closeDatabase() {
+  await db.close();
+}
+
 // ── Schema bootstrap ────────────────────────────────────────────────────────
 async function initSchema() {
-  const schemaVersion = "1";
-  await db.execute(`CREATE TABLE IF NOT EXISTS schema_meta (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-  )`);
-  const versionResult = await db.execute({
-    sql: "SELECT value FROM schema_meta WHERE key = 'schema_version'",
-    args: [],
-  });
-  const currentVersion = toObjects(versionResult)[0]?.value;
-  const schemaCurrent = currentVersion === schemaVersion;
-
   // Run each CREATE TABLE individually instead of batching them together.
   // Batching DDL statements against Turso's cloud HTTP API was triggering
   // "Unexpected status code while fetching migration jobs: 400" regardless
@@ -354,6 +347,24 @@ async function initSchema() {
       mirrored_price    REAL    NOT NULL,
       created_at        TEXT    NOT NULL DEFAULT (datetime('now'))
     )`,
+    // Durable outbox: the strategy trade and one job per subscriber are
+    // committed together. A worker can safely resume pending/stale jobs after
+    // a restart without applying the same mirror twice.
+    `CREATE TABLE IF NOT EXISTS strategy_mirror_jobs (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      strategy_trade_id INTEGER NOT NULL REFERENCES strategy_trades(id) ON DELETE CASCADE,
+      user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      portfolio_id      INTEGER NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+      proportion        REAL    NOT NULL,
+      status            TEXT    NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','processing','retry','completed','skipped','failed')),
+      attempt_count     INTEGER NOT NULL DEFAULT 0,
+      claimed_at        TEXT,
+      completed_at      TEXT,
+      last_error        TEXT,
+      created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(strategy_trade_id, portfolio_id)
+    )`,
     `CREATE TABLE IF NOT EXISTS internal_transfers (
       id                  INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id             INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -536,6 +547,75 @@ async function initSchema() {
     )`,
   ];
 
+  const columnMigrations = [
+    ["users", "phone", "ALTER TABLE users ADD COLUMN phone TEXT"],
+    ["users", "phone_verified", "ALTER TABLE users ADD COLUMN phone_verified INTEGER NOT NULL DEFAULT 0"],
+    ["users", "phone_pending", "ALTER TABLE users ADD COLUMN phone_pending TEXT"],
+    ["users", "first_name", "ALTER TABLE users ADD COLUMN first_name TEXT"],
+    ["users", "last_name", "ALTER TABLE users ADD COLUMN last_name TEXT"],
+    ["users", "email_verified", "ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1"],
+    ["users", "email_verified_at", "ALTER TABLE users ADD COLUMN email_verified_at TEXT"],
+    ["users", "last_sensitive_change_at", "ALTER TABLE users ADD COLUMN last_sensitive_change_at TEXT"],
+    ["sessions", "device_id", "ALTER TABLE sessions ADD COLUMN device_id TEXT"],
+    ["users", "avatar_url", "ALTER TABLE users ADD COLUMN avatar_url TEXT"],
+    ["users", "date_of_birth", "ALTER TABLE users ADD COLUMN date_of_birth TEXT"],
+    ["users", "country", "ALTER TABLE users ADD COLUMN country TEXT"],
+    ["users", "kyc_id_status", "ALTER TABLE users ADD COLUMN kyc_id_status TEXT NOT NULL DEFAULT 'pending'"],
+    ["users", "kyc_addr_status", "ALTER TABLE users ADD COLUMN kyc_addr_status TEXT NOT NULL DEFAULT 'pending'"],
+    ["users", "role", "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'"],
+    ["users", "account_status", "ALTER TABLE users ADD COLUMN account_status TEXT NOT NULL DEFAULT 'active'"],
+    ["users", "ban_reason", "ALTER TABLE users ADD COLUMN ban_reason TEXT"],
+    ["users", "totp_secret", "ALTER TABLE users ADD COLUMN totp_secret TEXT"],
+    ["users", "totp_secret_pending", "ALTER TABLE users ADD COLUMN totp_secret_pending TEXT"],
+    ["users", "totp_enabled", "ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0"],
+    ["users", "totp_backup_codes", "ALTER TABLE users ADD COLUMN totp_backup_codes TEXT"],
+    ["users", "referral_code", "ALTER TABLE users ADD COLUMN referral_code TEXT"],
+    ["users", "referred_by", "ALTER TABLE users ADD COLUMN referred_by INTEGER REFERENCES users(id)"],
+    ["refresh_tokens", "session_id", "ALTER TABLE refresh_tokens ADD COLUMN session_id INTEGER"],
+    ["price_cache", "asset_type", "ALTER TABLE price_cache ADD COLUMN asset_type TEXT NOT NULL DEFAULT 'crypto'"],
+    ["transactions", "reference_id", "ALTER TABLE transactions ADD COLUMN reference_id TEXT"],
+    ["transactions", "source", "ALTER TABLE transactions ADD COLUMN source TEXT"],
+    ["transactions", "email_otp_hash", "ALTER TABLE transactions ADD COLUMN email_otp_hash TEXT"],
+    ["transactions", "email_otp_expires_at", "ALTER TABLE transactions ADD COLUMN email_otp_expires_at TEXT"],
+  ];
+
+  const indexMigrations = [
+    "CREATE INDEX IF NOT EXISTS idx_price_history_symbol_time ON price_history(symbol, recorded_at)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code)",
+    "CREATE INDEX IF NOT EXISTS idx_rate_limit_scope_id_time ON rate_limit_entries(scope, identifier, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_security_events_type_time ON security_events(type, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_trusted_devices_user_device ON trusted_devices(user_id, device_id)",
+    "CREATE INDEX IF NOT EXISTS idx_auto_invest_status_next_run ON auto_invest_plans(status, next_run_at)",
+    "CREATE INDEX IF NOT EXISTS idx_price_alerts_status_symbol ON price_alerts(status, symbol)",
+    "CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_hash ON email_verification_tokens(token_hash)",
+    "CREATE INDEX IF NOT EXISTS idx_signup_phone_tokens_hash ON signup_phone_tokens(token_hash)",
+    "CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_hash ON password_reset_tokens(token_hash)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_bonus_grants_transaction ON bonus_grants(transaction_id) WHERE transaction_id IS NOT NULL",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_strategy_trade_mirrors_trade_portfolio ON strategy_trade_mirrors(strategy_trade_id, portfolio_id)",
+    "CREATE INDEX IF NOT EXISTS idx_strategy_mirror_jobs_status_claimed ON strategy_mirror_jobs(status, claimed_at, id)",
+    "CREATE INDEX IF NOT EXISTS idx_strategy_mirror_jobs_trade ON strategy_mirror_jobs(strategy_trade_id, id)",
+  ];
+
+  // The migration definition is the version. Editing any table, column
+  // migration, or index automatically produces a new fingerprint and reruns
+  // the idempotent migration block—there is no manual version to forget.
+  const schemaVersion = crypto
+    .createHash("sha1")
+    .update(JSON.stringify({ tables, columnMigrations, indexMigrations }))
+    .digest("hex")
+    .slice(0, 12);
+
+  await db.execute(`CREATE TABLE IF NOT EXISTS schema_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  )`);
+  const versionResult = await db.execute({
+    sql: "SELECT value FROM schema_meta WHERE key = 'schema_version'",
+    args: [],
+  });
+  const currentVersion = toObjects(versionResult)[0]?.value;
+  const schemaCurrent = currentVersion === schemaVersion;
+
   if (!schemaCurrent) {
     if (databaseUrl.startsWith("file:")) {
       await db.batch(tables.map(sql => ({ sql, args: [] })), "write");
@@ -550,37 +630,6 @@ async function initSchema() {
     // Check columns explicitly instead of deliberately executing duplicate
     // ALTER statements and swallowing every error. This keeps genuine
     // migration failures visible and avoids dozens of failed round trips.
-    const columnMigrations = [
-      ["users", "phone", "ALTER TABLE users ADD COLUMN phone TEXT"],
-      ["users", "phone_verified", "ALTER TABLE users ADD COLUMN phone_verified INTEGER NOT NULL DEFAULT 0"],
-      ["users", "phone_pending", "ALTER TABLE users ADD COLUMN phone_pending TEXT"],
-      ["users", "first_name", "ALTER TABLE users ADD COLUMN first_name TEXT"],
-      ["users", "last_name", "ALTER TABLE users ADD COLUMN last_name TEXT"],
-      ["users", "email_verified", "ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1"],
-      ["users", "email_verified_at", "ALTER TABLE users ADD COLUMN email_verified_at TEXT"],
-      ["users", "last_sensitive_change_at", "ALTER TABLE users ADD COLUMN last_sensitive_change_at TEXT"],
-      ["sessions", "device_id", "ALTER TABLE sessions ADD COLUMN device_id TEXT"],
-      ["users", "avatar_url", "ALTER TABLE users ADD COLUMN avatar_url TEXT"],
-      ["users", "date_of_birth", "ALTER TABLE users ADD COLUMN date_of_birth TEXT"],
-      ["users", "country", "ALTER TABLE users ADD COLUMN country TEXT"],
-      ["users", "kyc_id_status", "ALTER TABLE users ADD COLUMN kyc_id_status TEXT NOT NULL DEFAULT 'pending'"],
-      ["users", "kyc_addr_status", "ALTER TABLE users ADD COLUMN kyc_addr_status TEXT NOT NULL DEFAULT 'pending'"],
-      ["users", "role", "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'"],
-      ["users", "account_status", "ALTER TABLE users ADD COLUMN account_status TEXT NOT NULL DEFAULT 'active'"],
-      ["users", "ban_reason", "ALTER TABLE users ADD COLUMN ban_reason TEXT"],
-      ["users", "totp_secret", "ALTER TABLE users ADD COLUMN totp_secret TEXT"],
-      ["users", "totp_secret_pending", "ALTER TABLE users ADD COLUMN totp_secret_pending TEXT"],
-      ["users", "totp_enabled", "ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0"],
-      ["users", "totp_backup_codes", "ALTER TABLE users ADD COLUMN totp_backup_codes TEXT"],
-      ["users", "referral_code", "ALTER TABLE users ADD COLUMN referral_code TEXT"],
-      ["users", "referred_by", "ALTER TABLE users ADD COLUMN referred_by INTEGER REFERENCES users(id)"],
-      ["refresh_tokens", "session_id", "ALTER TABLE refresh_tokens ADD COLUMN session_id INTEGER"],
-      ["price_cache", "asset_type", "ALTER TABLE price_cache ADD COLUMN asset_type TEXT NOT NULL DEFAULT 'crypto'"],
-      ["transactions", "reference_id", "ALTER TABLE transactions ADD COLUMN reference_id TEXT"],
-      ["transactions", "source", "ALTER TABLE transactions ADD COLUMN source TEXT"],
-      ["transactions", "email_otp_hash", "ALTER TABLE transactions ADD COLUMN email_otp_hash TEXT"],
-      ["transactions", "email_otp_expires_at", "ALTER TABLE transactions ADD COLUMN email_otp_expires_at TEXT"],
-    ];
     const columnsByTable = new Map();
     for (const table of new Set(columnMigrations.map(([table]) => table))) {
       const result = await db.execute(`PRAGMA table_info(${table})`);
@@ -590,18 +639,33 @@ async function initSchema() {
       if (!columnsByTable.get(table).has(column)) await db.execute(sql);
     }
 
-    const indexMigrations = [
-      "CREATE INDEX IF NOT EXISTS idx_price_history_symbol_time ON price_history(symbol, recorded_at)",
-      "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code)",
-      "CREATE INDEX IF NOT EXISTS idx_rate_limit_scope_id_time ON rate_limit_entries(scope, identifier, created_at)",
-      "CREATE INDEX IF NOT EXISTS idx_security_events_type_time ON security_events(type, created_at)",
-      "CREATE INDEX IF NOT EXISTS idx_trusted_devices_user_device ON trusted_devices(user_id, device_id)",
-      "CREATE INDEX IF NOT EXISTS idx_auto_invest_status_next_run ON auto_invest_plans(status, next_run_at)",
-      "CREATE INDEX IF NOT EXISTS idx_price_alerts_status_symbol ON price_alerts(status, symbol)",
-      "CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_hash ON email_verification_tokens(token_hash)",
-      "CREATE INDEX IF NOT EXISTS idx_signup_phone_tokens_hash ON signup_phone_tokens(token_hash)",
-      "CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_hash ON password_reset_tokens(token_hash)",
-    ];
+    const duplicateBonusGrants = await queryAll(
+      `SELECT transaction_id, COUNT(*) AS duplicate_count
+       FROM bonus_grants
+       WHERE transaction_id IS NOT NULL
+       GROUP BY transaction_id
+       HAVING COUNT(*) > 1
+       LIMIT 10`
+    );
+    if (duplicateBonusGrants.length) {
+      const keys = duplicateBonusGrants
+        .map(row => `transaction ${row.transaction_id} (${row.duplicate_count} grants)`)
+        .join(", ");
+      throw new Error(`Duplicate deposit bonus grants require financial reconciliation before migration: ${keys}`);
+    }
+    const duplicateStrategyMirrors = await queryAll(
+      `SELECT strategy_trade_id, portfolio_id, COUNT(*) AS duplicate_count
+       FROM strategy_trade_mirrors
+       GROUP BY strategy_trade_id, portfolio_id
+       HAVING COUNT(*) > 1
+       LIMIT 10`
+    );
+    if (duplicateStrategyMirrors.length) {
+      const keys = duplicateStrategyMirrors
+        .map(row => `trade ${row.strategy_trade_id}/portfolio ${row.portfolio_id} (${row.duplicate_count} mirrors)`)
+        .join(", ");
+      throw new Error(`Duplicate strategy mirrors require financial reconciliation before migration: ${keys}`);
+    }
     for (const sql of indexMigrations) await db.execute(sql);
 
     await execute(
@@ -675,4 +739,4 @@ async function initSchema() {
   console.log("✅ Database ready");
 }
 
-module.exports = { execute, queryOne, queryAll, batch, withTransaction, initSchema };
+module.exports = { execute, queryOne, queryAll, batch, withTransaction, initSchema, closeDatabase };

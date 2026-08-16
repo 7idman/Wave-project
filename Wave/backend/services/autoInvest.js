@@ -101,4 +101,4 @@ function startAutoInvestSchedule(intervalMs = 60 * 60 * 1000) {
   return handle;
 }
 
-module.exports = { runDuePlans, runDuePlan, startAutoInvestSchedule };
+module.exports = { startAutoInvestSchedule };

@@ -5,6 +5,12 @@ const { notifyAdmins, configured, notifyUserPush }=require("../services/push");
 const { valuePortfolio }=require("../services/portfolioValuation");
 const { checkReferralBonus }=require("../services/referrals");
 const { applyDepositBonus }=require("../services/promotions");
+const {
+  enqueueStrategyMirrorJobs,
+  processStrategyMirrorJobsForTrade,
+  retryStrategyMirrorJob,
+  listStrategyMirrorJobs,
+}=require("../services/strategyMirroring");
 const { generateReferenceId }=require("../utils/referenceId");
 const slug=s=>String(s||"").trim().toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"").slice(0,40)||"role";
 const parse=v=>{try{return JSON.parse(v||"{}");}catch{return {};}};
@@ -82,44 +88,9 @@ async function applyRequest(r,admin,action,note){
 // value, so someone who put in $250 and someone who put in $2,500 both see
 // the same %, scaled to their own account.
 //
-// Each subscriber's mirror is applied independently, in its own try/catch —
-// one subscriber having an issue (e.g. an edge-case rounding shortfall)
-// must never block the others from getting their mirror applied, and must
-// never partially apply (guarded atomic UPDATEs mean it's all-or-nothing
-// per subscriber, same pattern as buy/sell in trades.js).
-async function mirrorStrategyTrade(strategy,trade){
-  const subscribers=await queryAll("SELECT id,user_id FROM portfolios WHERE type='copier' AND strategy_id=?",[strategy.id]);
-  const results=[];
-  for(const sub of subscribers){
-    try{
-      const before=await valuePortfolio(sub.id);
-      if(!before||before.totalValue<=0){results.push({portfolioId:sub.id,skipped:"zero value"});continue;}
-      const mirroredDollar=before.totalValue*trade.proportion;
-      const mirroredQty=mirroredDollar/trade.price;
-      const outcome=await withTransaction(async tx=>{
-        if(trade.side==="buy"){
-          const deduct=await tx.execute("UPDATE portfolios SET cash_balance=cash_balance-?,updated_at=datetime('now') WHERE id=? AND cash_balance>=?",[mirroredDollar,sub.id,mirroredDollar]);
-          if(deduct.rowsAffected===0)return {skipped:"insufficient cash"};
-          await tx.execute("INSERT INTO portfolio_holdings (portfolio_id,symbol,amount,updated_at) VALUES (?,?,?,datetime('now')) ON CONFLICT(portfolio_id,symbol) DO UPDATE SET amount=amount+excluded.amount,updated_at=excluded.updated_at",[sub.id,trade.symbol,mirroredQty]);
-        }else{
-          const deduct=await tx.execute("UPDATE portfolio_holdings SET amount=amount-?,updated_at=datetime('now') WHERE portfolio_id=? AND symbol=? AND amount>=?",[mirroredQty,sub.id,trade.symbol,mirroredQty]);
-          if(deduct.rowsAffected===0)return {skipped:"insufficient holdings"};
-          await tx.execute("UPDATE portfolios SET cash_balance=cash_balance+?,updated_at=datetime('now') WHERE id=?",[mirroredDollar,sub.id]);
-        }
-        await tx.execute("INSERT INTO strategy_trade_mirrors (strategy_trade_id,user_id,portfolio_id,mirrored_amount,mirrored_price) VALUES (?,?,?,?,?)",[trade.id,sub.user_id,sub.id,mirroredQty,trade.price]);
-        await tx.execute("INSERT INTO activity_log (user_id,type,label,amount) VALUES (?,?,?,0)",[sub.user_id,"strategy_mirror",`${strategy.name}: ${trade.side==='buy'?'bought':'sold'} ${trade.symbol} mirrored into your copier account`]);
-        return null;
-      });
-      if(outcome?.skipped){results.push({portfolioId:sub.id,skipped:outcome.skipped});continue;}
-      results.push({portfolioId:sub.id,mirroredDollar,mirroredQty});
-    }catch(err){
-      console.error(`Strategy mirror failed for portfolio ${sub.id}, trade ${trade.id}:`,err.message);
-      results.push({portfolioId:sub.id,skipped:"error: "+err.message});
-    }
-  }
-  return results;
-}
-
+// The strategy trade writes durable subscriber jobs in the same database
+// transaction. services/strategyMirroring.js applies each job atomically and
+// resumes pending or stale work after a restart.
 router.post("/strategies",requirePermission("access_admin"),async(req,res)=>{try{const name=String(req.body.name||"").trim();const description=String(req.body.description||"").trim();const fee=Number(req.body.fee);if(!name||!Number.isFinite(fee)||fee<0)return res.status(400).json({error:"Name and a valid non-negative fee are required"});const created=await withTransaction(async tx=>{const portfolio=await tx.execute("INSERT INTO portfolios (user_id,type,cash_balance) VALUES (NULL,'strategy',0)");const strategy=await tx.execute("INSERT INTO strategies (name,description,fee,portfolio_id,status) VALUES (?,?,?,?,'active')",[name,description,fee,portfolio.lastInsertRowid]);await tx.execute("INSERT INTO admin_actions (admin_id,admin_email,action,target_user_id,reason) VALUES (?,?,?,?,?)",[req.user.id,req.user.email,"create_strategy",req.user.id,name]);return {strategyId:strategy.lastInsertRowid,portfolioId:portfolio.lastInsertRowid};});res.status(201).json({message:"Strategy created",...created});}catch(err){res.status(500).json({error:err.message});}});
 
 // Fund the strategy's own trading account so it can actually hold a real
@@ -161,24 +132,48 @@ router.post("/strategies/:id/trades",requirePermission("access_admin"),async(req
       }
       const inserted=await tx.execute("INSERT INTO strategy_trades (strategy_id,symbol,side,amount,price,admin_id) VALUES (?,?,?,?,?,?)",[strategyId,symbol,side,amount,price,req.user.id]);
       await tx.execute("INSERT INTO admin_actions (admin_id,admin_email,action,target_user_id,reason) VALUES (?,?,?,?,?)",[req.user.id,req.user.email,"log_strategy_trade",req.user.id,`${side} ${amount} ${symbol} on ${strategy.name}`]);
-      return {tradeId:inserted.lastInsertRowid};
+      const queued=await enqueueStrategyMirrorJobs(tx,{strategyId,tradeId:inserted.lastInsertRowid,proportion});
+      return {tradeId:inserted.lastInsertRowid,queued};
     });
     if(outcome.error)return res.status(400).json({error:outcome.error});
-    const trade={id:outcome.tradeId,symbol,side,amount,price,proportion};
-
-    const mirrorResults=await mirrorStrategyTrade(strategy,trade);
+    let mirrorResults=[];
+    let recoveryScheduled=false;
+    try{
+      mirrorResults=await processStrategyMirrorJobsForTrade(outcome.tradeId);
+    }catch(error){
+      // The core trade and jobs are already committed. Report success so an
+      // admin retry cannot duplicate the strategy trade; the worker resumes it.
+      recoveryScheduled=true;
+      console.error(`Immediate strategy mirror processing failed for trade ${outcome.tradeId}:`,error.message);
+    }
     res.status(201).json({
       message:`Logged ${side} ${amount} ${symbol} for ${strategy.name}`,
-      tradeId:trade.id,
+      tradeId:outcome.tradeId,
       proportion,
-      mirrored:mirrorResults.length,
-      skipped:mirrorResults.filter(r=>r.skipped).length,
+      queued:outcome.queued,
+      mirrored:mirrorResults.filter(result=>result.status==="completed").length,
+      skipped:mirrorResults.filter(result=>result.status==="skipped").length,
+      recoveryScheduled,
       mirrorResults,
     });
   }catch(err){res.status(500).json({error:err.message});}
 });
 
 router.get("/strategies",requirePermission("access_admin"),async(req,res)=>{try{const strategies=await queryAll("SELECT id,name,description,fee,portfolio_id,status FROM strategies ORDER BY id DESC");const enriched=[];for(const s of strategies){const value=await valuePortfolio(s.portfolio_id);const subCountRow=await queryOne("SELECT COUNT(*) as c FROM portfolios WHERE type='copier' AND strategy_id=?",[s.id]);enriched.push({id:s.id,name:s.name,description:s.description,fee:s.fee,status:s.status,cashBalance:value?.cashBalance??0,holdingsValue:value?.holdingsValue??0,totalValue:value?.totalValue??0,subscribers:subCountRow.c});}res.json({strategies:enriched});}catch(err){res.status(500).json({error:err.message});}});
+
+router.get("/strategies/mirror-jobs",requirePermission("access_admin"),async(req,res)=>{try{
+  const status=req.query.status?String(req.query.status):null;
+  const allowed=["pending","processing","retry","completed","skipped","failed"];
+  if(status&&!allowed.includes(status))return res.status(400).json({error:`status must be one of: ${allowed.join(", ")}`});
+  const jobs=await listStrategyMirrorJobs({status,limit:req.query.limit});
+  res.json({jobs});
+}catch(err){res.status(500).json({error:err.message});}});
+
+router.post("/strategies/mirror-jobs/:jobId/retry",requirePermission("access_admin"),async(req,res)=>{try{
+  const retried=await retryStrategyMirrorJob(req.params.jobId);
+  if(!retried)return res.status(409).json({error:"Only failed or skipped mirror jobs can be retried"});
+  res.json({message:"Mirror job queued for retry"});
+}catch(err){res.status(500).json({error:err.message});}});
 
 router.get("/strategies/:id/trades",requirePermission("access_admin"),async(req,res)=>{try{const trades=await queryAll("SELECT id,symbol,side,amount,price,created_at FROM strategy_trades WHERE strategy_id=? ORDER BY created_at DESC LIMIT 50",[req.params.id]);res.json({trades});}catch(err){res.status(500).json({error:err.message});}});
 

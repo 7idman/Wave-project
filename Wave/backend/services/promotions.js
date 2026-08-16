@@ -41,21 +41,21 @@ async function applyDepositBonus(userId, depositAmount, depositTransactionId) {
     .toISOString().slice(0, 19).replace("T", " ");
 
   return withTransaction(async tx => {
-    const existing = await tx.queryOne(
-      "SELECT id FROM bonus_grants WHERE transaction_id = ? AND promotion_id = ?",
-      [depositTransactionId, promo.id]
+    // Claim this deposit transaction before touching the balance. The engine
+    // intentionally awards only its best eligible promotion, so the unique
+    // transaction index also protects retries after promotion configuration
+    // changes. IGNORE turns a concurrent duplicate into an idempotent null.
+    const grant = await tx.execute(
+      "INSERT OR IGNORE INTO bonus_grants (user_id, promotion_id, transaction_id, amount, unlock_at) VALUES (?, ?, ?, ?, ?)",
+      [userId, promo.id, depositTransactionId, bonusAmount, unlockAt]
     );
-    if (existing) return null;
+    if (grant.rowsAffected === 0) return null;
 
     const credited = await tx.execute(
       "UPDATE users SET cash_balance = cash_balance + ?, updated_at = datetime('now') WHERE id = ?",
       [bonusAmount, userId]
     );
     if (credited.rowsAffected === 0) throw new Error("Bonus recipient no longer exists");
-    await tx.execute(
-      "INSERT INTO bonus_grants (user_id, promotion_id, transaction_id, amount, unlock_at) VALUES (?, ?, ?, ?, ?)",
-      [userId, promo.id, depositTransactionId, bonusAmount, unlockAt]
-    );
     return { promotionName: promo.name, bonusAmount, unlockAt };
   });
 }
@@ -70,4 +70,4 @@ async function getLockedBonusTotal(userId) {
   return row.total;
 }
 
-module.exports = { applyDepositBonus, getLockedBonusTotal, tierRank };
+module.exports = { applyDepositBonus, getLockedBonusTotal };

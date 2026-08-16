@@ -156,4 +156,4 @@ async function assessWithdrawalRisk({ userId, ip, amount, phoneVerified, sensiti
   return { score, level, reasons, actions: actionsForLevel(level) };
 }
 
-module.exports = { assessLoginRisk, assessSignupRisk, assessWithdrawalRisk, levelForScore, actionsForLevel };
+module.exports = { assessLoginRisk, assessSignupRisk, assessWithdrawalRisk };

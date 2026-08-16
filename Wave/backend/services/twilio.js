@@ -86,4 +86,4 @@ async function checkVerificationCode(phoneE164, code) {
   }
 }
 
-module.exports = { normalizeToE164, lookupLineType, sendVerificationCode, checkVerificationCode, getClient };
+module.exports = { normalizeToE164, lookupLineType, sendVerificationCode, checkVerificationCode };

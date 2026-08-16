@@ -102,4 +102,4 @@ async function runStockRefresh() {
   return { updated, skipped: STOCK_SYMBOLS.length - updated };
 }
 
-module.exports = { fetchStockPrices, fetchStockQuote, STOCK_SYMBOLS, STOCK_NAMES };
+module.exports = { fetchStockPrices, fetchStockQuote, STOCK_SYMBOLS };

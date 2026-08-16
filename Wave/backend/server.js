@@ -53,6 +53,7 @@ const autoInvestRoutes = require("./routes/autoInvest");
 const priceAlertRoutes = require("./routes/priceAlerts");
 const { startAutoInvestSchedule } = require("./services/autoInvest");
 const { startPriceSnapshotSchedule } = require("./services/priceSnapshot");
+const { startStrategyMirrorSchedule } = require("./services/strategyMirroring");
 const { fetchStockPrices } = require("./services/stocks");
 
 const app  = express();
@@ -177,6 +178,7 @@ if (cleanup.rowsAffected > 0) {
     setInterval(() => { fetchStockPrices().catch(console.warn); }, 5 * 60 * 1000);
     startPriceSnapshotSchedule();
     startAutoInvestSchedule();
+    startStrategyMirrorSchedule();
     app.listen(PORT, () => {
       console.log(`🚀 Wave API running on http://localhost:${PORT}`);
       console.log(`📦 Database: ${process.env.LIBSQL_URL || "file:wave.db"}`);

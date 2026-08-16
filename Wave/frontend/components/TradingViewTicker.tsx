@@ -15,7 +15,7 @@ export interface TickerSymbol { proName: string; title: string; }
 
 // A reasonable mix of the crypto/stock symbols already on the platform —
 // see COINS in data/market.ts and STOCK_NAMES in PlatformApp.tsx.
-export const DEFAULT_TICKER_SYMBOLS: TickerSymbol[] = [
+const DEFAULT_TICKER_SYMBOLS: TickerSymbol[] = [
   { proName: "BITSTAMP:BTCUSD",  title: "Bitcoin" },
   { proName: "BITSTAMP:ETHUSD",  title: "Ethereum" },
   { proName: "COINBASE:SOLUSD",  title: "Solana" },

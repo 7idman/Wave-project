@@ -52,4 +52,4 @@ function startPriceSnapshotSchedule(intervalMs = 15 * 60 * 1000) {
   return handle;
 }
 
-module.exports = { takeSnapshot, startPriceSnapshotSchedule };
+module.exports = { startPriceSnapshotSchedule };

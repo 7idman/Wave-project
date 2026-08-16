@@ -43,4 +43,4 @@ async function isDisposableEmail(email) {
   return HIGH_RISK_DOMAINS.has(domain);
 }
 
-module.exports = { isDisposableEmail, normalizeDomain };
+module.exports = { isDisposableEmail };
