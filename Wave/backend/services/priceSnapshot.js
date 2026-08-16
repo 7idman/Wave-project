@@ -5,16 +5,27 @@
  * no way to backfill prices from before snapshotting began.
  */
 
-const { queryAll, execute } = require("../db");
+const { queryAll, batch } = require("../db");
 const { checkAlerts } = require("./priceAlerts");
 
+let inFlightSnapshot = null;
 async function takeSnapshot() {
+  if (inFlightSnapshot) return inFlightSnapshot;
+  inFlightSnapshot = runSnapshot();
+  try {
+    return await inFlightSnapshot;
+  } finally {
+    inFlightSnapshot = null;
+  }
+}
+
+async function runSnapshot() {
   const prices = await queryAll("SELECT symbol, price, change_24h FROM price_cache");
-  for (const p of prices) {
-    await execute(
-      "INSERT INTO price_history (symbol, price, change_24h) VALUES (?, ?, ?)",
-      [p.symbol, p.price, p.change_24h]
-    );
+  if (prices.length) {
+    await batch(prices.map(price => ({
+      sql: "INSERT INTO price_history (symbol, price, change_24h) VALUES (?, ?, ?)",
+      args: [price.symbol, price.price, price.change_24h],
+    })));
   }
 
   // Price alerts are checked on this same cadence, right after the fresh

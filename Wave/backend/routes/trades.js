@@ -5,7 +5,7 @@
 
 const crypto = require("crypto");
 const router = require("express").Router();
-const { queryOne, execute } = require("../db");
+const { queryOne, execute, withTransaction } = require("../db");
 const { createAdminRequest } = require("../services/adminRequests");
 const { generateReferenceId } = require("../utils/referenceId");
 const { getLockedBonusTotal } = require("../services/promotions");
@@ -56,15 +56,21 @@ router.post("/", async (req, res) => {
     // A plan activation reduces available cash, but it is not a withdrawal.
     // Keep it in a dedicated activity log so its notification is accurate.
     if (type === "investment") {
-      const result = await execute(
-        "UPDATE users SET cash_balance = cash_balance - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance >= ?",
-        [qty, userId, qty]
-      );
-      if (result.rowsAffected === 0) return res.status(400).json({ error: "Insufficient balance" });
       const activityLabel = typeof label === "string" && label.trim() ? label.trim().slice(0, 120) : "Investment plan";
-      await execute("INSERT INTO activity_log (user_id, type, label, amount) VALUES (?, ?, ?, ?)", [userId, "investment", activityLabel, qty]);
-      const user = await queryOne("SELECT cash_balance FROM users WHERE id = ?", [userId]);
-      return res.status(201).json({ message: `${activityLabel} activated`, cashBalance: user.cash_balance });
+      const outcome = await withTransaction(async tx => {
+        const result = await tx.execute(
+          "UPDATE users SET cash_balance = cash_balance - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance >= ?",
+          [qty, userId, qty]
+        );
+        if (result.rowsAffected === 0) return { error: "Insufficient balance" };
+        await tx.execute(
+          "INSERT INTO activity_log (user_id, type, label, amount) VALUES (?, ?, ?, ?)",
+          [userId, "investment", activityLabel, qty]
+        );
+        return tx.queryOne("SELECT cash_balance FROM users WHERE id = ?", [userId]);
+      });
+      if (outcome.error) return res.status(400).json(outcome);
+      return res.status(201).json({ message: `${activityLabel} activated`, cashBalance: outcome.cash_balance });
     }
 
     // ── DEPOSIT ────────────────────────────────────────────────────────────
@@ -244,64 +250,50 @@ router.post("/", async (req, res) => {
     const fee      = parseFloat((subtotal * FEE_RATE).toFixed(8));
     const total    = parseFloat((subtotal + fee).toFixed(8));
 
-    if (type === "buy") {
-      // Concept: same atomic pattern as withdraw — the cash_balance >= ? check
-      // and the deduction happen as one indivisible database operation.
-      const result = await execute(
-        "UPDATE users SET cash_balance = cash_balance - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance >= ?",
-        [total, userId, total]
-      );
+    const outcome = await withTransaction(async tx => {
+      if (type === "buy") {
+        const result = await tx.execute(
+          "UPDATE users SET cash_balance = cash_balance - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance >= ?",
+          [total, userId, total]
+        );
+        if (result.rowsAffected === 0) return { error: "Insufficient cash balance" };
 
-      if (result.rowsAffected === 0) {
-        return res.status(400).json({ error: "Insufficient cash balance" });
+        await tx.execute(
+          `INSERT INTO holdings (user_id, symbol, amount, updated_at) VALUES (?, ?, ?, datetime('now'))
+           ON CONFLICT(user_id, symbol) DO UPDATE SET amount = amount + excluded.amount, updated_at = excluded.updated_at`,
+          [userId, sym, qty]
+        );
+        await tx.execute(
+          "INSERT INTO transactions (user_id, type, symbol, amount, price, fee, total, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'completed')",
+          [userId, "buy", sym, qty, price, fee, total]
+        );
+      } else {
+        const proceeds = parseFloat((subtotal - fee).toFixed(8));
+        const result = await tx.execute(
+          "UPDATE holdings SET amount = amount - ?, updated_at = datetime('now') WHERE user_id = ? AND symbol = ? AND amount >= ?",
+          [qty, userId, sym, qty]
+        );
+        if (result.rowsAffected === 0) return { error: "Insufficient holdings" };
+
+        await tx.execute(
+          "UPDATE users SET cash_balance = cash_balance + ?, updated_at = datetime('now') WHERE id = ?",
+          [proceeds, userId]
+        );
+        await tx.execute(
+          "INSERT INTO transactions (user_id, type, symbol, amount, price, fee, total, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'completed')",
+          [userId, "sell", sym, qty, price, fee, proceeds]
+        );
       }
 
-      await execute(
-        `INSERT INTO holdings (user_id, symbol, amount, updated_at) VALUES (?, ?, ?, datetime('now'))
-         ON CONFLICT(user_id, symbol) DO UPDATE SET amount = amount + excluded.amount, updated_at = excluded.updated_at`,
-        [userId, sym, qty]
-      );
-      await execute(
-        "INSERT INTO transactions (user_id, type, symbol, amount, price, fee, total, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'completed')",
-        [userId, "buy", sym, qty, price, fee, total]
-      );
-    } else {
-      // ── SELL ────────────────────────────────────────────────────────────
-      // Concept: this is the exact fix for the race condition we discussed.
-      // The "amount >= ?" check and the subtraction happen in the SAME SQL
-      // statement. If two sell requests for the same holding arrive at the
-      // same instant, only the first one that reaches the database will see
-      // amount >= qty as true. By the time the second one runs, the amount
-      // has already been reduced, so its own "amount >= ?" check fails and
-      // rowsAffected comes back as 0 — the database itself blocks the overdraw,
-      // no matter how close together the two requests arrive.
-      const proceeds = parseFloat((subtotal - fee).toFixed(8));
-
-      const result = await execute(
-        "UPDATE holdings SET amount = amount - ?, updated_at = datetime('now') WHERE user_id = ? AND symbol = ? AND amount >= ?",
-        [qty, userId, sym, qty]
-      );
-
-      if (result.rowsAffected === 0) {
-        return res.status(400).json({ error: "Insufficient holdings" });
-      }
-
-      await execute(
-        "UPDATE users SET cash_balance = cash_balance + ?, updated_at = datetime('now') WHERE id = ?",
-        [proceeds, userId]
-      );
-      await execute(
-        "INSERT INTO transactions (user_id, type, symbol, amount, price, fee, total, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'completed')",
-        [userId, "sell", sym, qty, price, fee, proceeds]
-      );
-    }
-
-    const updated        = await queryOne("SELECT cash_balance FROM users WHERE id = ?", [userId]);
-    const updatedHolding = await queryOne("SELECT amount FROM holdings WHERE user_id = ? AND symbol = ?", [userId, sym]);
+      const user = await tx.queryOne("SELECT cash_balance FROM users WHERE id = ?", [userId]);
+      const holding = await tx.queryOne("SELECT amount FROM holdings WHERE user_id = ? AND symbol = ?", [userId, sym]);
+      return { cashBalance: user.cash_balance, holding: holding?.amount ?? 0 };
+    });
+    if (outcome.error) return res.status(400).json(outcome);
     res.status(201).json({
       message:     `${type === "buy" ? "Bought" : "Sold"} ${qty} ${sym}`,
-      cashBalance: updated.cash_balance,
-      holding:     updatedHolding?.amount ?? 0,
+      cashBalance: outcome.cashBalance,
+      holding:     outcome.holding,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

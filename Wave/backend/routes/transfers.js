@@ -6,7 +6,7 @@
  */
 
 const router = require("express").Router();
-const { queryOne, execute } = require("../db");
+const { queryOne, execute, withTransaction } = require("../db");
 const { generateReferenceId } = require("../utils/referenceId");
 const { sendVerificationCode, checkVerificationCode } = require("../services/twilio");
 const { checkAndRecord } = require("../services/rateLimit");
@@ -73,37 +73,34 @@ router.post("/to-portfolio", async (req, res) => {
 
     const referenceId = generateReferenceId();
 
-    // Same atomic guarded-deduction pattern as withdraw/buy in trades.js —
-    // the balance check and the deduction happen in one indivisible
-    // statement, so two simultaneous transfers can't both succeed off an
-    // insufficient balance.
-    const result = await execute(
-      "UPDATE users SET cash_balance = cash_balance - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance >= ?",
-      [amt, userId, amt]
-    );
-    if (result.rowsAffected === 0)
-      return res.status(400).json({ error: "Insufficient balance" });
+    const outcome = await withTransaction(async tx => {
+      const result = await tx.execute(
+        "UPDATE users SET cash_balance = cash_balance - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance >= ?",
+        [amt, userId, amt]
+      );
+      if (result.rowsAffected === 0) return { error: "Insufficient balance" };
 
-    await execute(
-      "UPDATE portfolios SET cash_balance = cash_balance + ?, updated_at = datetime('now') WHERE id = ?",
-      [amt, portfolioId]
-    );
-    await execute(
-      `INSERT INTO internal_transfers
-         (user_id, direction, portfolio_id, amount, reference_id, verification_status, status)
-       VALUES (?, 'to_portfolio', ?, ?, ?, ?, 'completed')`,
-      [userId, portfolioId, amt, referenceId, verification.status]
-    );
-    await execute(
-      "INSERT INTO activity_log (user_id, type, label, amount) VALUES (?, 'transfer', ?, ?)",
-      [userId, `Transfer to ${portfolio.type} account (${referenceId})`, amt]
-    );
-
-    const user = await queryOne("SELECT cash_balance FROM users WHERE id = ?", [userId]);
+      await tx.execute(
+        "UPDATE portfolios SET cash_balance = cash_balance + ?, updated_at = datetime('now') WHERE id = ?",
+        [amt, portfolioId]
+      );
+      await tx.execute(
+        `INSERT INTO internal_transfers
+           (user_id, direction, portfolio_id, amount, reference_id, verification_status, status)
+         VALUES (?, 'to_portfolio', ?, ?, ?, ?, 'completed')`,
+        [userId, portfolioId, amt, referenceId, verification.status]
+      );
+      await tx.execute(
+        "INSERT INTO activity_log (user_id, type, label, amount) VALUES (?, 'transfer', ?, ?)",
+        [userId, `Transfer to ${portfolio.type} account (${referenceId})`, amt]
+      );
+      return tx.queryOne("SELECT cash_balance FROM users WHERE id = ?", [userId]);
+    });
+    if (outcome.error) return res.status(400).json(outcome);
     res.status(201).json({
       message: `Transferred $${amt.toLocaleString()}`,
       referenceId,
-      cashBalance: user.cash_balance,
+      cashBalance: outcome.cash_balance,
       portfolioId,
     });
   } catch (err) {
@@ -134,34 +131,42 @@ router.post("/:id/confirm", async (req, res) => {
       return res.status(401).json({ error: "Invalid or expired code." });
     }
 
-    // Now, and only now, move the money — same atomic guarded pattern as
-    // the direct (non-verified) path above.
-    const result = await execute(
-      "UPDATE users SET cash_balance = cash_balance - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance >= ?",
-      [pending.amount, userId, pending.amount]
-    );
-    if (result.rowsAffected === 0) {
-      await execute("UPDATE internal_transfers SET status = 'failed' WHERE id = ?", [transferId]);
-      return res.status(400).json({ error: "Insufficient balance" });
-    }
+    const outcome = await withTransaction(async tx => {
+      const claim = await tx.execute(
+        "UPDATE internal_transfers SET status = 'processing' WHERE id = ? AND user_id = ? AND status = 'pending'",
+        [transferId, userId]
+      );
+      if (claim.rowsAffected === 0) return { error: "This transfer is already being processed.", status: 409 };
 
-    await execute(
-      "UPDATE portfolios SET cash_balance = cash_balance + ?, updated_at = datetime('now') WHERE id = ?",
-      [pending.amount, pending.portfolio_id]
-    );
-    await execute(
-      "UPDATE internal_transfers SET status = 'completed', verification_status = 'verified' WHERE id = ?",
-      [transferId]
-    );
-    const portfolio = await queryOne("SELECT type FROM portfolios WHERE id = ?", [pending.portfolio_id]);
-    await execute(
-      "INSERT INTO activity_log (user_id, type, label, amount) VALUES (?, 'transfer', ?, ?)",
-      [userId, `Transfer to ${portfolio.type} account (${pending.reference_id})`, pending.amount]
-    );
+      const result = await tx.execute(
+        "UPDATE users SET cash_balance = cash_balance - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance >= ?",
+        [pending.amount, userId, pending.amount]
+      );
+      if (result.rowsAffected === 0) {
+        await tx.execute("UPDATE internal_transfers SET status = 'failed' WHERE id = ?", [transferId]);
+        return { error: "Insufficient balance", status: 400 };
+      }
+
+      await tx.execute(
+        "UPDATE portfolios SET cash_balance = cash_balance + ?, updated_at = datetime('now') WHERE id = ?",
+        [pending.amount, pending.portfolio_id]
+      );
+      const portfolio = await tx.queryOne("SELECT type FROM portfolios WHERE id = ?", [pending.portfolio_id]);
+      if (!portfolio) throw new Error("Transfer destination no longer exists");
+      await tx.execute(
+        "UPDATE internal_transfers SET status = 'completed', verification_status = 'verified' WHERE id = ?",
+        [transferId]
+      );
+      await tx.execute(
+        "INSERT INTO activity_log (user_id, type, label, amount) VALUES (?, 'transfer', ?, ?)",
+        [userId, `Transfer to ${portfolio.type} account (${pending.reference_id})`, pending.amount]
+      );
+      const user = await tx.queryOne("SELECT cash_balance FROM users WHERE id = ?", [userId]);
+      return { cashBalance: user.cash_balance };
+    });
+    if (outcome.error) return res.status(outcome.status).json({ error: outcome.error });
     await logSecurityEvent("TRANSFER_VERIFIED", { userId, ip: req.ip, metadata: { transferId } });
-
-    const user = await queryOne("SELECT cash_balance FROM users WHERE id = ?", [userId]);
-    res.json({ message: `Transferred $${pending.amount.toLocaleString()}`, referenceId: pending.reference_id, cashBalance: user.cash_balance, portfolioId: pending.portfolio_id });
+    res.json({ message: `Transferred $${pending.amount.toLocaleString()}`, referenceId: pending.reference_id, cashBalance: outcome.cashBalance, portfolioId: pending.portfolio_id });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -15,6 +15,7 @@
  */
 
 const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+const { fetchWithTimeout } = require("../utils/http");
 
 async function verifyTurnstileToken(token, remoteIp) {
   const secret = process.env.TURNSTILE_SECRET_KEY;
@@ -30,14 +31,7 @@ async function verifyTurnstileToken(token, remoteIp) {
     const body = new URLSearchParams({ secret, response: token });
     if (remoteIp) body.set("remoteip", remoteIp);
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000); // don't hang a request forever if Cloudflare stalls
-    let res;
-    try {
-      res = await fetch(TURNSTILE_VERIFY_URL, { method: "POST", body, signal: controller.signal });
-    } finally {
-      clearTimeout(timeout);
-    }
+    const res = await fetchWithTimeout(TURNSTILE_VERIFY_URL, { method: "POST", body });
 
     if (!res.ok) {
       console.error(`Turnstile verify HTTP error: ${res.status}`);

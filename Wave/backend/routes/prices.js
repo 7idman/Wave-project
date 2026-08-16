@@ -9,6 +9,7 @@
 
 const router = require("express").Router();
 const { queryOne, queryAll, execute } = require("../db");
+const { fetchWithTimeout } = require("../utils/http");
 
 const COIN_IDS = {
   BTC:  "bitcoin",
@@ -30,7 +31,7 @@ async function fetchLivePrices() {
     const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`;
     const headers = { Accept: "application/json" };
     if (process.env.COINGECKO_API_KEY) headers["x-cg-demo-api-key"] = process.env.COINGECKO_API_KEY;
-    const res = await fetch(url, { headers });
+    const res = await fetchWithTimeout(url, { headers });
     if (!res.ok) throw new Error(`CoinGecko error: ${res.status}`);
     const data = await res.json();
 

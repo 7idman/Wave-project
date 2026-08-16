@@ -352,9 +352,6 @@
   :root{--space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:24px;--space-6:32px;--space-7:48px;--shadow-sm:0 6px 18px rgba(0,0,0,.12);--shadow-md:0 18px 45px rgba(0,0,0,.18);--shadow-lg:0 28px 70px rgba(0,0,0,.28);--ease-out:cubic-bezier(.2,.8,.2,1);}
   :where(button,input,select,textarea,[role="button"]):focus-visible{outline:3px solid rgba(129,140,248,.62);outline-offset:3px;}
   .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
-  .ui-card{isolation:isolate;}.ui-dropdown{position:relative;z-index:20;}.ui-tooltip{position:relative;display:inline-flex;}
-  .ui-tooltip::after{content:attr(data-tooltip);position:absolute;left:50%;bottom:calc(100% + 9px);z-index:80;max-width:220px;width:max-content;padding:7px 9px;border-radius:8px;background:rgba(9,11,18,.96);border:1px solid rgba(255,255,255,.12);box-shadow:var(--shadow-sm);color:#fff;font-size:11px;font-weight:600;line-height:1.3;text-align:center;opacity:0;pointer-events:none;transform:translate(-50%,4px);transition:opacity .16s ease,transform .16s var(--ease-out);}
-  .ui-tooltip:hover::after,.ui-tooltip:focus-within::after{opacity:1;transform:translate(-50%,0);}
   .ui-modal-backdrop{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:20px;background:rgba(3,5,10,.68);backdrop-filter:blur(10px);animation:ui-fade-in .18s ease both;}
   .ui-modal{width:min(100%,460px);max-height:min(720px,calc(100vh - 40px));overflow:auto;border:1px solid var(--border2);border-radius:var(--r);padding:28px 24px;background:var(--bg2);box-shadow:var(--shadow-lg);animation:ui-modal-in .22s var(--ease-out) both;}
   .ui-modal-close{width:32px;height:32px;border:1px solid var(--border);border-radius:50%;background:var(--surface2);color:var(--text2);font-size:21px;line-height:1;cursor:pointer;transition:transform .16s var(--ease-out),background .16s ease,color .16s ease;}
@@ -364,7 +361,7 @@
   @keyframes vip-shine{0%{background-position:-200% 0}100%{background-position:200% 0}}
   .badge-vip{position:relative;overflow:hidden;background:linear-gradient(110deg,#0e7490,#67e8f9,#0e7490,#67e8f9,#0e7490);background-size:250% 100%;animation:vip-shine 3.5s linear infinite;color:#03181c;font-weight:800;border:1px solid rgba(103,232,249,.5);box-shadow:0 0 12px rgba(103,232,249,.35);}
   @media(prefers-reduced-motion:reduce){.badge-vip{animation:none;background:rgba(103,232,249,.18);color:#67e8f9;}}
-  @media(prefers-reduced-motion:reduce){.ui-modal-backdrop,.ui-modal,.skeleton::after{animation:none!important}.ui-tooltip::after{transition:none}.btn,.gcard,.stat,.hi{transition:none!important}}@media(max-width:640px){.ui-modal{padding:22px 18px;border-radius:18px}.ui-tooltip::after{display:none}}
+  @media(prefers-reduced-motion:reduce){.ui-modal-backdrop,.ui-modal,.skeleton::after{animation:none!important}.btn,.gcard,.stat,.hi{transition:none!important}}@media(max-width:640px){.ui-modal{padding:22px 18px;border-radius:18px}}
 
   /* Mobile composition pass. These rules deliberately sit last so the desktop
      product treatment above remains untouched. The focus is a calmer reading

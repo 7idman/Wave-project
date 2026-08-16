@@ -13,8 +13,9 @@
 require("dotenv").config();
 const { createClient } = require("@libsql/client");
 
+const databaseUrl = process.env.LIBSQL_URL || "file:wave.db";
 const db = createClient({
-  url:       process.env.LIBSQL_URL       || "file:wave.db",
+  url:       databaseUrl,
   authToken: process.env.LIBSQL_AUTH_TOKEN || undefined,
 });
 
@@ -69,8 +70,100 @@ async function batch(stmts) {
   return db.batch(stmts.map(s => ({ sql: s.sql, args: s.args || [] })));
 }
 
+function isDatabaseBusy(error) {
+  return error?.code === "SQLITE_BUSY" || error?.cause?.code === "SQLITE_BUSY";
+}
+
+async function acquireWriteTransaction(maxAttempts = 7) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      return await db.transaction("write");
+    } catch (error) {
+      if (!isDatabaseBusy(error) || attempt === maxAttempts - 1) throw error;
+      const delayMs = 20 * (2 ** attempt);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+  throw new Error("Unable to acquire database write transaction");
+}
+
+/**
+ * Run related reads and writes in one serialized write transaction.
+ * The callback receives the same execute/query helpers as this module.
+ * Any thrown error rolls every statement back before it is re-thrown.
+ */
+async function runTransaction(callback) {
+  const transaction = await acquireWriteTransaction();
+  const transactionApi = {
+    async execute(sql, args = []) {
+      const result = await transaction.execute({ sql, args });
+      return {
+        rowsAffected: result.rowsAffected,
+        lastInsertRowid: result.lastInsertRowid != null
+          ? Number(result.lastInsertRowid)
+          : null,
+      };
+    },
+    async queryOne(sql, args = []) {
+      const result = await transaction.execute({ sql, args });
+      return toObjects(result)[0] ?? null;
+    },
+    async queryAll(sql, args = []) {
+      const result = await transaction.execute({ sql, args });
+      return toObjects(result);
+    },
+  };
+
+  try {
+    const value = await callback(transactionApi);
+    await transaction.commit();
+    return value;
+  } catch (error) {
+    if (!transaction.closed) {
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        console.error("Database transaction rollback failed:", rollbackError.message);
+      }
+    }
+    throw error;
+  } finally {
+    transaction.close();
+  }
+}
+
+// The native local SQLite transport does not queue overlapping write
+// transactions reliably. Serialize them in-process; Turso/libSQL handles its
+// own remote write queue, so production traffic keeps its normal concurrency.
+let localWriteTail = Promise.resolve();
+async function withTransaction(callback) {
+  if (!databaseUrl.startsWith("file:")) return runTransaction(callback);
+
+  let release;
+  const previous = localWriteTail;
+  localWriteTail = new Promise(resolve => { release = resolve; });
+  await previous;
+  try {
+    return await runTransaction(callback);
+  } finally {
+    release();
+  }
+}
+
 // ── Schema bootstrap ────────────────────────────────────────────────────────
 async function initSchema() {
+  const schemaVersion = "1";
+  await db.execute(`CREATE TABLE IF NOT EXISTS schema_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  )`);
+  const versionResult = await db.execute({
+    sql: "SELECT value FROM schema_meta WHERE key = 'schema_version'",
+    args: [],
+  });
+  const currentVersion = toObjects(versionResult)[0]?.value;
+  const schemaCurrent = currentVersion === schemaVersion;
+
   // Run each CREATE TABLE individually instead of batching them together.
   // Batching DDL statements against Turso's cloud HTTP API was triggering
   // "Unexpected status code while fetching migration jobs: 400" regardless
@@ -443,57 +536,74 @@ async function initSchema() {
     )`,
   ];
 
-  for (const sql of tables) {
-    await db.execute(sql);
+  if (!schemaCurrent) {
+    if (databaseUrl.startsWith("file:")) {
+      await db.batch(tables.map(sql => ({ sql, args: [] })), "write");
+    } else {
+      for (const sql of tables) {
+        await db.execute(sql);
+      }
+    }
   }
 
-  // ── Safe migrations (ADD COLUMN IF NOT EXISTS equivalent) ────────────────
-  const migrations = [
-    "ALTER TABLE users ADD COLUMN phone            TEXT",
-    "ALTER TABLE users ADD COLUMN phone_verified   INTEGER NOT NULL DEFAULT 0",
-    "ALTER TABLE users ADD COLUMN phone_pending    TEXT",
-    "ALTER TABLE users ADD COLUMN first_name       TEXT",
-    "ALTER TABLE users ADD COLUMN last_name        TEXT",
-    "ALTER TABLE users ADD COLUMN email_verified   INTEGER NOT NULL DEFAULT 1",
-    "ALTER TABLE users ADD COLUMN email_verified_at TEXT",
-    "ALTER TABLE users ADD COLUMN last_sensitive_change_at TEXT",
-    "ALTER TABLE sessions ADD COLUMN device_id TEXT",
-    "ALTER TABLE users ADD COLUMN avatar_url       TEXT",
-    "ALTER TABLE users ADD COLUMN date_of_birth    TEXT",
-    "ALTER TABLE users ADD COLUMN country          TEXT",
-    "ALTER TABLE users ADD COLUMN kyc_id_status    TEXT NOT NULL DEFAULT 'pending'",
-    "ALTER TABLE users ADD COLUMN kyc_addr_status  TEXT NOT NULL DEFAULT 'pending'",
-    "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'",
-    "ALTER TABLE users ADD COLUMN account_status TEXT NOT NULL DEFAULT 'active'",
-    "ALTER TABLE users ADD COLUMN ban_reason TEXT",
-    "ALTER TABLE users ADD COLUMN totp_secret TEXT",
-    "ALTER TABLE users ADD COLUMN totp_secret_pending TEXT",
-    "ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0",
-    "ALTER TABLE users ADD COLUMN totp_backup_codes TEXT",
-    "ALTER TABLE users ADD COLUMN referral_code TEXT",
-    "ALTER TABLE users ADD COLUMN referred_by INTEGER REFERENCES users(id)",
-    "ALTER TABLE refresh_tokens ADD COLUMN session_id INTEGER",
-    "CREATE INDEX IF NOT EXISTS idx_price_history_symbol_time ON price_history(symbol, recorded_at)",
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code)",
-    "CREATE INDEX IF NOT EXISTS idx_rate_limit_scope_id_time ON rate_limit_entries(scope, identifier, created_at)",
-    "CREATE INDEX IF NOT EXISTS idx_security_events_type_time ON security_events(type, created_at)",
-    "CREATE INDEX IF NOT EXISTS idx_trusted_devices_user_device ON trusted_devices(user_id, device_id)",
-    "CREATE INDEX IF NOT EXISTS idx_auto_invest_status_next_run ON auto_invest_plans(status, next_run_at)",
-    "CREATE INDEX IF NOT EXISTS idx_price_alerts_status_symbol ON price_alerts(status, symbol)",
-    "CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_hash ON email_verification_tokens(token_hash)",
-    "CREATE INDEX IF NOT EXISTS idx_signup_phone_tokens_hash ON signup_phone_tokens(token_hash)",
-    "ALTER TABLE price_cache ADD COLUMN asset_type TEXT NOT NULL DEFAULT 'crypto'",
-    "ALTER TABLE transactions ADD COLUMN reference_id TEXT",
-    "ALTER TABLE transactions ADD COLUMN source TEXT",
-    "ALTER TABLE transactions ADD COLUMN email_otp_hash TEXT",
-    "ALTER TABLE transactions ADD COLUMN email_otp_expires_at TEXT",
-    "CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_hash ON password_reset_tokens(token_hash)",
-  ];
-  for (const sql of migrations) {
-    try { await db.execute(sql); } catch (_) { /* column already exists — skip */ }
-  }
+  if (!schemaCurrent) {
+    // Check columns explicitly instead of deliberately executing duplicate
+    // ALTER statements and swallowing every error. This keeps genuine
+    // migration failures visible and avoids dozens of failed round trips.
+    const columnMigrations = [
+      ["users", "phone", "ALTER TABLE users ADD COLUMN phone TEXT"],
+      ["users", "phone_verified", "ALTER TABLE users ADD COLUMN phone_verified INTEGER NOT NULL DEFAULT 0"],
+      ["users", "phone_pending", "ALTER TABLE users ADD COLUMN phone_pending TEXT"],
+      ["users", "first_name", "ALTER TABLE users ADD COLUMN first_name TEXT"],
+      ["users", "last_name", "ALTER TABLE users ADD COLUMN last_name TEXT"],
+      ["users", "email_verified", "ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1"],
+      ["users", "email_verified_at", "ALTER TABLE users ADD COLUMN email_verified_at TEXT"],
+      ["users", "last_sensitive_change_at", "ALTER TABLE users ADD COLUMN last_sensitive_change_at TEXT"],
+      ["sessions", "device_id", "ALTER TABLE sessions ADD COLUMN device_id TEXT"],
+      ["users", "avatar_url", "ALTER TABLE users ADD COLUMN avatar_url TEXT"],
+      ["users", "date_of_birth", "ALTER TABLE users ADD COLUMN date_of_birth TEXT"],
+      ["users", "country", "ALTER TABLE users ADD COLUMN country TEXT"],
+      ["users", "kyc_id_status", "ALTER TABLE users ADD COLUMN kyc_id_status TEXT NOT NULL DEFAULT 'pending'"],
+      ["users", "kyc_addr_status", "ALTER TABLE users ADD COLUMN kyc_addr_status TEXT NOT NULL DEFAULT 'pending'"],
+      ["users", "role", "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'"],
+      ["users", "account_status", "ALTER TABLE users ADD COLUMN account_status TEXT NOT NULL DEFAULT 'active'"],
+      ["users", "ban_reason", "ALTER TABLE users ADD COLUMN ban_reason TEXT"],
+      ["users", "totp_secret", "ALTER TABLE users ADD COLUMN totp_secret TEXT"],
+      ["users", "totp_secret_pending", "ALTER TABLE users ADD COLUMN totp_secret_pending TEXT"],
+      ["users", "totp_enabled", "ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0"],
+      ["users", "totp_backup_codes", "ALTER TABLE users ADD COLUMN totp_backup_codes TEXT"],
+      ["users", "referral_code", "ALTER TABLE users ADD COLUMN referral_code TEXT"],
+      ["users", "referred_by", "ALTER TABLE users ADD COLUMN referred_by INTEGER REFERENCES users(id)"],
+      ["refresh_tokens", "session_id", "ALTER TABLE refresh_tokens ADD COLUMN session_id INTEGER"],
+      ["price_cache", "asset_type", "ALTER TABLE price_cache ADD COLUMN asset_type TEXT NOT NULL DEFAULT 'crypto'"],
+      ["transactions", "reference_id", "ALTER TABLE transactions ADD COLUMN reference_id TEXT"],
+      ["transactions", "source", "ALTER TABLE transactions ADD COLUMN source TEXT"],
+      ["transactions", "email_otp_hash", "ALTER TABLE transactions ADD COLUMN email_otp_hash TEXT"],
+      ["transactions", "email_otp_expires_at", "ALTER TABLE transactions ADD COLUMN email_otp_expires_at TEXT"],
+    ];
+    const columnsByTable = new Map();
+    for (const table of new Set(columnMigrations.map(([table]) => table))) {
+      const result = await db.execute(`PRAGMA table_info(${table})`);
+      columnsByTable.set(table, new Set(toObjects(result).map(column => column.name)));
+    }
+    for (const [table, column, sql] of columnMigrations) {
+      if (!columnsByTable.get(table).has(column)) await db.execute(sql);
+    }
 
-  try {
+    const indexMigrations = [
+      "CREATE INDEX IF NOT EXISTS idx_price_history_symbol_time ON price_history(symbol, recorded_at)",
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code)",
+      "CREATE INDEX IF NOT EXISTS idx_rate_limit_scope_id_time ON rate_limit_entries(scope, identifier, created_at)",
+      "CREATE INDEX IF NOT EXISTS idx_security_events_type_time ON security_events(type, created_at)",
+      "CREATE INDEX IF NOT EXISTS idx_trusted_devices_user_device ON trusted_devices(user_id, device_id)",
+      "CREATE INDEX IF NOT EXISTS idx_auto_invest_status_next_run ON auto_invest_plans(status, next_run_at)",
+      "CREATE INDEX IF NOT EXISTS idx_price_alerts_status_symbol ON price_alerts(status, symbol)",
+      "CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_hash ON email_verification_tokens(token_hash)",
+      "CREATE INDEX IF NOT EXISTS idx_signup_phone_tokens_hash ON signup_phone_tokens(token_hash)",
+      "CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_hash ON password_reset_tokens(token_hash)",
+    ];
+    for (const sql of indexMigrations) await db.execute(sql);
+
     await execute(
       `UPDATE users
        SET first_name = CASE WHEN instr(trim(name), ' ') > 0 THEN substr(trim(name), 1, instr(trim(name), ' ') - 1) ELSE trim(name) END,
@@ -501,8 +611,10 @@ async function initSchema() {
        WHERE (first_name IS NULL OR first_name = '') AND name IS NOT NULL AND trim(name) <> ''`
     );
     await execute("UPDATE users SET email_verified_at = COALESCE(email_verified_at, created_at, datetime('now')) WHERE email_verified = 1");
-  } catch (err) {
-    console.warn("User compatibility backfill skipped:", err.message);
+    await execute(
+      "INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      [schemaVersion]
+    );
   }
 
   const defaultRoles = [
@@ -563,4 +675,4 @@ async function initSchema() {
   console.log("✅ Database ready");
 }
 
-module.exports = { execute, queryOne, queryAll, batch, initSchema };
+module.exports = { execute, queryOne, queryAll, batch, withTransaction, initSchema };

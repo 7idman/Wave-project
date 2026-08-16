@@ -70,12 +70,4 @@ async function trustDevice(userId, deviceId, label) {
   );
 }
 
-async function revokeDevice(userId, trustedDeviceRowId) {
-  const result = await execute(
-    "DELETE FROM trusted_devices WHERE id = ? AND user_id = ?",
-    [trustedDeviceRowId, userId]
-  );
-  return result.rowsAffected > 0;
-}
-
-module.exports = { getOrSetDeviceId, isDeviceTrusted, trustDevice, revokeDevice, DEVICE_COOKIE_NAME };
+module.exports = { getOrSetDeviceId, isDeviceTrusted, trustDevice, DEVICE_COOKIE_NAME };

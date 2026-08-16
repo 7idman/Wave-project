@@ -10,6 +10,7 @@
  */
 
 const { execute } = require("../db");
+const { fetchWithTimeout } = require("../utils/http");
 
 // A curated, broad set across major sectors — not "all stocks," but wide
 // enough to be useful. At the current 5-minute refresh cycle this averages
@@ -42,7 +43,7 @@ async function fetchStockQuote(symbol) {
   const apiKey = process.env.FINNHUB_API_KEY;
   if (!apiKey) throw new Error("FINNHUB_API_KEY is not set");
 
-  const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${apiKey}`);
+  const res = await fetchWithTimeout(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${apiKey}`);
   if (!res.ok) throw new Error(`Finnhub request failed for ${symbol}: HTTP ${res.status}`);
   const data = await res.json();
 
@@ -61,28 +62,43 @@ async function fetchStockQuote(symbol) {
   };
 }
 
+let inFlightStockFetch = null;
 async function fetchStockPrices() {
+  if (inFlightStockFetch) return inFlightStockFetch;
+  inFlightStockFetch = runStockRefresh();
+  try {
+    return await inFlightStockFetch;
+  } finally {
+    inFlightStockFetch = null;
+  }
+}
+
+async function runStockRefresh() {
   if (!process.env.FINNHUB_API_KEY) {
     console.warn("Stocks: FINNHUB_API_KEY not set — skipping stock price fetch");
     return { updated: 0, skipped: STOCK_SYMBOLS.length };
   }
   let updated = 0;
-  for (const symbol of STOCK_SYMBOLS) {
-    try {
-      const quote = await fetchStockQuote(symbol);
-      await execute(
-        `INSERT INTO price_cache (symbol, price, change_24h, asset_type, updated_at)
-         VALUES (?, ?, ?, 'stock', datetime('now'))
-         ON CONFLICT(symbol) DO UPDATE SET price=excluded.price, change_24h=excluded.change_24h, asset_type='stock', updated_at=excluded.updated_at`,
-        [quote.symbol, quote.price, quote.change24h]
-      );
-      updated++;
-    } catch (err) {
-      // One bad symbol (rate limit, unknown ticker, network blip) must
-      // never stop the rest of the batch from updating.
-      console.error(`Stock price fetch failed for ${symbol}:`, err.message);
+  let nextIndex = 0;
+  async function worker() {
+    while (nextIndex < STOCK_SYMBOLS.length) {
+      const symbol = STOCK_SYMBOLS[nextIndex++];
+      try {
+        const quote = await fetchStockQuote(symbol);
+        await execute(
+          `INSERT INTO price_cache (symbol, price, change_24h, asset_type, updated_at)
+           VALUES (?, ?, ?, 'stock', datetime('now'))
+           ON CONFLICT(symbol) DO UPDATE SET price=excluded.price, change_24h=excluded.change_24h, asset_type='stock', updated_at=excluded.updated_at`,
+          [quote.symbol, quote.price, quote.change24h]
+        );
+        updated++;
+      } catch (err) {
+        // One bad symbol must never stop the rest of the refresh.
+        console.error(`Stock price fetch failed for ${symbol}:`, err.message);
+      }
     }
   }
+  await Promise.all(Array.from({ length: 4 }, () => worker()));
   return { updated, skipped: STOCK_SYMBOLS.length - updated };
 }
 

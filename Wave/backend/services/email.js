@@ -9,10 +9,6 @@ function getResendClient() {
   return resendClient;
 }
 
-function isEmailConfigured() {
-  return Boolean(process.env.RESEND_API_KEY);
-}
-
 function fromAddress() {
   return process.env.RESEND_FROM_EMAIL || "Wave <onboarding@resend.dev>";
 }
@@ -149,7 +145,6 @@ async function sendLoginEmailCode({ to, name, code }) {
 }
 
 module.exports = {
-  isEmailConfigured,
   sendEmail,
   sendVerificationEmail,
   sendNewDeviceLoginAlert,

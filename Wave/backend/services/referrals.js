@@ -8,7 +8,7 @@
  * cashoutable yet" pattern as services/promotions.js.
  */
 
-const { queryOne, queryAll, execute } = require("../db");
+const { queryOne, queryAll, execute, withTransaction } = require("../db");
 const { getLifetimeDeposits } = require("./tier");
 
 const REFERRER_BONUS = 10;
@@ -55,12 +55,14 @@ async function linkReferral(refereeId, code) {
   if (!referrer || referrer.id === refereeId) return null;
 
   try {
-    await execute(
-      "INSERT INTO referrals (referrer_id, referee_id, status, threshold_amount) VALUES (?, ?, 'pending', ?)",
-      [referrer.id, refereeId, DEPOSIT_THRESHOLD]
-    );
-    await execute("UPDATE users SET referred_by = ? WHERE id = ?", [referrer.id, refereeId]);
-    return referrer.id;
+    return await withTransaction(async tx => {
+      await tx.execute(
+        "INSERT INTO referrals (referrer_id, referee_id, status, threshold_amount) VALUES (?, ?, 'pending', ?)",
+        [referrer.id, refereeId, DEPOSIT_THRESHOLD]
+      );
+      await tx.execute("UPDATE users SET referred_by = ? WHERE id = ?", [referrer.id, refereeId]);
+      return referrer.id;
+    });
   } catch (err) {
     if (/UNIQUE/i.test(err.message)) return null; // referee already linked to someone — ignore
     throw err;
@@ -80,34 +82,33 @@ async function checkReferralBonus(refereeId) {
   const lifetimeDeposits = await getLifetimeDeposits(refereeId);
   if (lifetimeDeposits < referral.threshold_amount) return null;
 
-  // Atomic guard: only one caller can flip pending -> completed. If two
-  // deposits somehow trigger this check concurrently, only the first
-  // succeeds and the second sees rowsAffected === 0 and bails out —
-  // prevents the bonus from being paid out twice.
-  const flipped = await execute(
-    "UPDATE referrals SET status = 'completed', completed_at = datetime('now') WHERE id = ? AND status = 'pending'",
-    [referral.id]
-  );
-  if (flipped.rowsAffected === 0) return null;
-
   const unlockAt = new Date(Date.now() + REFERRAL_LOCK_DAYS * 24 * 60 * 60 * 1000)
     .toISOString().slice(0, 19).replace("T", " ");
 
-  for (const [userId, role, amount] of [
-    [referral.referrer_id, "referrer", REFERRER_BONUS],
-    [referral.referee_id,  "referee",  REFEREE_BONUS],
-  ]) {
-    await execute(
-      "UPDATE users SET cash_balance = cash_balance + ?, updated_at = datetime('now') WHERE id = ?",
-      [amount, userId]
+  return withTransaction(async tx => {
+    const flipped = await tx.execute(
+      "UPDATE referrals SET status = 'completed', completed_at = datetime('now') WHERE id = ? AND status = 'pending'",
+      [referral.id]
     );
-    await execute(
-      "INSERT INTO referral_bonus_grants (user_id, referral_id, role, amount, unlock_at) VALUES (?, ?, ?, ?, ?)",
-      [userId, referral.id, role, amount, unlockAt]
-    );
-  }
+    if (flipped.rowsAffected === 0) return null;
 
-  return { referrerId: referral.referrer_id, refereeId: referral.referee_id, referrerBonus: REFERRER_BONUS, refereeBonus: REFEREE_BONUS, unlockAt };
+    for (const [userId, role, amount] of [
+      [referral.referrer_id, "referrer", REFERRER_BONUS],
+      [referral.referee_id,  "referee",  REFEREE_BONUS],
+    ]) {
+      const credited = await tx.execute(
+        "UPDATE users SET cash_balance = cash_balance + ?, updated_at = datetime('now') WHERE id = ?",
+        [amount, userId]
+      );
+      if (credited.rowsAffected === 0) throw new Error("Referral bonus recipient no longer exists");
+      await tx.execute(
+        "INSERT INTO referral_bonus_grants (user_id, referral_id, role, amount, unlock_at) VALUES (?, ?, ?, ?, ?)",
+        [userId, referral.id, role, amount, unlockAt]
+      );
+    }
+
+    return { referrerId: referral.referrer_id, refereeId: referral.referee_id, referrerBonus: REFERRER_BONUS, refereeBonus: REFEREE_BONUS, unlockAt };
+  });
 }
 
 // Sum of still-locked referral bonus money — added into the withdrawal

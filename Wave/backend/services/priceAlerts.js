@@ -7,7 +7,7 @@
  * already used for balance-update notifications.
  */
 
-const { queryAll, queryOne, execute } = require("../db");
+const { queryAll, queryOne, withTransaction } = require("../db");
 const { notifyUserPush } = require("./push");
 
 async function checkAlerts() {
@@ -26,11 +26,19 @@ async function checkAlerts() {
     // Without this, two overlapping checker runs (or a slow run plus the
     // next scheduled one) could both see it as active and send the push
     // notification twice for the same crossing.
-    const result = await execute(
-      "UPDATE price_alerts SET status = 'triggered', triggered_at = datetime('now') WHERE id = ? AND status = 'active'",
-      [alert.id]
-    );
-    if (result.rowsAffected === 0) continue;
+    const claimed = await withTransaction(async tx => {
+      const result = await tx.execute(
+        "UPDATE price_alerts SET status = 'triggered', triggered_at = datetime('now') WHERE id = ? AND status = 'active'",
+        [alert.id]
+      );
+      if (result.rowsAffected === 0) return false;
+      await tx.execute(
+        "INSERT INTO activity_log (user_id, type, label, amount) VALUES (?, 'price_alert', ?, 0)",
+        [alert.user_id, `${alert.symbol} ${alert.condition === "above" ? "reached" : "dropped to"} $${alert.target_price}`]
+      );
+      return true;
+    });
+    if (!claimed) continue;
 
     try {
       await notifyUserPush(alert.user_id, {
@@ -46,10 +54,6 @@ async function checkAlerts() {
       console.error(`Price alert push failed for alert ${alert.id}:`, err.message);
     }
 
-    await execute(
-      "INSERT INTO activity_log (user_id, type, label, amount) VALUES (?, 'price_alert', ?, 0)",
-      [alert.user_id, `${alert.symbol} ${alert.condition === "above" ? "reached" : "dropped to"} $${alert.target_price}`]
-    );
     triggered++;
   }
 

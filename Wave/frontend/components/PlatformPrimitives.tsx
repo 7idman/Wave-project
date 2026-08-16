@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useId, type ButtonHTMLAttributes, type HTMLAttributes, type InputHTMLAttributes, type ReactNode } from "react";
+import { useEffect, useId, type ReactNode } from "react";
 import { COINS } from "../data/market";
 
 export const CoinIcon=({symbol,size=32}:{symbol:string;size?:number})=>{
@@ -40,31 +40,6 @@ export const Toggle=({on,onToggle,label="Toggle setting"}:{on:boolean;onToggle:(
   <button type="button" onClick={onToggle} aria-label={label} aria-pressed={on} className={`ui-toggle ${on?"is-on":""}`}>
     <span className="ui-toggle-knob"/>
   </button>
-);
-
-export const Card=({children,className="",...props}:{children:ReactNode;className?:string}&HTMLAttributes<HTMLDivElement>)=>(
-  <div className={`gcard ui-card ${className}`} {...props}>{children}</div>
-);
-
-export const Button=({className="",type="button",...props}:{className?:string}&ButtonHTMLAttributes<HTMLButtonElement>)=>(
-  <button type={type} className={`btn ${className}`} {...props}/>
-);
-
-export const Input=forwardRef<HTMLInputElement,InputHTMLAttributes<HTMLInputElement>>(({className="",...props},ref)=>(
-  <input ref={ref} className={`inp ${className}`} {...props}/>
-));
-Input.displayName="Input";
-
-export const Badge=({children,tone="blue",className=""}:{children:ReactNode;tone?:"blue"|"green"|"red"|"purple"|"gray";className?:string})=>(
-  <span className={`badge badge-${tone} ${className}`}>{children}</span>
-);
-
-export const Tooltip=({label,children}:{label:string;children:ReactNode})=>(
-  <span className="ui-tooltip" data-tooltip={label}>{children}</span>
-);
-
-export const Dropdown=({children,className="",...props}:{children:ReactNode;className?:string}&HTMLAttributes<HTMLDivElement>)=>(
-  <div className={`ui-dropdown ${className}`} {...props}>{children}</div>
 );
 
 /* ── Modal ── */

@@ -723,8 +723,7 @@
   cursor: pointer;
 }
 .dashboard-shell .ui-modal-close:hover { background: var(--wave-surface-soft); color: var(--wave-ink); }
-.dashboard-shell .profile-menu-dropdown,
-.dashboard-shell .ui-dropdown {
+.dashboard-shell .profile-menu-dropdown {
   border: 1px solid var(--wave-line-strong) !important;
   border-radius: var(--wave-radius-md) !important;
   background: var(--wave-surface) !important;

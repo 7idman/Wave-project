@@ -6,7 +6,7 @@
 
 const router = require("express").Router();
 const crypto = require("crypto");
-const { queryOne, queryAll, execute } = require("../db");
+const { queryOne, queryAll, withTransaction } = require("../db");
 const { valuePortfolio } = require("../services/portfolioValuation");
 
 function generateReferenceId() {
@@ -84,90 +84,57 @@ router.get("/my", async (req, res) => {
 router.post("/:id/subscribe", async (req, res) => {
   const userId = req.user.id;
   const strategyId = parseInt(req.params.id, 10);
-  let deducted = false;
-  let fee = 0;
 
   try {
-    const strategy = await queryOne(
-      "SELECT id, name, fee, status FROM strategies WHERE id = ?",
-      [strategyId]
-    );
-    if (!strategy) return res.status(404).json({ error: "Strategy not found" });
-    if (strategy.status !== "active")
-      return res.status(400).json({ error: "This strategy isn't accepting new subscribers right now" });
-
-    const existing = await queryOne(
-      "SELECT id FROM portfolios WHERE user_id = ? AND type = 'copier' AND strategy_id = ?",
-      [userId, strategyId]
-    );
-    if (existing) return res.status(409).json({ error: "You're already connected to this strategy" });
-
-    fee = strategy.fee;
-
-    // Step 1: guarded atomic deduction. This single UPDATE is its own atomic
-    // unit — it either deducts the full fee or (if balance is insufficient)
-    // affects 0 rows and changes nothing. Nothing downstream runs unless
-    // this really succeeded.
-    const deduction = await execute(
-      "UPDATE users SET cash_balance = cash_balance - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance >= ?",
-      [fee, userId, fee]
-    );
-    if (deduction.rowsAffected === 0)
-      return res.status(400).json({ error: "Insufficient balance" });
-    deducted = true;
-
-    // Step 2: create the copier portfolio, seeded with the fee.
-    // If this throws, the catch block below refunds the deduction from
-    // step 1 — see comment there for why this can't just be one batch.
-    const created = await execute(
-      "INSERT INTO portfolios (user_id, type, strategy_id, cash_balance) VALUES (?, 'copier', ?, ?)",
-      [userId, strategyId, fee]
-    );
-    const portfolioId = created.lastInsertRowid;
-
-    // Audit records — best-effort. If these fail, the money movement above
-    // already succeeded correctly; we log the failure but don't reverse a
-    // successful transfer over a bookkeeping-record error.
     const referenceId = generateReferenceId();
-    try {
-      await execute(
+    const outcome = await withTransaction(async tx => {
+      const strategy = await tx.queryOne(
+        "SELECT id, name, fee, status FROM strategies WHERE id = ?",
+        [strategyId]
+      );
+      if (!strategy) return { error: "Strategy not found", status: 404 };
+      if (strategy.status !== "active") {
+        return { error: "This strategy isn't accepting new subscribers right now", status: 400 };
+      }
+
+      const existing = await tx.queryOne(
+        "SELECT id FROM portfolios WHERE user_id = ? AND type = 'copier' AND strategy_id = ?",
+        [userId, strategyId]
+      );
+      if (existing) return { error: "You're already connected to this strategy", status: 409 };
+
+      const deduction = await tx.execute(
+        "UPDATE users SET cash_balance = cash_balance - ?, updated_at = datetime('now') WHERE id = ? AND cash_balance >= ?",
+        [strategy.fee, userId, strategy.fee]
+      );
+      if (deduction.rowsAffected === 0) return { error: "Insufficient balance", status: 400 };
+
+      const created = await tx.execute(
+        "INSERT INTO portfolios (user_id, type, strategy_id, cash_balance) VALUES (?, 'copier', ?, ?)",
+        [userId, strategyId, strategy.fee]
+      );
+      const portfolioId = created.lastInsertRowid;
+      await tx.execute(
         `INSERT INTO internal_transfers (user_id, direction, portfolio_id, amount, reference_id, verification_status, status)
          VALUES (?, 'to_portfolio', ?, ?, ?, 'not_required', 'completed')`,
-        [userId, portfolioId, fee, referenceId]
+        [userId, portfolioId, strategy.fee, referenceId]
       );
-      await execute(
+      await tx.execute(
         "INSERT INTO activity_log (user_id, type, label, amount) VALUES (?, 'transfer', ?, ?)",
-        [userId, `Connected to ${strategy.name} (${referenceId})`, fee]
+        [userId, `Connected to ${strategy.name} (${referenceId})`, strategy.fee]
       );
-    } catch (auditErr) {
-      console.error("Signal Copier: audit log write failed after successful transfer", auditErr.message);
-    }
-
-    const user = await queryOne("SELECT cash_balance FROM users WHERE id = ?", [userId]);
+      const user = await tx.queryOne("SELECT cash_balance FROM users WHERE id = ?", [userId]);
+      return { portfolioId, cashBalance: user.cash_balance, strategyName: strategy.name };
+    });
+    if (outcome.error) return res.status(outcome.status).json({ error: outcome.error });
     res.status(201).json({
-      message: `Connected to ${strategy.name}`,
-      portfolioId,
+      message: `Connected to ${outcome.strategyName}`,
+      portfolioId: outcome.portfolioId,
       referenceId,
-      cashBalance: user.cash_balance,
+      cashBalance: outcome.cashBalance,
     });
   } catch (err) {
-    // Compensating refund: if the deduction (step 1) already succeeded but
-    // anything after it threw, put the fee back rather than leave it
-    // vanished with no portfolio to show for it. This is a fallback, not
-    // the primary safety mechanism — step 1's own guarded UPDATE is what
-    // prevents an overdraw in the first place.
-    if (deducted) {
-      try {
-        await execute(
-          "UPDATE users SET cash_balance = cash_balance + ?, updated_at = datetime('now') WHERE id = ?",
-          [fee, userId]
-        );
-        console.error(`Signal Copier: refunded $${fee} to user ${userId} after subscribe failure:`, err.message);
-      } catch (refundErr) {
-        console.error(`Signal Copier: REFUND FAILED for user ${userId}, amount $${fee} — needs manual admin correction:`, refundErr.message);
-      }
-    }
-    res.status(500).json({ error: "Something went wrong connecting to this strategy. " + (deducted ? "Your balance has been refunded." : "") });
+    res.status(500).json({ error: "Something went wrong connecting to this strategy." });
   }
 });
 

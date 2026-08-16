@@ -5,7 +5,7 @@
  * withdrawal for lock_days (enforced in trades.js's withdraw handler).
  */
 
-const { queryAll, queryOne, execute } = require("../db");
+const { queryAll, queryOne, withTransaction } = require("../db");
 const { TIERS, getUserTier } = require("./tier");
 
 function tierRank(tierKey) {
@@ -40,16 +40,24 @@ async function applyDepositBonus(userId, depositAmount, depositTransactionId) {
   const unlockAt = new Date(Date.now() + promo.lock_days * 24 * 60 * 60 * 1000)
     .toISOString().slice(0, 19).replace("T", " ");
 
-  await execute(
-    "UPDATE users SET cash_balance = cash_balance + ?, updated_at = datetime('now') WHERE id = ?",
-    [bonusAmount, userId]
-  );
-  await execute(
-    "INSERT INTO bonus_grants (user_id, promotion_id, transaction_id, amount, unlock_at) VALUES (?, ?, ?, ?, ?)",
-    [userId, promo.id, depositTransactionId, bonusAmount, unlockAt]
-  );
+  return withTransaction(async tx => {
+    const existing = await tx.queryOne(
+      "SELECT id FROM bonus_grants WHERE transaction_id = ? AND promotion_id = ?",
+      [depositTransactionId, promo.id]
+    );
+    if (existing) return null;
 
-  return { promotionName: promo.name, bonusAmount, unlockAt };
+    const credited = await tx.execute(
+      "UPDATE users SET cash_balance = cash_balance + ?, updated_at = datetime('now') WHERE id = ?",
+      [bonusAmount, userId]
+    );
+    if (credited.rowsAffected === 0) throw new Error("Bonus recipient no longer exists");
+    await tx.execute(
+      "INSERT INTO bonus_grants (user_id, promotion_id, transaction_id, amount, unlock_at) VALUES (?, ?, ?, ?, ?)",
+      [userId, promo.id, depositTransactionId, bonusAmount, unlockAt]
+    );
+    return { promotionName: promo.name, bonusAmount, unlockAt };
+  });
 }
 
 // Sum of bonus money still locked right now — used to make sure a withdrawal

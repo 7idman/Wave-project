@@ -9,6 +9,22 @@
 
 require("dotenv").config();
 
+function validateProductionSecrets() {
+  if (process.env.NODE_ENV !== "production") return;
+  const missing = ["JWT_SECRET", "SESSION_SECRET"].filter(name => !process.env[name]);
+  if (missing.length) {
+    throw new Error(`Missing required production secret(s): ${missing.join(", ")}`);
+  }
+  if (process.env.JWT_SECRET.length < 32 || process.env.SESSION_SECRET.length < 32) {
+    throw new Error("JWT_SECRET and SESSION_SECRET must each be at least 32 characters in production");
+  }
+  if (process.env.JWT_SECRET === process.env.SESSION_SECRET) {
+    throw new Error("JWT_SECRET and SESSION_SECRET must be different values");
+  }
+}
+
+validateProductionSecrets();
+
 const express        = require("express");
 const cors           = require("cors");
 const session        = require("express-session");
@@ -41,6 +57,7 @@ const { fetchStockPrices } = require("./services/stocks");
 
 const app  = express();
 const PORT = process.env.PORT || 4000;
+app.disable("x-powered-by");
 
 // Bug fix: Railway (and most hosts) put your app behind a reverse proxy, so
 // the real client IP arrives in an X-Forwarded-For header rather than as the
@@ -73,7 +90,9 @@ const ALLOWED_ORIGINS = [
 app.use(cors({
   origin: (origin, cb) => {
     if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-    cb(new Error(`CORS blocked: ${origin}`));
+    const error = new Error(`CORS blocked: ${origin}`);
+    error.status = 403;
+    cb(error);
   },
   credentials: true,
 }));

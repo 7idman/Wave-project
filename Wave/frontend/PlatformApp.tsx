@@ -91,7 +91,9 @@ export default function App(){
         // Backend returned 200 without a user object — treat it like an invalid
         // session instead of crashing on u.name below, so we fall through to
         // the .catch() and clear the bad token rather than silently breaking.
-        throw new Error("Malformed /auth/me response: missing user");
+        const error:any=new Error("Malformed /auth/me response: missing user");
+        error.code="INVALID_SESSION_RESPONSE";
+        throw error;
       }
       const nm=u.name||"User";
       const initials=nm.trim().split(/\s+/).map((w:string)=>w[0]||"").join("").slice(0,2).toUpperCase()||"U";
@@ -103,8 +105,11 @@ export default function App(){
         setAppSettings(p=>({...p,currency:currencyForCountry(u.country)}));
         localStorage.setItem("wave_currency_auto","1");
       }
-    }).catch(()=>{
-      api.clearTokens(); // token was invalid/expired/malformed — clear it so we don't keep retrying
+    }).catch((error:any)=>{
+      // Preserve credentials through a temporary offline/timeout/5xx failure.
+      // Only a confirmed invalid session or malformed authenticated response
+      // should force the user to sign in again.
+      if(error?.status===401||error?.status===403||error?.code==="INVALID_SESSION_RESPONSE") api.clearTokens();
     }).finally(()=>{
       if(!cancelled) setAuthChecking(false);
     });
@@ -194,6 +199,11 @@ export default function App(){
   const[loading,setLoading]   =useState(false);
   const[signingOut,setSigningOut]=useState(false);
   const[toast,setToast]       =useState<{msg:string;icon:string;ok?:boolean}|null>(null);
+  const toastTimerRef=useRef<number|null>(null);
+  const marketPricesRequestRef=useRef<Promise<void>|null>(null);
+  const accountDataRequestRef=useRef<Promise<void>|null>(null);
+  const accountStateVersionRef=useRef(0);
+  const accountRequestIdRef=useRef(0);
   const[email,setEmail]       =useState("");
   const[pw,setPw]             =useState("");
   const[sbOpen,setSbOpen]     =useState(false);      // mobile: sidebar slid in/out
@@ -374,24 +384,79 @@ export default function App(){
 
   useEffect(()=>{document.body.style.overflow=sbOpen?"hidden":"";return()=>{document.body.style.overflow="";};},[sbOpen]);
 
-  const toast2=(msg:string,icon="✓",ok=true)=>{setToast({msg,icon,ok});setTimeout(()=>setToast(null),3500);};
+  const toast2=useCallback((msg:string,icon="✓",ok=true)=>{
+    setToast({msg,icon,ok});
+    if(toastTimerRef.current!==null) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current=window.setTimeout(()=>{setToast(null);toastTimerRef.current=null;},3500);
+  },[]);
+  useEffect(()=>()=>{
+    if(toastTimerRef.current!==null) window.clearTimeout(toastTimerRef.current);
+  },[]);
+
+  const clearUserScopedState=useCallback(()=>{
+    accountStateVersionRef.current+=1;
+    accountRequestIdRef.current+=1;
+    accountDataRequestRef.current=null;
+    setPort({cashBalance:0,totalPortfolioValue:0,totalValue:0,holdings:[]});
+    setTxs([]);
+    setReferralData(null);
+    setReferralLoading(false);
+    setSiteUpdates([]);
+    setLoginHistory([]);
+    setActivities([]);
+    setStrategies([]);
+    setMyCopiers([]);
+    setMyManaged([]);
+    setTierInfo(null);
+    setBalanceHistory([]);
+    setWalletAnalytics(null);
+    setAutoInvestPlans([]);
+    setPriceAlerts([]);
+    setDepositReceipt(null);
+    setTxDetail(null);
+    setKycStatus({phone:"pending",id:"pending",address:"pending"});
+  },[]);
+
+  useEffect(()=>{
+    const endSession=(event:Event)=>{
+      const message=(event as CustomEvent<{message?:string}>).detail?.message||"Your session has expired. Please sign in again.";
+      api.clearTokens();
+      clearUserScopedState();
+      setUser(null);
+      setAccountLoading(false);
+      setPage("dashboard");
+      setLoginErr(message);
+      toast2(message,"⚠",false);
+    };
+    window.addEventListener("wave:session-expired",endSession);
+    window.addEventListener("wave:account-terminated",endSession);
+    return()=>{
+      window.removeEventListener("wave:session-expired",endSession);
+      window.removeEventListener("wave:account-terminated",endSession);
+    };
+  },[clearUserScopedState,toast2]);
   const toggleWatch=(symbol:string)=>setWatchlist(items=>items.includes(symbol)?items.filter(s=>s!==symbol):[...items,symbol]);
 
-  const loadMarketPrices=useCallback(async()=>{
-    try{
-      const p=await api.get("/prices");
-      const mapped:Record<string,Price>={};
-      Object.entries(p).forEach(([sym,v]:any)=>{
-        mapped[sym]={price:v.price||0,change24h:v.change24h||0,assetType:v.assetType||"crypto"};
-      });
-      const directions:Record<string,boolean>={};
-      Object.entries(mapped).forEach(([sym,next])=>{
-        directions[sym]=(next.price??0)>=(priceSnapshot.current[sym]?.price??next.price??0);
-      });
-      priceSnapshot.current=mapped;
-      setPriceDir(directions);
-      setPrices(mapped);
-    }catch(e:any){console.warn("prices:",e.message);}
+  const loadMarketPrices=useCallback(()=>{
+    if(marketPricesRequestRef.current) return marketPricesRequestRef.current;
+    marketPricesRequestRef.current=(async()=>{
+      try{
+        const p=await api.get("/prices");
+        const mapped:Record<string,Price>={};
+        Object.entries(p).forEach(([sym,v]:any)=>{
+          mapped[sym]={price:v.price||0,change24h:v.change24h||0,assetType:v.assetType||"crypto"};
+        });
+        const directions:Record<string,boolean>={};
+        Object.entries(mapped).forEach(([sym,next])=>{
+          directions[sym]=(next.price??0)>=(priceSnapshot.current[sym]?.price??next.price??0);
+        });
+        priceSnapshot.current=mapped;
+        setPriceDir(directions);
+        setPrices(mapped);
+      }catch(e:any){console.warn("prices:",e.message);}
+      finally{marketPricesRequestRef.current=null;}
+    })();
+    return marketPricesRequestRef.current;
   },[]);
 
   // Market prices are public: keep both the landing page and signed-in app live.
@@ -401,25 +466,35 @@ export default function App(){
     return()=>window.clearInterval(interval);
   },[loadMarketPrices]);
 
-  const loadData=useCallback(async()=>{
-    // Each call is independent — one failing won't block the others
-    await loadMarketPrices();
+  const loadData=useCallback(()=>{
+    if(accountDataRequestRef.current) return accountDataRequestRef.current;
+    const stateVersion=accountStateVersionRef.current;
+    const requestId=++accountRequestIdRef.current;
+    accountDataRequestRef.current=(async()=>{
+      // Each account call is independent — one failing won't block the other.
+      // Market prices have their own public 20-second poll above.
+      try{
+        const pf=await api.get("/portfolio");
+        if(stateVersion===accountStateVersionRef.current){
+          setPort({
+            cashBalance:         pf.cashBalance         ??pf.cash_balance??0,
+            totalPortfolioValue: pf.totalPortfolioValue ??0,
+            totalValue:          pf.totalValue          ??0,
+            holdings:            pf.holdings            ??[],
+          });
+        }
+      }catch(e:any){console.warn("portfolio:",e.message);}
 
-    try{
-      const pf=await api.get("/portfolio");
-      setPort({
-        cashBalance:         pf.cashBalance         ??pf.cash_balance??0,
-        totalPortfolioValue: pf.totalPortfolioValue ??0,
-        totalValue:          pf.totalValue          ??0,
-        holdings:            pf.holdings            ??[],
-      });
-    }catch(e:any){console.warn("portfolio:",e.message);}
-
-    try{
-      const tx=await api.get("/transactions");
-      setTxs(tx.transactions??[]);
-    }catch(e:any){console.warn("transactions:",e.message);}
-  },[loadMarketPrices]);
+      try{
+        const tx=await api.get("/transactions");
+        if(stateVersion===accountStateVersionRef.current) setTxs(tx.transactions??[]);
+      }catch(e:any){console.warn("transactions:",e.message);}
+      finally{
+        if(requestId===accountRequestIdRef.current) accountDataRequestRef.current=null;
+      }
+    })();
+    return accountDataRequestRef.current;
+  },[]);
   useEffect(()=>{
     if(!user) return;
     setAccountLoading(true);
@@ -802,7 +877,7 @@ export default function App(){
     // Keep the confirmation motion visible briefly, even on a fast connection.
     const remaining=420-(Date.now()-started);
     if(remaining>0) await new Promise(resolve=>setTimeout(resolve,remaining));
-    api.clearTokens();setUser(null);setAccountLoading(false);setPage("dashboard");setSigningOut(false);toast2("Signed out");
+    api.clearTokens();clearUserScopedState();setUser(null);setAccountLoading(false);setPage("dashboard");setSigningOut(false);toast2("Signed out");
   };
   const signOutDevice=async(session:LoginEvent)=>{
     if(session.current){ doLogout(); return; }
