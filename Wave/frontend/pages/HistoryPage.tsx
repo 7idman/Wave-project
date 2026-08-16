@@ -2,6 +2,7 @@ import type { Tx } from "../types";
 import { COINS } from "../data/market";
 import { CoinIcon } from "../components/PlatformPrimitives";
 import { EmptyState } from "../components/PlatformFeedback";
+import { ActivityGlyph } from "../components/ProductIcons";
 
 function statusBadge(status:string){
   if(status==="completed")return{cls:"badge-green",icon:"✓"};
@@ -35,17 +36,20 @@ export function HistoryPage({transactions:txs,mobile:mob}:{transactions:Tx[];mob
         </tbody>
       </table>
     </div>
-    <div className="txcards" style={{padding:"12px 14px 16px"}}>
+    <div className="txcards history-cards" style={{padding:"12px 14px 16px"}}>
       {txs.map(tx=><div key={tx.id} className="txc">
         <div className="txctop">
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <span className={`tbadge ${tx.type==="buy"?"badge-green":tx.type==="sell"?"badge-red":tx.type==="deposit"?"badge-blue":"badge-purple"}`}>{tx.type}</span>
-            <div style={{display:"flex",alignItems:"center",gap:6}}><CoinIcon symbol={tx.symbol} size={18}/><span className="txcsym" style={{color:COINS[tx.symbol]?.color||"var(--text)"}}>{tx.symbol}</span></div>
+          <div className="txcidentity">
+            <ActivityGlyph type={tx.type}/>
+            <div className="txcprimary">
+              <div className="txcasset"><CoinIcon symbol={tx.symbol} size={18}/><span className="txcsym" style={{color:COINS[tx.symbol]?.color||"var(--text)"}}>{tx.symbol}</span></div>
+              <span className={`tbadge ${tx.type==="buy"?"badge-green":tx.type==="sell"?"badge-red":tx.type==="deposit"?"badge-blue":"badge-purple"}`}>{tx.type}</span>
+            </div>
           </div>
-          <span className="txcdate">{(tx.created_at||"").slice(0,10)}</span>
+          <div className="txcmeta"><span className="txcdate">{(tx.created_at||"").slice(0,10)}</span><span className={`badge ${statusBadge(tx.status).cls}`}>{statusBadge(tx.status).icon} {tx.status}</span></div>
         </div>
         <div className="txcbot">
-          <span className="txcamt">{tx.amount} @ ${(tx.price||0).toLocaleString()}</span>
+          <span className="txcamt"><small>Amount</small>{tx.amount} @ ${(tx.price||0).toLocaleString()}</span>
           <span className="txctot" style={{color:tx.type==="buy"||tx.type==="withdraw"?"var(--red)":"var(--green)"}}>{tx.type==="buy"||tx.type==="withdraw"?"-":"+"}${(tx.total||0).toLocaleString()}</span>
         </div>
       </div>)}

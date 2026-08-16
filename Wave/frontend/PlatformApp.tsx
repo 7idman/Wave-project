@@ -21,8 +21,12 @@ import { HistoryPage } from "./pages/HistoryPage";
 import { ReferralsPage, type ReferralData } from "./pages/ReferralsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
+import { StockLogo } from "./components/StockLogo";
+import { TradingViewTicker, type TickerSymbol } from "./components/TradingViewTicker";
 
 const AdminPanel=lazy(()=>import("./admin/AdminPanel"));
+
+const STOCK_TICKER_SYMBOLS:TickerSymbol[]=["AAPL","MSFT","GOOGL","AMZN","TSLA","NVDA","META","NFLX","ADBE","CRM","ORCL","INTC"].map(symbol=>({proName:`NASDAQ:${symbol}`,title:symbol}));
 
 // Shared across every transaction status badge in this file. 'processing'
 // and 'awaiting_review' are mid-flight states (SMS/email verification in
@@ -1371,7 +1375,7 @@ export default function App(){
     </div>
   );
   if(!user) return(
-    <div className="app landing">
+    <div className="app landing landing-light">
       <div className="landing-orb one"/><div className="landing-orb two"/>
       <nav className="landing-nav">
         <div className="landing-brand"><WaveLogo size={28}/>Wave</div>
@@ -1946,7 +1950,7 @@ export default function App(){
             <div className="product-mobile-greeting">
               <div className="mobile-greeting-kicker">Market overview</div>
               <div className="mobile-greeting-title">
-                Good {new Date().getHours()<12?t("morning"):new Date().getHours()<17?t("afternoon"):t("evening")}, {user.name.split(" ")[0]} <span className="greeting-sparkle"><ProductIcon name="sparkle" size={19}/></span>
+                Welcome back, <span>{user.name.split(" ")[0]}</span> <span className="greeting-sparkle"><ProductIcon name="sparkle" size={19}/></span>
               </div>
               <div className="mobile-greeting-date">
                 {new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}
@@ -1973,7 +1977,7 @@ export default function App(){
       {page==="dashboard"&&<div className="greeting-kicker"><span/>Market overview</div>}
       <div className="ttl">
         {page==="dashboard"
-          ? <>Good {new Date().getHours()<12?t("morning"):new Date().getHours()<17?t("afternoon"):t("evening")}, <span>{user.name.split(" ")[0]}</span><i className="greeting-sparkle"><ProductIcon name="sparkle" size={23}/></i></>
+          ? <>Welcome back, <span>{user.name.split(" ")[0]}</span><i className="greeting-sparkle"><ProductIcon name="sparkle" size={23}/></i></>
           : page==="coin"
             ? `${COINS[selCoin]?.name||selCoin} (${selCoin})`
             : (LANG[appSettings.language]?.[page]||LABELS[page]||pageTitle[page])
@@ -2163,12 +2167,12 @@ export default function App(){
         {/* ══ STOCKS ══ */}
         {page==="stocks"&&(
           <div className="page-wrap product-page product-stocks-page">
-            <div className="stitle">Stocks</div>
-            <div style={{fontSize:12,color:"var(--text3)",marginBottom:14}}>Real quotes via Finnhub. Same paper-trading engine as crypto — buy/sell instantly, no real brokerage involved.</div>
-            <input className="inp" placeholder="Search by ticker or company name…" value={stockSearch} onChange={e=>setStockSearch(e.target.value)} style={{marginBottom:18,maxWidth:360}}/>
+            <div className="stocks-page-heading"><div><div className="stitle">Stocks</div><p>Live quotes for paper trading only — no brokerage execution.</p></div><span className="stocks-market-status"><i/> Live market data</span></div>
+            <div className="stocks-ticker"><ErrorBoundary boundaryName="stocks-tradingview-ticker" fallback={null}><TradingViewTicker symbols={STOCK_TICKER_SYMBOLS} colorTheme={resolvedTheme==="Light"?"light":"dark"}/></ErrorBoundary></div>
+            <div className="stock-search-wrap"><AppIcon name="stocks" size={18}/><input className="inp" aria-label="Search stocks" placeholder="Search ticker or company name" value={stockSearch} onChange={e=>setStockSearch(e.target.value)}/></div>
 
             <div className="tgrid">
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:12,alignContent:"start"}}>
+              <div className="stock-card-grid">
                 {Object.entries(STOCK_NAMES).filter(([sym,name])=>{
                   const q=stockSearch.trim().toLowerCase();
                   return !q||sym.toLowerCase().includes(q)||name.toLowerCase().includes(q);
@@ -2176,17 +2180,17 @@ export default function App(){
                   const p=prices[sym];
                   const chg=p?.change24h||0;
                   return (
-                    <div key={sym} className="gcard" onClick={()=>setSelStock(sym)} style={{cursor:"pointer",border:selStock===sym?"1px solid #6366F1":undefined,padding:16}}>
-                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-                        <div style={{width:34,height:34,borderRadius:10,background:stockColor(sym),color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,flexShrink:0}}>{sym.slice(0,2)}</div>
-                        <div style={{minWidth:0}}>
-                          <div style={{fontWeight:700,fontSize:13}}>{sym}</div>
-                          <div style={{fontSize:11,color:"var(--text3)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{name}</div>
+                    <div key={sym} className={`gcard stock-card ${selStock===sym?"selected":""}`} onClick={()=>setSelStock(sym)}>
+                      <div className="stock-card-head">
+                        <StockLogo symbol={sym} size={42} color={stockColor(sym)}/>
+                        <div className="stock-card-name">
+                          <div>{sym}</div>
+                          <span>{name}</span>
                         </div>
                       </div>
                       {p?<>
-                        <div style={{fontSize:18,fontWeight:800}}>{cur(p.price)}</div>
-                        <div style={{fontSize:12,fontWeight:700,color:chg>=0?"var(--green)":"var(--red)"}}>{chg>=0?"▲":"▼"} {Math.abs(chg).toFixed(2)}%</div>
+                        <div className="stock-card-price">{cur(p.price)}</div>
+                        <div className="stock-card-change" style={{color:chg>=0?"var(--green)":"var(--red)"}}>{chg>=0?"▲":"▼"} {Math.abs(chg).toFixed(2)}%</div>
                       </>:<div style={{fontSize:12,color:"var(--text3)"}}>Price not loaded yet</div>}
                     </div>
                   );
@@ -2195,7 +2199,7 @@ export default function App(){
 
               <div className="gcard tcrd">
                 <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
-                  <div style={{width:30,height:30,borderRadius:8,background:stockColor(selStock),color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800}}>{selStock.slice(0,2)}</div>
+                  <StockLogo symbol={selStock} size={36} color={stockColor(selStock)}/>
                   <div><div style={{fontWeight:800}}>{selStock}</div><div style={{fontSize:11,color:"var(--text3)"}}>{STOCK_NAMES[selStock]}</div></div>
                 </div>
                 <div className="ttabs">
@@ -2222,7 +2226,7 @@ export default function App(){
                 {stockHoldings.map(h=>(
                   <div key={h.symbol} className="setting-row">
                     <div style={{display:"flex",alignItems:"center",gap:10}}>
-                      <div style={{width:30,height:30,borderRadius:8,background:stockColor(h.symbol),color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800}}>{h.symbol.slice(0,2)}</div>
+                      <StockLogo symbol={h.symbol} size={34} color={stockColor(h.symbol)}/>
                       <div><div style={{fontWeight:700,fontSize:13}}>{h.symbol}</div><div style={{fontSize:11,color:"var(--text3)"}}>{h.amount} shares</div></div>
                     </div>
                     <div style={{fontWeight:800}}>{cur(h.value)}</div>
@@ -2253,7 +2257,7 @@ export default function App(){
                 {autoInvestPlans.filter(p=>p.status!=="cancelled").map(p=>(
                   <div key={p.id} className="setting-row">
                     <div style={{display:"flex",alignItems:"center",gap:10}}>
-                      <div style={{width:30,height:30,borderRadius:8,background:stockColor(p.symbol),color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800}}>{p.symbol.slice(0,2)}</div>
+                      <StockLogo symbol={p.symbol} size={34} color={stockColor(p.symbol)}/>
                       <div>
                         <div style={{fontWeight:700,fontSize:13}}>${p.weekly_amount}/week into {p.symbol}{p.status==="paused"&&<span className="badge badge-blue" style={{marginLeft:8,fontSize:9}}>Paused</span>}</div>
                         <div style={{fontSize:11,color:"var(--text3)"}}>Next: {new Date(p.next_run_at).toLocaleDateString()}</div>
@@ -2835,7 +2839,7 @@ export default function App(){
       {/* Bottom nav */}
       <div className="bnav">
         <div className="bnavr">
-          {NAV.slice(0,2).map(n=>(
+          {NAV.filter(n=>n.id==="dashboard"||n.id==="stocks").map(n=>(
             <div key={n.id} className={`bni ${page===n.id?"active":""}`} onClick={()=>nav(n.id)} onKeyDown={e=>onActivate(e,()=>nav(n.id))} role="button" tabIndex={0} aria-current={page===n.id?"page":undefined}>
               <span className="bni-icon"><AppIcon name={n.icon} size={19}/></span><span>{n.short}</span>
             </div>

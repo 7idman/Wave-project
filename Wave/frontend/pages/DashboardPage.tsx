@@ -51,7 +51,10 @@ export function DashboardPage({
   onToggleWatch:toggleWatch,onOpenCoin:openCoin,
 }:DashboardPageProps){
   return <div className="dashboard-page">
-    <div className="dashboard-ticker" style={{marginBottom:mob?12:16}}><ErrorBoundary boundaryName="tradingview-ticker" fallback={null}><TradingViewTicker colorTheme={theme==="Light"?"light":"dark"}/></ErrorBoundary></div>
+    <div className="dashboard-ticker market-pulse-link" role="button" tabIndex={0} aria-label="Open live stock markets" onClick={()=>nav("stocks")} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();nav("stocks");}}}>
+      <ErrorBoundary boundaryName="tradingview-ticker" fallback={null}><TradingViewTicker colorTheme={theme==="Light"?"light":"dark"}/></ErrorBoundary>
+      <span className="market-pulse-cta"><ProductIcon name="trendUp" size={13}/> Explore stocks <ProductIcon name="arrowRight" size={13}/></span>
+    </div>
     <div className="stats dashboard-stats" style={{marginTop:mob?12:0}}>
       {accountLoading?[0,1,2,3].map(index=><div key={index} className="stat skeleton" style={{minHeight:88}}/>):[
         {l:"Portfolio Value",raw:port.totalPortfolioValue,s:"Invested",pos:null,glow:"#35C7F2",tone:"portfolio",tip:"Current market value of your holdings only, excluding cash"},
