@@ -139,14 +139,28 @@ test("legacy fiat writes are deterministically rounded into the cents ledger", a
 
 test("shared rate limits remain exact under concurrent replica-style calls", async () => {
   const identifier = `ip:concurrent-${Date.now()}`;
-  const results = await Promise.all(Array.from({ length: 12 }, () =>
-    checkAndRecord("test_shared_ip", identifier, { max: 10, windowMinutes: 15 })
-  ));
+  const originalRandom = Math.random;
+  Math.random = () => 0; // force the transactional cleanup branch on every call
+  let results;
+  try {
+    results = await Promise.all(Array.from({ length: 12 }, () =>
+      checkAndRecord("test_shared_ip", identifier, { max: 10, windowMinutes: 15 })
+    ));
+  } finally {
+    Math.random = originalRandom;
+  }
   assert.equal(results.filter(result => result.allowed).length, 10);
   assert.equal(Math.max(...results.map(result => result.count)), 12);
 });
 
 test("a legacy schema marker reruns idempotent migrations automatically", async () => {
+  const affectedUserId = await createUser();
+  const affectedTrade = await db.execute(
+    `INSERT INTO transactions
+       (user_id, type, symbol, amount, amount_cents, price, fee, fee_cents, total, total_cents, status)
+     VALUES (?, 'buy', 'AAPL', 0.12, 12, 100, 0, 0, 12, 1200, 'completed')`,
+    [affectedUserId]
+  );
   await db.execute("DROP INDEX idx_bonus_grants_transaction");
   await db.execute("DROP TABLE strategy_mirror_jobs");
   await db.execute("DROP TABLE http_sessions");
@@ -168,10 +182,20 @@ test("a legacy schema marker reruns idempotent migrations automatically", async 
      WHERE type = 'table'
        AND name IN ('http_sessions', 'scheduler_leases', 'stock_refresh_jobs')`
   );
+  const repairedTrade = await db.queryOne(
+    "SELECT amount, amount_cents FROM transactions WHERE id = ?",
+    [affectedTrade.lastInsertRowid]
+  );
+  const review = await db.queryOne(
+    "SELECT stored_amount, erroneous_amount_cents FROM asset_quantity_migration_review WHERE transaction_id = ?",
+    [affectedTrade.lastInsertRowid]
+  );
   assert.match(version.value, /^[a-f0-9]{12}$/);
   assert.ok(jobsTable);
   assert.ok(bonusIndex);
   assert.equal(infrastructureTables.length, 3);
+  assert.deepEqual(repairedTrade, { amount: 0.12, amount_cents: null });
+  assert.deepEqual(review, { stored_amount: 0.12, erroneous_amount_cents: 12 });
 });
 
 test("failed financial transactions roll back every write", async () => {

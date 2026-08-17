@@ -133,9 +133,8 @@ async function runTransaction(callback) {
   }
 }
 
-// The native local SQLite transport does not queue overlapping write
-// transactions reliably. Serialize them in-process; Turso/libSQL handles its
-// own remote write queue, so production traffic keeps its normal concurrency.
+// Serialize explicit write transactions for the native local SQLite transport.
+// Turso/libSQL manages its remote write queue in production.
 let localWriteTail = Promise.resolve();
 async function withTransaction(callback) {
   if (!databaseUrl.startsWith("file:")) return runTransaction(callback);
@@ -599,6 +598,16 @@ async function initSchema() {
       created_at  TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(table_name, row_id, column_name)
     )`,
+    `CREATE TABLE IF NOT EXISTS asset_quantity_migration_review (
+      transaction_id        INTEGER PRIMARY KEY,
+      user_id               INTEGER,
+      type                  TEXT NOT NULL,
+      symbol                TEXT NOT NULL,
+      stored_amount         REAL NOT NULL,
+      erroneous_amount_cents INTEGER NOT NULL,
+      detected_at           TEXT NOT NULL DEFAULT (datetime('now')),
+      note                  TEXT NOT NULL
+    )`,
   ];
 
   const columnMigrations = [
@@ -673,11 +682,18 @@ async function initSchema() {
   const moneyColumns = [
     { table: "users", legacy: "cash_balance", cents: "cash_balance_cents" },
     { table: "portfolios", legacy: "cash_balance", cents: "cash_balance_cents" },
-    { table: "transactions", legacy: "amount", cents: "amount_cents", nullable: true, where: "symbol = 'USD' AND type IN ('deposit', 'withdraw')" },
+    {
+      table: "transactions",
+      legacy: "amount",
+      cents: "amount_cents",
+      nullable: true,
+      where: "symbol = 'USD' AND type IN ('deposit', 'withdraw')",
+      triggerWhere: "NEW.symbol = 'USD' AND NEW.type IN ('deposit', 'withdraw')",
+    },
     { table: "transactions", legacy: "fee", cents: "fee_cents" },
     { table: "transactions", legacy: "total", cents: "total_cents" },
     { table: "activity_log", legacy: "amount", cents: "amount_cents" },
-    { table: "admin_requests", legacy: "amount", cents: "amount_cents", nullable: true, where: "amount IS NOT NULL" },
+    { table: "admin_requests", legacy: "amount", cents: "amount_cents", nullable: true, where: "amount IS NOT NULL", triggerWhere: "NEW.amount IS NOT NULL" },
     { table: "strategies", legacy: "fee", cents: "fee_cents" },
     { table: "internal_transfers", legacy: "amount", cents: "amount_cents" },
     { table: "promotions", legacy: "min_deposit", cents: "min_deposit_cents" },
@@ -759,6 +775,40 @@ async function initSchema() {
     }
     for (const sql of indexMigrations) await db.execute(sql);
 
+    // Remove the old compatibility triggers before any repair statements.
+    // Otherwise an UPDATE used to clear a wrongly populated cents column can
+    // cause the old trigger to overwrite the original asset quantity.
+    for (const mapping of moneyColumns) {
+      const triggerBase = `sync_money_${mapping.table}_${mapping.cents}`;
+      for (const suffix of ["insert", "cents", "legacy"]) {
+        await execute(`DROP TRIGGER IF EXISTS ${triggerBase}_${suffix}`);
+      }
+    }
+
+    // A previous trigger revision treated transactions.amount as fiat for
+    // every trade. Preserve evidence of rows it touched, but never invent a
+    // higher-precision historical quantity that cannot be reconstructed.
+    const assetQuantityReviewInsert = await execute(
+      `INSERT OR IGNORE INTO asset_quantity_migration_review
+         (transaction_id, user_id, type, symbol, stored_amount, erroneous_amount_cents, note)
+       SELECT id, user_id, type, symbol, amount, amount_cents,
+              'Prior cents trigger touched an asset quantity; verify against external trade records if exact historical precision is required.'
+       FROM transactions
+       WHERE NOT (symbol = 'USD' AND type IN ('deposit', 'withdraw'))
+         AND amount_cents IS NOT NULL`
+    );
+    await execute(
+      `UPDATE transactions
+       SET amount_cents = NULL
+       WHERE NOT (symbol = 'USD' AND type IN ('deposit', 'withdraw'))
+         AND amount_cents IS NOT NULL`
+    );
+    if (assetQuantityReviewInsert.rowsAffected > 0) {
+      console.warn(
+        `[warn] ${assetQuantityReviewInsert.rowsAffected} historical asset transaction(s) require quantity review; see asset_quantity_migration_review.`
+      );
+    }
+
     for (const mapping of moneyColumns) {
       const condition = mapping.where ? ` AND (${mapping.where})` : "";
       const nonNull = mapping.nullable ? ` AND ${mapping.legacy} IS NOT NULL` : "";
@@ -779,14 +829,12 @@ async function initSchema() {
       );
 
       const triggerBase = `sync_money_${mapping.table}_${mapping.cents}`;
-      for (const suffix of ["insert", "cents", "legacy"]) {
-        await execute(`DROP TRIGGER IF EXISTS ${triggerBase}_${suffix}`);
-      }
+      const triggerWhen = mapping.triggerWhere ? ` WHEN ${mapping.triggerWhere}` : "";
       const insertCents = mapping.nullable
         ? `CASE WHEN NEW.${mapping.cents} IS NULL AND NEW.${mapping.legacy} IS NOT NULL THEN CAST(ROUND(NEW.${mapping.legacy} * 100.0) AS INTEGER) ELSE NEW.${mapping.cents} END`
         : `CASE WHEN NEW.${mapping.cents} = 0 AND NEW.${mapping.legacy} <> 0 THEN CAST(ROUND(NEW.${mapping.legacy} * 100.0) AS INTEGER) ELSE NEW.${mapping.cents} END`;
       await execute(
-        `CREATE TRIGGER ${triggerBase}_insert AFTER INSERT ON ${mapping.table}
+        `CREATE TRIGGER ${triggerBase}_insert AFTER INSERT ON ${mapping.table}${triggerWhen}
          BEGIN
            UPDATE ${mapping.table}
            SET ${mapping.cents} = ${insertCents},
@@ -795,7 +843,7 @@ async function initSchema() {
          END`
       );
       await execute(
-        `CREATE TRIGGER ${triggerBase}_cents AFTER UPDATE OF ${mapping.cents} ON ${mapping.table}
+        `CREATE TRIGGER ${triggerBase}_cents AFTER UPDATE OF ${mapping.cents} ON ${mapping.table}${triggerWhen}
          BEGIN
            UPDATE ${mapping.table}
            SET ${mapping.legacy} = NEW.${mapping.cents} / 100.0
@@ -804,7 +852,7 @@ async function initSchema() {
       );
       await execute(
         `CREATE TRIGGER ${triggerBase}_legacy AFTER UPDATE OF ${mapping.legacy} ON ${mapping.table}
-         WHEN NEW.${mapping.cents} IS OLD.${mapping.cents}
+         WHEN ${mapping.triggerWhere ? `(${mapping.triggerWhere}) AND ` : ""}NEW.${mapping.cents} IS OLD.${mapping.cents}
               AND NEW.${mapping.legacy} IS NOT (NEW.${mapping.cents} / 100.0)
          BEGIN
            UPDATE ${mapping.table}

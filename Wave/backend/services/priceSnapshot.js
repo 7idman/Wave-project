@@ -10,6 +10,7 @@ const { checkAlerts } = require("./priceAlerts");
 const { runWithSchedulerLease } = require("./schedulerLease");
 
 let inFlightSnapshot = null;
+let scheduledRun = null;
 async function takeSnapshot() {
   if (inFlightSnapshot) return inFlightSnapshot;
   inFlightSnapshot = runSnapshot();
@@ -46,7 +47,12 @@ async function runSnapshot() {
 // writing to the database excessively at low traffic (current scale: one
 // developer + a handful of testers).
 function startPriceSnapshotSchedule(intervalMs = 15 * 60 * 1000) {
-  const run = () => runWithSchedulerLease("price-snapshot", intervalMs, takeSnapshot);
+  const run = () => {
+    if (scheduledRun) return scheduledRun;
+    scheduledRun = runWithSchedulerLease("price-snapshot", intervalMs, takeSnapshot)
+      .finally(() => { scheduledRun = null; });
+    return scheduledRun;
+  };
   run().catch(err => console.error("Price snapshot failed:", err.message));
   const handle = setInterval(() => {
     run().catch(err => console.error("Price snapshot failed:", err.message));
@@ -54,4 +60,10 @@ function startPriceSnapshotSchedule(intervalMs = 15 * 60 * 1000) {
   return handle;
 }
 
-module.exports = { startPriceSnapshotSchedule };
+async function waitForPriceSnapshotIdle() {
+  while (scheduledRun || inFlightSnapshot) {
+    await Promise.allSettled([scheduledRun, inFlightSnapshot].filter(Boolean));
+  }
+}
+
+module.exports = { startPriceSnapshotSchedule, waitForPriceSnapshotIdle };

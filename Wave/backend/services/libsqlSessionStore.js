@@ -4,6 +4,7 @@ const { runWithSchedulerLease } = require("./schedulerLease");
 
 const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+let cleanupInFlight = null;
 
 function sqliteDateTime(value) {
   const date = new Date(value);
@@ -82,11 +83,15 @@ class LibsqlSessionStore extends session.Store {
 }
 
 function startSessionCleanupSchedule(store, intervalMs = CLEANUP_INTERVAL_MS) {
-  const run = async () => runWithSchedulerLease(
-    "http-session-cleanup",
-    intervalMs,
-    () => store.cleanupExpired()
-  );
+  const run = () => {
+    if (cleanupInFlight) return cleanupInFlight;
+    cleanupInFlight = runWithSchedulerLease(
+      "http-session-cleanup",
+      intervalMs,
+      () => store.cleanupExpired()
+    ).finally(() => { cleanupInFlight = null; });
+    return cleanupInFlight;
+  };
   run().catch(error => console.error("Session cleanup failed:", error.message));
   const handle = setInterval(() => {
     run().catch(error => console.error("Session cleanup failed:", error.message));
@@ -94,7 +99,12 @@ function startSessionCleanupSchedule(store, intervalMs = CLEANUP_INTERVAL_MS) {
   return handle;
 }
 
+function waitForSessionCleanupIdle() {
+  return cleanupInFlight || Promise.resolve();
+}
+
 module.exports = {
   LibsqlSessionStore,
   startSessionCleanupSchedule,
+  waitForSessionCleanupIdle,
 };

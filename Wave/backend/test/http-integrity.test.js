@@ -62,18 +62,23 @@ test("health and authentication boundaries work over HTTP", async () => {
   assert.equal(forbidden.status, 403);
 });
 
-test("a buy settles cash in exact cents through the real HTTP route", async () => {
+test("a fractional buy preserves asset precision and settles cash in exact cents", async () => {
   const response = await api("/api/trades", {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ type: "buy", symbol: "AAPL", amount: "1" }),
+    body: JSON.stringify({ type: "buy", symbol: "AAPL", amount: "0.12345678" }),
   });
   assert.equal(response.status, 201, await response.text());
   const user = await db.queryOne("SELECT cash_balance,cash_balance_cents FROM users WHERE id=?", [userId]);
-  assert.equal(user.cash_balance_cents, 89990);
-  assert.equal(user.cash_balance, 899.9);
-  const transaction = await db.queryOne("SELECT fee_cents,total_cents FROM transactions WHERE user_id=?", [userId]);
-  assert.deepEqual(transaction, { fee_cents: 10, total_cents: 10010 });
+  assert.equal(user.cash_balance_cents, 98764);
+  assert.equal(user.cash_balance, 987.64);
+  const transaction = await db.queryOne("SELECT amount,amount_cents,fee_cents,total_cents FROM transactions WHERE user_id=?", [userId]);
+  assert.deepEqual(transaction, {
+    amount: 0.12345678,
+    amount_cents: null,
+    fee_cents: 1,
+    total_cents: 1236,
+  });
 });
 
 test("HTTP money inputs reject sub-cent fiat values", async () => {

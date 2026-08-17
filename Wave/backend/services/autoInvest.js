@@ -69,6 +69,7 @@ async function runDuePlan(plan) {
 }
 
 let inFlightDuePlans = null;
+let scheduledRun = null;
 async function runDuePlans() {
   if (inFlightDuePlans) return inFlightDuePlans;
   inFlightDuePlans = executeDuePlans();
@@ -97,7 +98,12 @@ async function executeDuePlans() {
 }
 
 function startAutoInvestSchedule(intervalMs = 60 * 60 * 1000) {
-  const run = () => runWithSchedulerLease("auto-invest", intervalMs, runDuePlans);
+  const run = () => {
+    if (scheduledRun) return scheduledRun;
+    scheduledRun = runWithSchedulerLease("auto-invest", intervalMs, runDuePlans)
+      .finally(() => { scheduledRun = null; });
+    return scheduledRun;
+  };
   run().catch(err => console.error("Auto-invest run failed:", err.message));
   const handle = setInterval(() => {
     run().catch(err => console.error("Auto-invest run failed:", err.message));
@@ -105,4 +111,10 @@ function startAutoInvestSchedule(intervalMs = 60 * 60 * 1000) {
   return handle;
 }
 
-module.exports = { startAutoInvestSchedule };
+async function waitForAutoInvestIdle() {
+  while (scheduledRun || inFlightDuePlans) {
+    await Promise.allSettled([scheduledRun, inFlightDuePlans].filter(Boolean));
+  }
+}
+
+module.exports = { startAutoInvestSchedule, waitForAutoInvestIdle };

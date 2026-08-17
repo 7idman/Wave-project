@@ -273,6 +273,7 @@ async function drainJobs(options = {}) {
 }
 
 let scheduledDrain = null;
+let scheduledRecovery = null;
 async function processPendingStrategyMirrorJobs(options = {}) {
   if (scheduledDrain) return scheduledDrain;
   scheduledDrain = drainJobs(options);
@@ -344,16 +345,26 @@ async function listStrategyMirrorJobs({ status = null, limit = 100 } = {}) {
 }
 
 function startStrategyMirrorSchedule(intervalMs = 30 * 1000) {
-  const run = () => runWithSchedulerLease(
-    "strategy-mirror-recovery",
-    intervalMs,
-    processPendingStrategyMirrorJobs
-  );
+  const run = () => {
+    if (scheduledRecovery) return scheduledRecovery;
+    scheduledRecovery = runWithSchedulerLease(
+      "strategy-mirror-recovery",
+      intervalMs,
+      processPendingStrategyMirrorJobs
+    ).finally(() => { scheduledRecovery = null; });
+    return scheduledRecovery;
+  };
   run().catch(error => console.error("Strategy mirror recovery failed:", error.message));
   const handle = setInterval(() => {
     run().catch(error => console.error("Strategy mirror recovery failed:", error.message));
   }, intervalMs);
   return handle;
+}
+
+async function waitForStrategyMirrorIdle() {
+  while (scheduledRecovery || scheduledDrain) {
+    await Promise.allSettled([scheduledRecovery, scheduledDrain].filter(Boolean));
+  }
 }
 
 module.exports = {
@@ -363,4 +374,5 @@ module.exports = {
   retryStrategyMirrorJob,
   listStrategyMirrorJobs,
   startStrategyMirrorSchedule,
+  waitForStrategyMirrorIdle,
 };

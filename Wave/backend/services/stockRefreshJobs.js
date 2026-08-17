@@ -137,6 +137,7 @@ async function runClaimedJob(job) {
 }
 
 let localDrain = null;
+let schedulingInFlight = null;
 async function processPendingStockRefreshJobs() {
   if (localDrain) return localDrain;
   localDrain = (async () => {
@@ -160,13 +161,17 @@ function startStockRefreshSchedule({
   refreshIntervalMs = DEFAULT_REFRESH_INTERVAL_MS,
   pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
 } = {}) {
-  const schedule = async () => {
-    if (!process.env.FINNHUB_API_KEY) return;
-    await runWithSchedulerLease("stock-refresh-schedule", refreshIntervalMs, async () => {
-      await execute("DELETE FROM stock_refresh_jobs WHERE active_key IS NULL AND created_at < datetime('now', '-30 days')");
-      await enqueueStockRefresh({ source: "scheduled" });
-    });
-    triggerStockRefreshProcessing();
+  const schedule = () => {
+    if (schedulingInFlight) return schedulingInFlight;
+    schedulingInFlight = (async () => {
+      if (!process.env.FINNHUB_API_KEY) return;
+      await runWithSchedulerLease("stock-refresh-schedule", refreshIntervalMs, async () => {
+        await execute("DELETE FROM stock_refresh_jobs WHERE active_key IS NULL AND created_at < datetime('now', '-30 days')");
+        await enqueueStockRefresh({ source: "scheduled" });
+      });
+      triggerStockRefreshProcessing();
+    })().finally(() => { schedulingInFlight = null; });
+    return schedulingInFlight;
   };
 
   schedule().catch(error => console.error("Stock refresh scheduling failed:", error.message));
@@ -177,6 +182,12 @@ function startStockRefreshSchedule({
   return { refreshHandle, pollHandle };
 }
 
+async function waitForStockRefreshIdle() {
+  while (schedulingInFlight || localDrain) {
+    await Promise.allSettled([schedulingInFlight, localDrain].filter(Boolean));
+  }
+}
+
 module.exports = {
   enqueueStockRefresh,
   getStockRefreshJob,
@@ -184,4 +195,5 @@ module.exports = {
   processPendingStockRefreshJobs,
   triggerStockRefreshProcessing,
   startStockRefreshSchedule,
+  waitForStockRefreshIdle,
 };

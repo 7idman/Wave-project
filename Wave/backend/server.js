@@ -29,7 +29,7 @@ const express        = require("express");
 const cors           = require("cors");
 const session        = require("express-session");
 const passport       = require("passport");
-const { initSchema, execute } = require("./db");
+const { initSchema, execute, closeDatabase } = require("./db");
 const { authenticate } = require("./middleware/auth");
 const { databaseRateLimit } = require("./middleware/databaseRateLimit");
 
@@ -50,19 +50,28 @@ const phoneRoutes = require("./routes/phone");
 const clientErrorRoutes = require("./routes/clientErrors");
 const autoInvestRoutes = require("./routes/autoInvest");
 const priceAlertRoutes = require("./routes/priceAlerts");
-const { startAutoInvestSchedule } = require("./services/autoInvest");
-const { startPriceSnapshotSchedule } = require("./services/priceSnapshot");
-const { startStrategyMirrorSchedule } = require("./services/strategyMirroring");
-const { startStockRefreshSchedule } = require("./services/stockRefreshJobs");
+const { startAutoInvestSchedule, waitForAutoInvestIdle } = require("./services/autoInvest");
+const { startPriceSnapshotSchedule, waitForPriceSnapshotIdle } = require("./services/priceSnapshot");
+const { startStrategyMirrorSchedule, waitForStrategyMirrorIdle } = require("./services/strategyMirroring");
+const { startStockRefreshSchedule, waitForStockRefreshIdle } = require("./services/stockRefreshJobs");
 const {
   LibsqlSessionStore,
   startSessionCleanupSchedule,
+  waitForSessionCleanupIdle,
 } = require("./services/libsqlSessionStore");
 const { runWithSchedulerLease } = require("./services/schedulerLease");
 
 const app  = express();
-const PORT = process.env.PORT || 4000;
+const PORT = Number.parseInt(process.env.PORT || "4000", 10);
+if (!Number.isInteger(PORT) || PORT < 0 || PORT > 65535) {
+  throw new Error("PORT must be an integer between 0 and 65535");
+}
+const SHUTDOWN_TIMEOUT_MS = Math.max(1000, Number(process.env.SHUTDOWN_TIMEOUT_MS) || 10000);
 const httpSessionStore = new LibsqlSessionStore();
+let activeServer = null;
+let shutdownInFlight = null;
+const scheduleHandles = new Set();
+const backgroundTasks = new Set();
 app.disable("x-powered-by");
 
 // Railway puts the app behind a reverse proxy. Trust one proxy hop so the
@@ -156,33 +165,122 @@ app.use((err, req, res, next) => {
 });
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
+function trackBackgroundTask(task) {
+  backgroundTasks.add(task);
+  task.finally(() => backgroundTasks.delete(task));
+  return task;
+}
+
+function rememberScheduleHandle(handle) {
+  if (handle) scheduleHandles.add(handle);
+  return handle;
+}
+
+function stopSchedules() {
+  for (const handle of scheduleHandles) clearInterval(handle);
+  scheduleHandles.clear();
+}
+
+function closeHttpServer(server) {
+  if (!server?.listening) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    server.close(error => error ? reject(error) : resolve());
+  });
+}
+
 async function start() {
-  try {
-    await initSchema();
-    const cleanup = await execute("DELETE FROM refresh_tokens WHERE expires_at < datetime('now')");
-    if (cleanup.rowsAffected > 0) {
-      console.log(`[info] Cleared ${cleanup.rowsAffected} expired refresh token(s)`);
-    }
-    runWithSchedulerLease(
-      "crypto-price-warmup",
-      60 * 1000,
-      priceRoutes.fetchLivePrices
-    ).catch(error => console.warn("Crypto price warmup failed:", error.message));
-    startStockRefreshSchedule();
-    startPriceSnapshotSchedule();
-    startAutoInvestSchedule();
-    startStrategyMirrorSchedule();
-    startSessionCleanupSchedule(httpSessionStore);
-    app.listen(PORT, () => {
-      console.log(`[info] Wave API running on http://localhost:${PORT}`);
+  if (activeServer?.listening) return activeServer;
+
+  await initSchema();
+  const cleanup = await execute("DELETE FROM refresh_tokens WHERE expires_at < datetime('now')");
+  if (cleanup.rowsAffected > 0) {
+    console.log(`[info] Cleared ${cleanup.rowsAffected} expired refresh token(s)`);
+  }
+
+  trackBackgroundTask(
+    runWithSchedulerLease("crypto-price-warmup", 60 * 1000, priceRoutes.fetchLivePrices)
+      .catch(error => console.warn("Crypto price warmup failed:", error.message))
+  );
+  const stockSchedule = startStockRefreshSchedule();
+  rememberScheduleHandle(stockSchedule.refreshHandle);
+  rememberScheduleHandle(stockSchedule.pollHandle);
+  rememberScheduleHandle(startPriceSnapshotSchedule());
+  rememberScheduleHandle(startAutoInvestSchedule());
+  rememberScheduleHandle(startStrategyMirrorSchedule());
+  rememberScheduleHandle(startSessionCleanupSchedule(httpSessionStore));
+
+  activeServer = await new Promise((resolve, reject) => {
+    const server = app.listen(PORT, () => {
+      server.removeListener("error", reject);
+      const address = server.address();
+      const listeningPort = typeof address === "object" && address ? address.port : PORT;
+      console.log(`[info] Wave API running on http://localhost:${listeningPort}`);
       console.log(`[info] Database: ${process.env.LIBSQL_URL || "file:wave.db"}`);
+      resolve(server);
     });
-  } catch (err) {
-    console.error("[error] Failed to start server:", err.message);
-    process.exit(1);
+    server.once("error", reject);
+  });
+  return activeServer;
+}
+
+async function stop({ timeoutMs = SHUTDOWN_TIMEOUT_MS } = {}) {
+  if (shutdownInFlight) return shutdownInFlight;
+  shutdownInFlight = (async () => {
+    stopSchedules();
+    const gracefulWork = Promise.all([
+      closeHttpServer(activeServer),
+      Promise.allSettled([
+        ...backgroundTasks,
+        waitForStockRefreshIdle(),
+        waitForPriceSnapshotIdle(),
+        waitForAutoInvestIdle(),
+        waitForStrategyMirrorIdle(),
+        waitForSessionCleanupIdle(),
+      ]),
+    ]);
+
+    let timeoutHandle;
+    const timedOut = await Promise.race([
+      gracefulWork.then(() => false),
+      new Promise(resolve => {
+        timeoutHandle = setTimeout(() => resolve(true), timeoutMs);
+        timeoutHandle.unref?.();
+      }),
+    ]);
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+
+    if (timedOut) {
+      activeServer?.closeAllConnections?.();
+      return { timedOut: true };
+    }
+    await closeDatabase();
+    activeServer = null;
+    return { timedOut: false };
+  })();
+  return shutdownInFlight;
+}
+
+function installShutdownHandlers() {
+  for (const signal of ["SIGTERM", "SIGINT"]) {
+    process.once(signal, () => {
+      console.log(`[info] ${signal} received; shutting down gracefully`);
+      stop().then(({ timedOut }) => {
+        if (timedOut) console.warn(`[warn] Shutdown exceeded ${SHUTDOWN_TIMEOUT_MS}ms; forcing exit so durable workers can recover.`);
+        process.exit(0);
+      }).catch(error => {
+        console.error("[error] Graceful shutdown failed:", error.message);
+        process.exit(1);
+      });
+    });
   }
 }
 
-if (require.main === module) start();
+if (require.main === module) {
+  start().then(installShutdownHandlers).catch(error => {
+    stopSchedules();
+    console.error("[error] Failed to start server:", error.message);
+    process.exitCode = 1;
+  });
+}
 
-module.exports = { app, start };
+module.exports = { app, start, stop };
