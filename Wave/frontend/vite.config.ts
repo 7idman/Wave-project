@@ -1,6 +1,5 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import path from 'path'
 
 export default defineConfig({
   plugins: [react()],
@@ -9,24 +8,22 @@ export default defineConfig({
     dedupe: ['react', 'react-dom'],
   },
   build: {
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        // React and the charting stack change less often than application
-        // code, but combining both crossed Vite's 500 kB chunk threshold.
-        // Separate cache groups keep first-load parsing smaller while still
-        // preserving long-lived vendor caching across deployments.
-        onlyExplicitManualChunks: true,
-        manualChunks(id) {
-          const moduleId = id.replaceAll('\\', '/')
-          if (!moduleId.includes('/node_modules/')) return undefined
-          if (
-            moduleId.includes('/node_modules/react/') ||
-            moduleId.includes('/node_modules/react-dom/') ||
-            moduleId.includes('/node_modules/scheduler/')
-          ) {
-            return 'reactVendor'
-          }
-          return 'charts'
+        codeSplitting: {
+          groups: [
+            {
+              name: 'reactVendor',
+              test: /node_modules[\\/](?:react|react-dom|scheduler)[\\/]/,
+              includeDependenciesRecursively: true,
+              priority: 20,
+            },
+            {
+              name: 'charts',
+              test: /node_modules/,
+              priority: 10,
+            },
+          ],
         },
       },
     },
