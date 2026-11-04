@@ -10,6 +10,7 @@
 const router = require("express").Router();
 const { queryOne, queryAll, execute } = require("../db");
 const { fetchWithTimeout } = require("../utils/http");
+const shutdownSignal = require("../lib/shutdownSignal");
 
 const COIN_IDS = {
   BTC:  "bitcoin",
@@ -31,20 +32,27 @@ async function fetchLivePrices() {
     const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`;
     const headers = { Accept: "application/json" };
     if (process.env.COINGECKO_API_KEY) headers["x-cg-demo-api-key"] = process.env.COINGECKO_API_KEY;
-    const res = await fetchWithTimeout(url, { headers });
-    if (!res.ok) throw new Error(`CoinGecko error: ${res.status}`);
-    const data = await res.json();
+    try {
+      const res = await fetchWithTimeout(url, { headers, signal: shutdownSignal.signal });
+      if (shutdownSignal.signal.aborted) return;
+      if (!res.ok) throw new Error(`CoinGecko error: ${res.status}`);
+      const data = await res.json();
+      if (shutdownSignal.signal.aborted) return;
 
-    for (const [sym, id] of Object.entries(COIN_IDS)) {
-      const entry = data[id];
-      if (entry) {
-        await execute(
-          "UPDATE price_cache SET price = ?, change_24h = ?, updated_at = datetime('now') WHERE symbol = ?",
-          [entry.usd, entry.usd_24h_change ?? 0, sym]
-        );
+      for (const [sym, id] of Object.entries(COIN_IDS)) {
+        const entry = data[id];
+        if (entry) {
+          await execute(
+            "UPDATE price_cache SET price = ?, change_24h = ?, updated_at = datetime('now') WHERE symbol = ?",
+            [entry.usd, entry.usd_24h_change ?? 0, sym]
+          );
+        }
       }
+      lastFetch = Date.now();
+    } catch (err) {
+      if (err.name === "AbortError" && shutdownSignal.signal.aborted) return;
+      throw err;
     }
-    lastFetch = Date.now();
   })();
 
   try {

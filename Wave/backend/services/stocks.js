@@ -11,6 +11,7 @@
 
 const { execute } = require("../db");
 const { fetchWithTimeout } = require("../utils/http");
+const shutdownSignal = require("../lib/shutdownSignal");
 
 // A curated, broad set across major sectors — not "all stocks," but wide
 // enough to be useful. At the current 5-minute refresh cycle this averages
@@ -94,8 +95,13 @@ function queueFinnhubRequest(url) {
   const request = requestQueue.then(async () => {
     const waitMs = Math.max(nextRequestAt, rateLimitUntil) - Date.now();
     if (waitMs > 0) await sleep(waitMs);
+    if (shutdownSignal.signal.aborted) {
+      const err = new Error("aborted");
+      err.name = "AbortError";
+      throw err;
+    }
 
-    const response = await fetchWithTimeout(url);
+    const response = await fetchWithTimeout(url, { signal: shutdownSignal.signal });
     nextRequestAt = Date.now() + requestIntervalMs();
     if (response.status === 429) {
       rateLimitUntil = Math.max(
@@ -166,8 +172,10 @@ async function runStockRefresh({ onProgress } = {}) {
   let processed = 0;
   let rateLimited = false;
   for (const symbol of STOCK_SYMBOLS) {
+    if (shutdownSignal.signal.aborted) break;
     try {
       const quote = await fetchStockQuote(symbol);
+      if (shutdownSignal.signal.aborted) break;
       await execute(
         `INSERT INTO price_cache (symbol, price, change_24h, asset_type, updated_at)
          VALUES (?, ?, ?, 'stock', datetime('now'))
@@ -176,6 +184,9 @@ async function runStockRefresh({ onProgress } = {}) {
       );
       updated++;
     } catch (err) {
+      if (err.name === "AbortError" && shutdownSignal.signal.aborted) {
+        break;
+      }
       if (err.code === "FINNHUB_RATE_LIMITED") {
         console.warn(`Stocks: ${err.message}; ending this refresh early`);
         rateLimited = true;

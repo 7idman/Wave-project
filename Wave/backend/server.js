@@ -60,6 +60,7 @@ const {
   waitForSessionCleanupIdle,
 } = require("./services/libsqlSessionStore");
 const { runWithSchedulerLease } = require("./services/schedulerLease");
+const shutdownSignal = require("./lib/shutdownSignal");
 
 const app  = express();
 const PORT = Number.parseInt(process.env.PORT || "4000", 10);
@@ -71,7 +72,8 @@ const httpSessionStore = new LibsqlSessionStore();
 let activeServer = null;
 let shutdownInFlight = null;
 const scheduleHandles = new Set();
-const backgroundTasks = new Set();
+const backgroundTasks = new Map();
+let nextTaskId = 1;
 app.disable("x-powered-by");
 
 // Railway puts the app behind a reverse proxy. Trust one proxy hop so the
@@ -165,9 +167,12 @@ app.use((err, req, res, next) => {
 });
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
-function trackBackgroundTask(task) {
-  backgroundTasks.add(task);
-  task.finally(() => backgroundTasks.delete(task));
+function trackBackgroundTask(nameOrTask, maybeTask) {
+  const name = maybeTask ? nameOrTask : `task-${nextTaskId++}`;
+  const task = maybeTask || nameOrTask;
+  backgroundTasks.set(name, task);
+  const done = () => backgroundTasks.delete(name);
+  task.then(done, done);
   return task;
 }
 
@@ -189,6 +194,7 @@ function closeHttpServer(server) {
 }
 
 async function start() {
+  shutdownSignal.reset();
   if (activeServer?.listening) return activeServer;
 
   await initSchema();
@@ -198,6 +204,7 @@ async function start() {
   }
 
   trackBackgroundTask(
+    "crypto-price-warmup",
     runWithSchedulerLease("crypto-price-warmup", 60 * 1000, priceRoutes.fetchLivePrices)
       .catch(error => console.warn("Crypto price warmup failed:", error.message))
   );
@@ -227,10 +234,11 @@ async function stop({ timeoutMs = SHUTDOWN_TIMEOUT_MS } = {}) {
   if (shutdownInFlight) return shutdownInFlight;
   shutdownInFlight = (async () => {
     stopSchedules();
+    shutdownSignal.abort();
     const gracefulWork = Promise.all([
       closeHttpServer(activeServer),
       Promise.allSettled([
-        ...backgroundTasks,
+        ...backgroundTasks.values(),
         waitForStockRefreshIdle(),
         waitForPriceSnapshotIdle(),
         waitForAutoInvestIdle(),
@@ -251,6 +259,7 @@ async function stop({ timeoutMs = SHUTDOWN_TIMEOUT_MS } = {}) {
 
     if (timedOut) {
       activeServer?.closeAllConnections?.();
+      console.warn("[warn] shutdown drain timed out; still pending:", [...backgroundTasks.keys()].join(", "));
       return { timedOut: true };
     }
     await closeDatabase();
@@ -275,12 +284,35 @@ function installShutdownHandlers() {
   }
 }
 
+let fatalInProgress = false;
+
+function installCrashGuards(drain) {
+  const onFatal = label => error => {
+    if (shutdownInFlight) {
+      console.warn(`[warn] ${label} during shutdown:`, error);
+      return;
+    }
+    console.error(`[fatal] ${label}:`, error);
+    if (fatalInProgress) return;
+    fatalInProgress = true;
+    setTimeout(() => process.exit(1), 20_000).unref?.();
+    Promise.resolve().then(() => drain())
+      .catch(err => console.error("[fatal] drain failed:", err))
+      .finally(() => process.exit(1));
+  };
+  process.on("unhandledRejection", onFatal("Unhandled rejection"));
+  process.on("uncaughtException", onFatal("Uncaught exception"));
+}
+
 if (require.main === module) {
-  start().then(installShutdownHandlers).catch(error => {
+  start().then(() => {
+    installShutdownHandlers();
+    installCrashGuards(stop);
+  }).catch(error => {
     stopSchedules();
     console.error("[error] Failed to start server:", error.message);
-    process.exitCode = 1;
+    process.exit(1);
   });
 }
 
-module.exports = { app, start, stop };
+module.exports = { app, start, stop, installCrashGuards };
