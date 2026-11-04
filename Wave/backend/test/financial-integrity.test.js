@@ -122,6 +122,56 @@ test("schema fingerprint is automatic and required integrity indexes exist", asy
   assert.equal(infrastructureTables.length, 3);
 });
 
+test("migration steps strictly maintain drop -> repair -> create ordering", () => {
+  const payload = db.getSchemaPayload();
+  assert.ok(payload, "schema payload should be recorded");
+  const steps = payload.migrationSteps;
+  assert.ok(Array.isArray(steps) && steps.length > 0, "migrationSteps must not be empty");
+
+  let maxDropIndex = -1;
+  let minRepairIndex = Infinity;
+  let maxRepairIndex = -1;
+  let minCreateIndex = Infinity;
+
+  steps.forEach((step, index) => {
+    if (step.phase === "drop") {
+      maxDropIndex = Math.max(maxDropIndex, index);
+    } else if (step.phase === "repair") {
+      minRepairIndex = Math.min(minRepairIndex, index);
+      maxRepairIndex = Math.max(maxRepairIndex, index);
+    } else if (step.phase === "create") {
+      minCreateIndex = Math.min(minCreateIndex, index);
+    }
+  });
+
+  assert.ok(maxDropIndex >= 0, "must have drop steps");
+  assert.ok(minRepairIndex < Infinity, "must have repair steps");
+  assert.ok(minCreateIndex < Infinity, "must have create steps");
+  assert.ok(maxDropIndex < minRepairIndex, `all drops (max index ${maxDropIndex}) must precede all repairs (min index ${minRepairIndex})`);
+  assert.ok(maxRepairIndex < minCreateIndex, `all repairs (max index ${maxRepairIndex}) must precede all creates (min index ${minCreateIndex})`);
+});
+
+test("schema fingerprint matches real payload and is sensitive to individual step modifications", async () => {
+  const payload = db.getSchemaPayload();
+  assert.ok(payload, "schema payload should be recorded");
+
+  const versionRow = await db.queryOne("SELECT value FROM schema_meta WHERE key = 'schema_version'");
+  const computedVersion = db.computeSchemaFingerprint(payload);
+  assert.equal(versionRow.value, computedVersion, "persisted schema_version must match computeSchemaFingerprint(real payload)");
+
+  const hasCreateTrigger = payload.migrationSteps.some(step => step.sql && step.sql.includes("CREATE TRIGGER"));
+  assert.equal(hasCreateTrigger, true, "payload migrationSteps must contain at least one CREATE TRIGGER");
+
+  const hasAssetReview = payload.migrationSteps.some(
+    step => step.tag === "asset-review" && step.sql && step.sql.includes("asset_quantity_migration_review")
+  );
+  assert.equal(hasAssetReview, true, "payload migrationSteps must contain the asset-review insert");
+
+  const mutatedPayload = JSON.parse(JSON.stringify(payload));
+  mutatedPayload.migrationSteps[0].sql += " ";
+  assert.notEqual(db.computeSchemaFingerprint(mutatedPayload), computedVersion);
+});
+
 test("fiat helpers parse and settle exact cents without floating-point drift", () => {
   assert.equal(parseMoneyToCents("0.10") + parseMoneyToCents("0.20"), 30);
   assert.equal(roundMoneyToCents(10.005), 1001);
@@ -155,12 +205,28 @@ test("shared rate limits remain exact under concurrent replica-style calls", asy
 
 test("a legacy schema marker reruns idempotent migrations automatically", async () => {
   const affectedUserId = await createUser();
-  const affectedTrade = await db.execute(
+  await db.execute("DELETE FROM asset_quantity_migration_review");
+
+  const btcTrade = await db.execute(
     `INSERT INTO transactions
        (user_id, type, symbol, amount, amount_cents, price, fee, fee_cents, total, total_cents, status)
-     VALUES (?, 'buy', 'AAPL', 0.12, 12, 100, 0, 0, 12, 1200, 'completed')`,
+     VALUES (?, 'buy', 'BTC', 0.12345678, 12345, 60000, 0, 0, 7407.41, 740741, 'completed')`,
     [affectedUserId]
   );
+  const usdDeposit = await db.execute(
+    `INSERT INTO transactions
+       (user_id, type, symbol, amount, amount_cents, price, fee, fee_cents, total, total_cents, status)
+     VALUES (?, 'deposit', 'USD', 250.00, 25000, 1, 0, 0, 250.00, 25000, 'completed')`,
+    [affectedUserId]
+  );
+
+  await db.execute("DROP TRIGGER IF EXISTS sync_money_transactions_amount_cents_cents");
+  await db.execute(`CREATE TRIGGER sync_money_transactions_amount_cents_cents
+    AFTER UPDATE OF amount_cents ON transactions
+    BEGIN
+      UPDATE transactions SET amount = NEW.amount_cents / 100.0 WHERE id = NEW.id;
+    END`);
+
   await db.execute("DROP INDEX idx_bonus_grants_transaction");
   await db.execute("DROP TABLE strategy_mirror_jobs");
   await db.execute("DROP TABLE http_sessions");
@@ -182,20 +248,46 @@ test("a legacy schema marker reruns idempotent migrations automatically", async 
      WHERE type = 'table'
        AND name IN ('http_sessions', 'scheduler_leases', 'stock_refresh_jobs')`
   );
-  const repairedTrade = await db.queryOne(
+  const repairedBtc = await db.queryOne(
     "SELECT amount, amount_cents FROM transactions WHERE id = ?",
-    [affectedTrade.lastInsertRowid]
+    [btcTrade.lastInsertRowid]
   );
-  const review = await db.queryOne(
-    "SELECT stored_amount, erroneous_amount_cents FROM asset_quantity_migration_review WHERE transaction_id = ?",
-    [affectedTrade.lastInsertRowid]
+  const repairedUsd = await db.queryOne(
+    "SELECT amount, amount_cents FROM transactions WHERE id = ?",
+    [usdDeposit.lastInsertRowid]
   );
+  const reviewRows = await db.queryAll(
+    "SELECT transaction_id, stored_amount, erroneous_amount_cents FROM asset_quantity_migration_review"
+  );
+  const triggers = await db.queryAll(
+    "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'sync_money_%'"
+  );
+  const expectedTriggerCount = db.getSchemaPayload().moneyColumns.length * 3;
+
   assert.match(version.value, /^[a-f0-9]{12}$/);
   assert.ok(jobsTable);
   assert.ok(bonusIndex);
   assert.equal(infrastructureTables.length, 3);
-  assert.deepEqual(repairedTrade, { amount: 0.12, amount_cents: null });
-  assert.deepEqual(review, { stored_amount: 0.12, erroneous_amount_cents: 12 });
+  assert.equal(repairedBtc.amount, 0.12345678);
+  assert.equal(repairedBtc.amount_cents, null);
+  assert.equal(repairedUsd.amount, 250.00);
+  assert.equal(repairedUsd.amount_cents, 25000);
+  assert.equal(reviewRows.length, 1);
+  assert.equal(reviewRows[0].transaction_id, btcTrade.lastInsertRowid);
+  assert.equal(reviewRows[0].stored_amount, 0.12345678);
+  assert.equal(reviewRows[0].erroneous_amount_cents, 12345);
+  assert.equal(triggers.length, expectedTriggerCount);
+
+  // A second initSchema run is a no-op
+  await db.initSchema();
+  const triggersAfter = await db.queryAll(
+    "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'sync_money_%'"
+  );
+  assert.equal(triggersAfter.length, expectedTriggerCount);
+  const reviewRowsAfter = await db.queryAll("SELECT * FROM asset_quantity_migration_review");
+  assert.equal(reviewRowsAfter.length, 1);
+  const versionAfter = await db.queryOne("SELECT value FROM schema_meta WHERE key = 'schema_version'");
+  assert.equal(versionAfter.value, version.value);
 });
 
 test("failed financial transactions roll back every write", async () => {

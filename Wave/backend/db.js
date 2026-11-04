@@ -154,6 +154,61 @@ async function closeDatabase() {
   await db.close();
 }
 
+let lastSchemaPayload = null;
+
+function getSchemaPayload() {
+  return lastSchemaPayload;
+}
+
+function buildDropStatements(mapping) {
+  const triggerBase = `sync_money_${mapping.table}_${mapping.cents}`;
+  return [
+    `DROP TRIGGER IF EXISTS ${triggerBase}_insert`,
+    `DROP TRIGGER IF EXISTS ${triggerBase}_cents`,
+    `DROP TRIGGER IF EXISTS ${triggerBase}_legacy`,
+  ];
+}
+
+function buildCreateStatements(mapping) {
+  const triggerBase = `sync_money_${mapping.table}_${mapping.cents}`;
+  const triggerWhen = mapping.triggerWhere ? ` WHEN ${mapping.triggerWhere}` : "";
+  const insertCents = mapping.nullable
+    ? `CASE WHEN NEW.${mapping.cents} IS NULL AND NEW.${mapping.legacy} IS NOT NULL THEN CAST(ROUND(NEW.${mapping.legacy} * 100.0) AS INTEGER) ELSE NEW.${mapping.cents} END`
+    : `CASE WHEN NEW.${mapping.cents} = 0 AND NEW.${mapping.legacy} <> 0 THEN CAST(ROUND(NEW.${mapping.legacy} * 100.0) AS INTEGER) ELSE NEW.${mapping.cents} END`;
+  return [
+    `CREATE TRIGGER IF NOT EXISTS ${triggerBase}_insert AFTER INSERT ON ${mapping.table}${triggerWhen}
+     BEGIN
+       UPDATE ${mapping.table}
+       SET ${mapping.cents} = ${insertCents},
+           ${mapping.legacy} = (${insertCents}) / 100.0
+       WHERE id = NEW.id;
+     END`,
+    `CREATE TRIGGER IF NOT EXISTS ${triggerBase}_cents AFTER UPDATE OF ${mapping.cents} ON ${mapping.table}${triggerWhen}
+     BEGIN
+       UPDATE ${mapping.table}
+       SET ${mapping.legacy} = NEW.${mapping.cents} / 100.0
+       WHERE id = NEW.id;
+     END`,
+    `CREATE TRIGGER IF NOT EXISTS ${triggerBase}_legacy AFTER UPDATE OF ${mapping.legacy} ON ${mapping.table}
+     WHEN ${mapping.triggerWhere ? `(${mapping.triggerWhere}) AND ` : ""}NEW.${mapping.cents} IS OLD.${mapping.cents}
+          AND NEW.${mapping.legacy} IS NOT (NEW.${mapping.cents} / 100.0)
+     BEGIN
+       UPDATE ${mapping.table}
+       SET ${mapping.cents} = CAST(ROUND(NEW.${mapping.legacy} * 100.0) AS INTEGER),
+           ${mapping.legacy} = CAST(ROUND(NEW.${mapping.legacy} * 100.0) AS INTEGER) / 100.0
+       WHERE id = NEW.id;
+     END`,
+  ];
+}
+
+function computeSchemaFingerprint(payload) {
+  return crypto
+    .createHash("sha1")
+    .update(JSON.stringify(payload))
+    .digest("hex")
+    .slice(0, 12);
+}
+
 // ── Schema bootstrap ────────────────────────────────────────────────────────
 async function initSchema() {
   // Run each CREATE TABLE individually instead of batching them together.
@@ -703,14 +758,77 @@ async function initSchema() {
     { table: "auto_invest_plans", legacy: "weekly_amount", cents: "weekly_amount_cents" },
   ];
 
-  // The migration definition is the version. Editing any table, column
-  // migration, or index automatically produces a new fingerprint and reruns
-  // the idempotent migration block—there is no manual version to forget.
-  const schemaVersion = crypto
-    .createHash("sha1")
-    .update(JSON.stringify({ tables, columnMigrations, indexMigrations, moneyColumns }))
-    .digest("hex")
-    .slice(0, 12);
+  const repairStatements = [
+    {
+      sql: `INSERT OR IGNORE INTO asset_quantity_migration_review
+         (transaction_id, user_id, type, symbol, stored_amount, erroneous_amount_cents, note)
+       SELECT id, user_id, type, symbol, amount, amount_cents,
+              'Prior cents trigger touched an asset quantity; verify against external trade records if exact historical precision is required.'
+       FROM transactions
+       WHERE NOT (symbol = 'USD' AND type IN ('deposit', 'withdraw'))
+         AND amount_cents IS NOT NULL`,
+      args: [],
+      tag: "asset-review",
+    },
+    {
+      sql: `UPDATE transactions
+       SET amount_cents = NULL
+       WHERE NOT (symbol = 'USD' AND type IN ('deposit', 'withdraw'))
+         AND amount_cents IS NOT NULL`,
+      args: [],
+    },
+    ...moneyColumns.flatMap(mapping => {
+      const condition = mapping.where ? ` AND (${mapping.where})` : "";
+      const nonNull = mapping.nullable ? ` AND ${mapping.legacy} IS NOT NULL` : "";
+      return [
+        {
+          sql: `INSERT OR IGNORE INTO money_migration_adjustments
+             (table_name, row_id, column_name, old_value, new_cents, delta)
+           SELECT ?, id, ?, ${mapping.legacy}, CAST(ROUND(${mapping.legacy} * 100.0) AS INTEGER),
+                  (CAST(ROUND(${mapping.legacy} * 100.0) AS INTEGER) / 100.0) - ${mapping.legacy}
+           FROM ${mapping.table}
+           WHERE ABS((${mapping.legacy} * 100.0) - ROUND(${mapping.legacy} * 100.0)) > 0.0000001${nonNull}${condition}`,
+          args: [mapping.table, mapping.legacy],
+        },
+        {
+          sql: `UPDATE ${mapping.table}
+           SET ${mapping.cents} = CAST(ROUND(${mapping.legacy} * 100.0) AS INTEGER),
+               ${mapping.legacy} = CAST(ROUND(${mapping.legacy} * 100.0) AS INTEGER) / 100.0
+           WHERE 1 = 1${nonNull}${condition}`,
+          args: [],
+        },
+      ];
+    }),
+    {
+      sql: `UPDATE users
+       SET first_name = CASE WHEN instr(trim(name), ' ') > 0 THEN substr(trim(name), 1, instr(trim(name), ' ') - 1) ELSE trim(name) END,
+           last_name = CASE WHEN instr(trim(name), ' ') > 0 THEN trim(substr(trim(name), instr(trim(name), ' ') + 1)) ELSE NULL END
+       WHERE (first_name IS NULL OR first_name = '') AND name IS NOT NULL AND trim(name) <> ''`,
+      args: [],
+    },
+    {
+      sql: "UPDATE users SET email_verified_at = COALESCE(email_verified_at, created_at, datetime('now')) WHERE email_verified = 1",
+      args: [],
+    },
+  ];
+
+  const migrationSteps = [
+    ...moneyColumns.flatMap(buildDropStatements).map(sql => ({ sql, args: [], phase: "drop" })),
+    ...repairStatements.map(s => ({ ...s, phase: "repair" })),
+    ...moneyColumns.flatMap(buildCreateStatements).map(sql => ({ sql, args: [], phase: "create" })),
+  ];
+
+  const schemaPayload = {
+    tables,
+    columnMigrations,
+    indexMigrations,
+    moneyColumns,
+    migrationSteps,
+  };
+  lastSchemaPayload = schemaPayload;
+
+  // NOTE: the hash is whitespace-sensitive; reformatting SQL strings reruns the migration on the next deploy.
+  const schemaVersion = computeSchemaFingerprint(schemaPayload);
 
   await db.execute(`CREATE TABLE IF NOT EXISTS schema_meta (
     key   TEXT PRIMARY KEY,
@@ -775,101 +893,32 @@ async function initSchema() {
     }
     for (const sql of indexMigrations) await db.execute(sql);
 
-    // Remove the old compatibility triggers before any repair statements.
-    // Otherwise an UPDATE used to clear a wrongly populated cents column can
-    // cause the old trigger to overwrite the original asset quantity.
-    for (const mapping of moneyColumns) {
-      const triggerBase = `sync_money_${mapping.table}_${mapping.cents}`;
-      for (const suffix of ["insert", "cents", "legacy"]) {
-        await execute(`DROP TRIGGER IF EXISTS ${triggerBase}_${suffix}`);
+    // Drop triggers, run data repairs, and recreate compatibility triggers in order.
+    let assetReviewRows = 0;
+    if (databaseUrl.startsWith("file:")) {
+      const results = await db.batch(
+        migrationSteps.map(step => ({ sql: step.sql, args: step.args || [] })),
+        "write"
+      );
+      const assetReviewIndex = migrationSteps.findIndex(s => s.tag === "asset-review");
+      if (assetReviewIndex !== -1 && results[assetReviewIndex]) {
+        assetReviewRows = results[assetReviewIndex].rowsAffected || 0;
+      }
+    } else {
+      // Sequential execution on Turso: DDL in batch mode is not supported by Turso HTTP API.
+      // Note: there is a brief window during sequential execution where triggers are dropped before being recreated.
+      for (const step of migrationSteps) {
+        const result = await db.execute({ sql: step.sql, args: step.args || [] });
+        if (step.tag === "asset-review") {
+          assetReviewRows = result.rowsAffected || 0;
+        }
       }
     }
-
-    // A previous trigger revision treated transactions.amount as fiat for
-    // every trade. Preserve evidence of rows it touched, but never invent a
-    // higher-precision historical quantity that cannot be reconstructed.
-    const assetQuantityReviewInsert = await execute(
-      `INSERT OR IGNORE INTO asset_quantity_migration_review
-         (transaction_id, user_id, type, symbol, stored_amount, erroneous_amount_cents, note)
-       SELECT id, user_id, type, symbol, amount, amount_cents,
-              'Prior cents trigger touched an asset quantity; verify against external trade records if exact historical precision is required.'
-       FROM transactions
-       WHERE NOT (symbol = 'USD' AND type IN ('deposit', 'withdraw'))
-         AND amount_cents IS NOT NULL`
-    );
-    await execute(
-      `UPDATE transactions
-       SET amount_cents = NULL
-       WHERE NOT (symbol = 'USD' AND type IN ('deposit', 'withdraw'))
-         AND amount_cents IS NOT NULL`
-    );
-    if (assetQuantityReviewInsert.rowsAffected > 0) {
+    if (assetReviewRows > 0) {
       console.warn(
-        `[warn] ${assetQuantityReviewInsert.rowsAffected} historical asset transaction(s) require quantity review; see asset_quantity_migration_review.`
+        `[warn] ${assetReviewRows} historical asset transaction(s) require quantity review; see asset_quantity_migration_review.`
       );
     }
-
-    for (const mapping of moneyColumns) {
-      const condition = mapping.where ? ` AND (${mapping.where})` : "";
-      const nonNull = mapping.nullable ? ` AND ${mapping.legacy} IS NOT NULL` : "";
-      await execute(
-        `INSERT OR IGNORE INTO money_migration_adjustments
-           (table_name, row_id, column_name, old_value, new_cents, delta)
-         SELECT ?, id, ?, ${mapping.legacy}, CAST(ROUND(${mapping.legacy} * 100.0) AS INTEGER),
-                (CAST(ROUND(${mapping.legacy} * 100.0) AS INTEGER) / 100.0) - ${mapping.legacy}
-         FROM ${mapping.table}
-         WHERE ABS((${mapping.legacy} * 100.0) - ROUND(${mapping.legacy} * 100.0)) > 0.0000001${nonNull}${condition}`,
-        [mapping.table, mapping.legacy]
-      );
-      await execute(
-        `UPDATE ${mapping.table}
-         SET ${mapping.cents} = CAST(ROUND(${mapping.legacy} * 100.0) AS INTEGER),
-             ${mapping.legacy} = CAST(ROUND(${mapping.legacy} * 100.0) AS INTEGER) / 100.0
-         WHERE 1 = 1${nonNull}${condition}`
-      );
-
-      const triggerBase = `sync_money_${mapping.table}_${mapping.cents}`;
-      const triggerWhen = mapping.triggerWhere ? ` WHEN ${mapping.triggerWhere}` : "";
-      const insertCents = mapping.nullable
-        ? `CASE WHEN NEW.${mapping.cents} IS NULL AND NEW.${mapping.legacy} IS NOT NULL THEN CAST(ROUND(NEW.${mapping.legacy} * 100.0) AS INTEGER) ELSE NEW.${mapping.cents} END`
-        : `CASE WHEN NEW.${mapping.cents} = 0 AND NEW.${mapping.legacy} <> 0 THEN CAST(ROUND(NEW.${mapping.legacy} * 100.0) AS INTEGER) ELSE NEW.${mapping.cents} END`;
-      await execute(
-        `CREATE TRIGGER ${triggerBase}_insert AFTER INSERT ON ${mapping.table}${triggerWhen}
-         BEGIN
-           UPDATE ${mapping.table}
-           SET ${mapping.cents} = ${insertCents},
-               ${mapping.legacy} = (${insertCents}) / 100.0
-           WHERE id = NEW.id;
-         END`
-      );
-      await execute(
-        `CREATE TRIGGER ${triggerBase}_cents AFTER UPDATE OF ${mapping.cents} ON ${mapping.table}${triggerWhen}
-         BEGIN
-           UPDATE ${mapping.table}
-           SET ${mapping.legacy} = NEW.${mapping.cents} / 100.0
-           WHERE id = NEW.id;
-         END`
-      );
-      await execute(
-        `CREATE TRIGGER ${triggerBase}_legacy AFTER UPDATE OF ${mapping.legacy} ON ${mapping.table}
-         WHEN ${mapping.triggerWhere ? `(${mapping.triggerWhere}) AND ` : ""}NEW.${mapping.cents} IS OLD.${mapping.cents}
-              AND NEW.${mapping.legacy} IS NOT (NEW.${mapping.cents} / 100.0)
-         BEGIN
-           UPDATE ${mapping.table}
-           SET ${mapping.cents} = CAST(ROUND(NEW.${mapping.legacy} * 100.0) AS INTEGER),
-               ${mapping.legacy} = CAST(ROUND(NEW.${mapping.legacy} * 100.0) AS INTEGER) / 100.0
-           WHERE id = NEW.id;
-         END`
-      );
-    }
-
-    await execute(
-      `UPDATE users
-       SET first_name = CASE WHEN instr(trim(name), ' ') > 0 THEN substr(trim(name), 1, instr(trim(name), ' ') - 1) ELSE trim(name) END,
-           last_name = CASE WHEN instr(trim(name), ' ') > 0 THEN trim(substr(trim(name), instr(trim(name), ' ') + 1)) ELSE NULL END
-       WHERE (first_name IS NULL OR first_name = '') AND name IS NOT NULL AND trim(name) <> ''`
-    );
-    await execute("UPDATE users SET email_verified_at = COALESCE(email_verified_at, created_at, datetime('now')) WHERE email_verified = 1");
     await execute(
       "INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
       [schemaVersion]
@@ -934,4 +983,14 @@ async function initSchema() {
   console.log("[info] Database ready");
 }
 
-module.exports = { execute, queryOne, queryAll, batch, withTransaction, initSchema, closeDatabase };
+module.exports = {
+  execute,
+  queryOne,
+  queryAll,
+  batch,
+  withTransaction,
+  initSchema,
+  closeDatabase,
+  computeSchemaFingerprint,
+  getSchemaPayload,
+};
