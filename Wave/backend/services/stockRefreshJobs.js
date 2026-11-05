@@ -1,6 +1,7 @@
 const { execute, queryOne, withTransaction } = require("../db");
 const { fetchStockPrices, STOCK_SYMBOLS } = require("./stocks");
 const { runWithSchedulerLease } = require("./schedulerLease");
+const shutdownSignal = require("../lib/shutdownSignal");
 
 const DEFAULT_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const DEFAULT_POLL_INTERVAL_MS = 15 * 1000;
@@ -124,6 +125,16 @@ async function runClaimedJob(job) {
     );
     console.log(`[info] Stock refresh ${job.id}: ${result.updated} updated, ${result.skipped} skipped`);
   } catch (error) {
+    if (error.name === "AbortError" && shutdownSignal.signal.aborted) {
+      await execute(
+        `UPDATE stock_refresh_jobs
+         SET status = 'pending', claimed_at = NULL, updated_at = datetime('now')
+         WHERE id = ? AND status = 'processing'`,
+        [job.id]
+      );
+      console.log(`[info] Stock refresh ${job.id} interrupted by shutdown; released for the next worker`);
+      return getStockRefreshJob(job.id);
+    }
     await execute(
       `UPDATE stock_refresh_jobs
        SET status = 'failed', active_key = NULL, last_error = ?,

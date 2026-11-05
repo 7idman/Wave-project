@@ -73,7 +73,6 @@ let activeServer = null;
 let shutdownInFlight = null;
 const scheduleHandles = new Set();
 const backgroundTasks = new Map();
-let nextTaskId = 1;
 app.disable("x-powered-by");
 
 // Railway puts the app behind a reverse proxy. Trust one proxy hop so the
@@ -167,9 +166,7 @@ app.use((err, req, res, next) => {
 });
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
-function trackBackgroundTask(nameOrTask, maybeTask) {
-  const name = maybeTask ? nameOrTask : `task-${nextTaskId++}`;
-  const task = maybeTask || nameOrTask;
+function trackBackgroundTask(name, task) {
   backgroundTasks.set(name, task);
   const done = () => backgroundTasks.delete(name);
   task.then(done, done);
@@ -235,16 +232,23 @@ async function stop({ timeoutMs = SHUTDOWN_TIMEOUT_MS } = {}) {
   shutdownInFlight = (async () => {
     stopSchedules();
     shutdownSignal.abort();
+    const drains = new Map([
+      ...backgroundTasks,
+      ["stock-refresh", waitForStockRefreshIdle()],
+      ["price-snapshot", waitForPriceSnapshotIdle()],
+      ["auto-invest", waitForAutoInvestIdle()],
+      ["strategy-mirror", waitForStrategyMirrorIdle()],
+      ["session-cleanup", waitForSessionCleanupIdle()],
+    ]);
+    const pendingDrains = new Set(drains.keys());
+    for (const [name, promise] of drains) {
+      const done = () => pendingDrains.delete(name);
+      promise.then(done, done);     // never promise.finally(): that creates a new unhandled rejection
+    }
+
     const gracefulWork = Promise.all([
       closeHttpServer(activeServer),
-      Promise.allSettled([
-        ...backgroundTasks.values(),
-        waitForStockRefreshIdle(),
-        waitForPriceSnapshotIdle(),
-        waitForAutoInvestIdle(),
-        waitForStrategyMirrorIdle(),
-        waitForSessionCleanupIdle(),
-      ]),
+      Promise.allSettled([...drains.values()]),
     ]);
 
     let timeoutHandle;
@@ -259,7 +263,7 @@ async function stop({ timeoutMs = SHUTDOWN_TIMEOUT_MS } = {}) {
 
     if (timedOut) {
       activeServer?.closeAllConnections?.();
-      console.warn("[warn] shutdown drain timed out; still pending:", [...backgroundTasks.keys()].join(", "));
+      console.warn("[warn] shutdown drain timed out; still pending:", [...pendingDrains].join(", "));
       return { timedOut: true };
     }
     await closeDatabase();
@@ -295,7 +299,7 @@ function installCrashGuards(drain) {
     console.error(`[fatal] ${label}:`, error);
     if (fatalInProgress) return;
     fatalInProgress = true;
-    setTimeout(() => process.exit(1), 20_000).unref?.();
+    setTimeout(() => process.exit(1), SHUTDOWN_TIMEOUT_MS + 10_000).unref?.();
     Promise.resolve().then(() => drain())
       .catch(err => console.error("[fatal] drain failed:", err))
       .finally(() => process.exit(1));

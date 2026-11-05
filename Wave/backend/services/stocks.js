@@ -72,6 +72,21 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function abortError() {
+  const e = new Error("aborted");
+  e.name = "AbortError";
+  return e;
+}
+
+function abortableSleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(abortError());
+    const onAbort = () => { clearTimeout(timer); reject(abortError()); };
+    const timer = setTimeout(() => { signal.removeEventListener("abort", onAbort); resolve(); }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 function retryAfterMs(response) {
   const raw = response.headers.get("retry-after");
   if (!raw) return defaultCooldownMs();
@@ -94,12 +109,8 @@ let rateLimitUntil = 0;
 function queueFinnhubRequest(url) {
   const request = requestQueue.then(async () => {
     const waitMs = Math.max(nextRequestAt, rateLimitUntil) - Date.now();
-    if (waitMs > 0) await sleep(waitMs);
-    if (shutdownSignal.signal.aborted) {
-      const err = new Error("aborted");
-      err.name = "AbortError";
-      throw err;
-    }
+    if (waitMs > 0) await abortableSleep(waitMs, shutdownSignal.signal);
+    if (shutdownSignal.signal.aborted) throw abortError();
 
     const response = await fetchWithTimeout(url, { signal: shutdownSignal.signal });
     nextRequestAt = Date.now() + requestIntervalMs();
@@ -172,10 +183,10 @@ async function runStockRefresh({ onProgress } = {}) {
   let processed = 0;
   let rateLimited = false;
   for (const symbol of STOCK_SYMBOLS) {
-    if (shutdownSignal.signal.aborted) break;
+    if (shutdownSignal.signal.aborted) throw abortError();
     try {
       const quote = await fetchStockQuote(symbol);
-      if (shutdownSignal.signal.aborted) break;
+      if (shutdownSignal.signal.aborted) throw abortError();
       await execute(
         `INSERT INTO price_cache (symbol, price, change_24h, asset_type, updated_at)
          VALUES (?, ?, ?, 'stock', datetime('now'))
@@ -184,9 +195,7 @@ async function runStockRefresh({ onProgress } = {}) {
       );
       updated++;
     } catch (err) {
-      if (err.name === "AbortError" && shutdownSignal.signal.aborted) {
-        break;
-      }
+      if (err.name === "AbortError" && shutdownSignal.signal.aborted) throw err;
       if (err.code === "FINNHUB_RATE_LIMITED") {
         console.warn(`Stocks: ${err.message}; ending this refresh early`);
         rateLimited = true;

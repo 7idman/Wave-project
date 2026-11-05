@@ -709,3 +709,116 @@ test("concurrent stock refresh requests share one durable asynchronous job", asy
     else process.env.FINNHUB_REQUEST_INTERVAL_MS = originalInterval;
   }
 });
+
+test("an interrupted stock refresh is released, then completes on the next worker", async () => {
+  const originalFetch = global.fetch;
+  const originalLog = console.log;
+  const originalApiKey = process.env.FINNHUB_API_KEY;
+  const originalInterval = process.env.FINNHUB_REQUEST_INTERVAL_MS;
+  const shutdownSignal = require("../lib/shutdownSignal");
+  const {
+    enqueueStockRefresh,
+    getStockRefreshJob,
+    processPendingStockRefreshJobs,
+  } = require("../services/stockRefreshJobs");
+
+  process.env.FINNHUB_API_KEY = "stock-job-test-key";
+  process.env.FINNHUB_REQUEST_INTERVAL_MS = "1";
+  console.log = () => {};
+
+  global.fetch = (url, opts = {}) => new Promise((_, reject) => {
+    if (opts.signal) {
+      opts.signal.addEventListener("abort", () =>
+        reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
+    }
+  });
+
+  try {
+    const { job } = await enqueueStockRefresh({ source: "admin" });
+    assert.ok(job);
+
+    const runPromise = processPendingStockRefreshJobs();
+    setTimeout(() => shutdownSignal.abort(), 25);
+    await runPromise;
+
+    const interruptedJob = await getStockRefreshJob(job.id);
+    assert.equal(interruptedJob.status, "pending");
+    const rawRow = await db.queryOne(
+      "SELECT active_key, claimed_at, completed_at FROM stock_refresh_jobs WHERE id = ?",
+      [job.id]
+    );
+    assert.equal(rawRow.active_key, 1);
+    assert.equal(rawRow.claimed_at, null);
+    assert.equal(rawRow.completed_at, null);
+
+    shutdownSignal.reset();
+    let requestCount = 0;
+    global.fetch = async () => {
+      requestCount += 1;
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        json: async () => ({ c: 150 + requestCount, dp: 0.1 }),
+      };
+    };
+
+    await processPendingStockRefreshJobs();
+    const completedJob = await getStockRefreshJob(job.id);
+    assert.equal(completedJob.status, "completed");
+    assert.equal(completedJob.processed, 46);
+  } finally {
+    shutdownSignal.reset();
+    await db.execute("DELETE FROM stock_refresh_jobs");
+    global.fetch = originalFetch;
+    console.log = originalLog;
+    if (originalApiKey === undefined) delete process.env.FINNHUB_API_KEY;
+    else process.env.FINNHUB_API_KEY = originalApiKey;
+    if (originalInterval === undefined) delete process.env.FINNHUB_REQUEST_INTERVAL_MS;
+    else process.env.FINNHUB_REQUEST_INTERVAL_MS = originalInterval;
+  }
+});
+
+test("Finnhub pacing wait aborts quickly on shutdown", async () => {
+  const originalFetch = global.fetch;
+  const originalWarn = console.warn;
+  const originalApiKey = process.env.FINNHUB_API_KEY;
+  const originalInterval = process.env.FINNHUB_REQUEST_INTERVAL_MS;
+  const originalCooldown = process.env.FINNHUB_RATE_LIMIT_COOLDOWN_MS;
+  const shutdownSignal = require("../lib/shutdownSignal");
+  const { fetchStockQuote } = require("../services/stocks");
+
+  process.env.FINNHUB_API_KEY = "pacing-test-key";
+  process.env.FINNHUB_REQUEST_INTERVAL_MS = "10";
+  process.env.FINNHUB_RATE_LIMIT_COOLDOWN_MS = "30000";
+  console.warn = () => {};
+
+  global.fetch = async () => ({
+    ok: false,
+    status: 429,
+    headers: { get: header => header.toLowerCase() === "retry-after" ? "30" : null },
+  });
+
+  try {
+    const t0 = Date.now();
+    const firstRequest = fetchStockQuote("AAPL");
+    const queuedRequest = fetchStockQuote("MSFT");
+
+    setTimeout(() => shutdownSignal.abort(), 20);
+
+    await assert.rejects(queuedRequest, err => err.name === "AbortError");
+    await assert.rejects(firstRequest, err => err.name === "AbortError");
+    const elapsed = Date.now() - t0;
+    assert.ok(elapsed < 1000, `pacing wait must abort in < 1000ms, took ${elapsed}ms`);
+  } finally {
+    shutdownSignal.reset();
+    global.fetch = originalFetch;
+    console.warn = originalWarn;
+    if (originalApiKey === undefined) delete process.env.FINNHUB_API_KEY;
+    else process.env.FINNHUB_API_KEY = originalApiKey;
+    if (originalInterval === undefined) delete process.env.FINNHUB_REQUEST_INTERVAL_MS;
+    else process.env.FINNHUB_REQUEST_INTERVAL_MS = originalInterval;
+    if (originalCooldown === undefined) delete process.env.FINNHUB_RATE_LIMIT_COOLDOWN_MS;
+    else process.env.FINNHUB_RATE_LIMIT_COOLDOWN_MS = originalCooldown;
+  }
+});
