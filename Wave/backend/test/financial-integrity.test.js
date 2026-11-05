@@ -836,3 +836,62 @@ test("Finnhub pacing wait aborts quickly on shutdown", async () => {
     else process.env.FINNHUB_RATE_LIMIT_COOLDOWN_MS = originalCooldown;
   }
 });
+
+test("authenticate returns 503 on database failure and 401 on JWT failure", async () => {
+  const jwt = require("jsonwebtoken");
+  const db = require("../db");
+  const originalError = console.error;
+  console.error = () => {};
+
+  const realQueryOne = db.queryOne;
+  db.queryOne = async () => { throw new Error("simulated database outage"); };
+  delete require.cache[require.resolve("../middleware/auth")];
+  const { authenticate, signAccessToken, JWT_SECRET } = require("../middleware/auth");
+
+  function createMockRes() {
+    return {
+      statusCode: null,
+      body: null,
+      status(code) { this.statusCode = code; return this; },
+      json(data) { this.body = data; return this; },
+    };
+  }
+
+  try {
+    // 1. Valid token + failing queryOne -> 503
+    let nextCalled = false;
+    const validToken = signAccessToken("user-123");
+    const req1 = { headers: { authorization: `Bearer ${validToken}` } };
+    const res1 = createMockRes();
+    await authenticate(req1, res1, () => { nextCalled = true; });
+
+    assert.equal(res1.statusCode, 503);
+    assert.deepEqual(res1.body, { error: "Service temporarily unavailable" });
+    assert.equal(nextCalled, false);
+
+    // 2. Bearer garbage -> 401
+    nextCalled = false;
+    const req2 = { headers: { authorization: "Bearer garbage" } };
+    const res2 = createMockRes();
+    await authenticate(req2, res2, () => { nextCalled = true; });
+
+    assert.equal(res2.statusCode, 401);
+    assert.deepEqual(res2.body, { error: "Invalid or expired token" });
+    assert.equal(nextCalled, false);
+
+    // 3. Expired token -> 401
+    nextCalled = false;
+    const expiredToken = jwt.sign({ sub: "user-123" }, JWT_SECRET, { expiresIn: -10 });
+    const req3 = { headers: { authorization: `Bearer ${expiredToken}` } };
+    const res3 = createMockRes();
+    await authenticate(req3, res3, () => { nextCalled = true; });
+
+    assert.equal(res3.statusCode, 401);
+    assert.deepEqual(res3.body, { error: "Invalid or expired token" });
+    assert.equal(nextCalled, false);
+  } finally {
+    console.error = originalError;
+    db.queryOne = realQueryOne;
+    delete require.cache[require.resolve("../middleware/auth")];
+  }
+});
