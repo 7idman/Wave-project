@@ -216,7 +216,10 @@ async function runMigrationStepsSequentially(execStep, steps) {
     for (const step of steps) results.push(await execStep(step));
   } catch (error) {
     // Put the triggers back (CREATE TRIGGER IF NOT EXISTS, so re-running is safe), then rethrow.
-    for (const step of createSteps) await execStep(step).catch(() => {});
+    for (const step of createSteps) {
+      await execStep(step).catch(restoreError =>
+        console.warn("[warn] could not restore sync trigger after migration failure:", restoreError.message));
+    }
     throw error;
   }
   return results;

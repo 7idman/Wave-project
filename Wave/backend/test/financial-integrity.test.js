@@ -678,6 +678,7 @@ test("concurrent stock refresh requests share one durable asynchronous job", asy
     getStockRefreshJob,
     processPendingStockRefreshJobs,
   } = require("../services/stockRefreshJobs");
+  const { STOCK_SYMBOLS } = require("../services/stocks");
 
   try {
     const requests = await Promise.all([
@@ -690,11 +691,11 @@ test("concurrent stock refresh requests share one durable asynchronous job", asy
     await processPendingStockRefreshJobs();
     const completed = await getStockRefreshJob(requests[0].job.id);
     assert.equal(completed.status, "completed");
-    assert.equal(completed.total, 46);
-    assert.equal(completed.processed, 46);
-    assert.equal(completed.updated, 46);
+    assert.equal(completed.total, STOCK_SYMBOLS.length);
+    assert.equal(completed.processed, STOCK_SYMBOLS.length);
+    assert.equal(completed.updated, STOCK_SYMBOLS.length);
     assert.equal(completed.skipped, 0);
-    assert.equal(requestCount, 46);
+    assert.equal(requestCount, STOCK_SYMBOLS.length);
 
     const next = await enqueueStockRefresh({ source: "admin" });
     assert.equal(next.created, true);
@@ -721,24 +722,31 @@ test("an interrupted stock refresh is released, then completes on the next worke
     getStockRefreshJob,
     processPendingStockRefreshJobs,
   } = require("../services/stockRefreshJobs");
+  const { STOCK_SYMBOLS } = require("../services/stocks");
 
   process.env.FINNHUB_API_KEY = "stock-job-test-key";
   process.env.FINNHUB_REQUEST_INTERVAL_MS = "1";
   console.log = () => {};
 
-  global.fetch = (url, opts = {}) => new Promise((_, reject) => {
-    if (opts.signal) {
-      opts.signal.addEventListener("abort", () =>
-        reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
-    }
-  });
+  let fetchStarted;
+  const fetchStartedPromise = new Promise(resolve => { fetchStarted = resolve; });
+  global.fetch = (url, opts = {}) => {
+    fetchStarted();
+    return new Promise((_, reject) => {
+      if (opts.signal) {
+        opts.signal.addEventListener("abort", () =>
+          reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
+      }
+    });
+  };
 
   try {
     const { job } = await enqueueStockRefresh({ source: "admin" });
     assert.ok(job);
 
     const runPromise = processPendingStockRefreshJobs();
-    setTimeout(() => shutdownSignal.abort(), 25);
+    await fetchStartedPromise;
+    shutdownSignal.abort();
     await runPromise;
 
     const interruptedJob = await getStockRefreshJob(job.id);
@@ -766,7 +774,7 @@ test("an interrupted stock refresh is released, then completes on the next worke
     await processPendingStockRefreshJobs();
     const completedJob = await getStockRefreshJob(job.id);
     assert.equal(completedJob.status, "completed");
-    assert.equal(completedJob.processed, 46);
+    assert.equal(completedJob.processed, STOCK_SYMBOLS.length);
   } finally {
     shutdownSignal.reset();
     await db.execute("DELETE FROM stock_refresh_jobs");
@@ -793,18 +801,24 @@ test("Finnhub pacing wait aborts quickly on shutdown", async () => {
   process.env.FINNHUB_RATE_LIMIT_COOLDOWN_MS = "30000";
   console.warn = () => {};
 
-  global.fetch = async () => ({
-    ok: false,
-    status: 429,
-    headers: { get: header => header.toLowerCase() === "retry-after" ? "30" : null },
-  });
+  let fetchStarted;
+  const fetchStartedPromise = new Promise(resolve => { fetchStarted = resolve; });
+  global.fetch = async () => {
+    fetchStarted();
+    return {
+      ok: false,
+      status: 429,
+      headers: { get: header => header.toLowerCase() === "retry-after" ? "30" : null },
+    };
+  };
 
   try {
     const t0 = Date.now();
     const firstRequest = fetchStockQuote("AAPL");
     const queuedRequest = fetchStockQuote("MSFT");
 
-    setTimeout(() => shutdownSignal.abort(), 20);
+    await fetchStartedPromise;
+    shutdownSignal.abort();
 
     await assert.rejects(queuedRequest, err => err.name === "AbortError");
     await assert.rejects(firstRequest, err => err.name === "AbortError");

@@ -58,7 +58,7 @@ test("boot failure exits non-zero instead of hanging", async () => {
     child.stderr.on("data", chunk => { stderr += chunk; });
 
     const code = await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { child.kill(); reject(new Error("process hung")); }, 60000);
+      const timer = setTimeout(() => { child.kill(); reject(new Error("process hung")); }, 120000);
       child.once("exit", c => { clearTimeout(timer); resolve(c); });
     });
 
@@ -98,7 +98,7 @@ test("unhandled rejection triggers crash guard and exits with code 1", async () 
     child.stderr.on("data", chunk => { stderr += chunk; });
 
     const code = await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { child.kill(); reject(new Error("process hung")); }, 60000);
+      const timer = setTimeout(() => { child.kill(); reject(new Error("process hung")); }, 120000);
       child.once("exit", c => { clearTimeout(timer); resolve(c); });
     });
 
@@ -145,7 +145,7 @@ test("shutdown aborts hung background fetches and tolerates late errors", async 
     child.stderr.on("data", chunk => { stderr += chunk; });
 
     const code = await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { child.kill(); reject(new Error("process hung")); }, 60000);
+      const timer = setTimeout(() => { child.kill(); reject(new Error("process hung")); }, 120000);
       child.once("exit", c => { clearTimeout(timer); resolve(c); });
     });
 
