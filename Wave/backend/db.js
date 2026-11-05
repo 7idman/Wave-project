@@ -209,6 +209,19 @@ function computeSchemaFingerprint(payload) {
     .slice(0, 12);
 }
 
+async function runMigrationStepsSequentially(execStep, steps) {
+  const createSteps = steps.filter(s => s.phase === "create");
+  const results = [];
+  try {
+    for (const step of steps) results.push(await execStep(step));
+  } catch (error) {
+    // Put the triggers back (CREATE TRIGGER IF NOT EXISTS, so re-running is safe), then rethrow.
+    for (const step of createSteps) await execStep(step).catch(() => {});
+    throw error;
+  }
+  return results;
+}
+
 // ── Schema bootstrap ────────────────────────────────────────────────────────
 async function initSchema() {
   // Run each CREATE TABLE individually instead of batching them together.
@@ -907,11 +920,13 @@ async function initSchema() {
     } else {
       // Sequential execution on Turso: DDL in batch mode is not supported by Turso HTTP API.
       // Note: there is a brief window during sequential execution where triggers are dropped before being recreated.
-      for (const step of migrationSteps) {
-        const result = await db.execute({ sql: step.sql, args: step.args || [] });
-        if (step.tag === "asset-review") {
-          assetReviewRows = result.rowsAffected || 0;
-        }
+      const results = await runMigrationStepsSequentially(
+        step => db.execute({ sql: step.sql, args: step.args || [] }),
+        migrationSteps
+      );
+      const assetReviewIndex = migrationSteps.findIndex(s => s.tag === "asset-review");
+      if (assetReviewIndex !== -1 && results[assetReviewIndex]) {
+        assetReviewRows = results[assetReviewIndex].rowsAffected || 0;
       }
     }
     if (assetReviewRows > 0) {
@@ -993,4 +1008,5 @@ module.exports = {
   closeDatabase,
   computeSchemaFingerprint,
   getSchemaPayload,
+  runMigrationStepsSequentially,
 };

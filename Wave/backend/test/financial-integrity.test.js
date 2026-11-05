@@ -172,6 +172,29 @@ test("schema fingerprint matches real payload and is sensitive to individual ste
   assert.notEqual(db.computeSchemaFingerprint(mutatedPayload), computedVersion);
 });
 
+test("a failing sequential migration restores the sync triggers", async () => {
+  const steps = db.getSchemaPayload().migrationSteps;
+  let repairCount = 0;
+  await assert.rejects(
+    db.runMigrationStepsSequentially(async step => {
+      if (step.phase === "repair") {
+        repairCount++;
+        if (repairCount === 2) {
+          throw new Error("simulated second repair failure");
+        }
+      }
+      return db.execute(step.sql, step.args);
+    }, steps),
+    /simulated second repair failure/
+  );
+
+  const triggers = await db.queryAll(
+    "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'sync_money_%'"
+  );
+  const expectedTriggerCount = db.getSchemaPayload().moneyColumns.length * 3;
+  assert.equal(triggers.length, expectedTriggerCount);
+});
+
 test("fiat helpers parse and settle exact cents without floating-point drift", () => {
   assert.equal(parseMoneyToCents("0.10") + parseMoneyToCents("0.20"), 30);
   assert.equal(roundMoneyToCents(10.005), 1001);
