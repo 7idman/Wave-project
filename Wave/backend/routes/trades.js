@@ -36,7 +36,11 @@ const SENSITIVE_CHANGE_COOLDOWN_HOURS = parseInt(process.env.SENSITIVE_CHANGE_CO
 // frontend rendering a blank/placeholder address someone could send real
 // funds into by mistake.
 router.get("/deposit-methods", async (req, res) => {
-  res.json(getDepositMethods());
+  try {
+    res.json(getDepositMethods());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.post("/", async (req, res) => {
