@@ -895,3 +895,64 @@ test("authenticate returns 503 on database failure and 401 on JWT failure", asyn
     delete require.cache[require.resolve("../middleware/auth")];
   }
 });
+
+test("validateProductionSecrets fails closed on production and Railway", () => {
+  const { validateProductionSecrets } = require("../lib/productionSecrets");
+  const validSecretA = "a".repeat(32);
+  const validSecretB = "b".repeat(32);
+
+  // 1. {} does not throw (development)
+  assert.doesNotThrow(() => validateProductionSecrets({}));
+
+  // 2. { NODE_ENV: "production" } throws missing secrets
+  assert.throws(
+    () => validateProductionSecrets({ NODE_ENV: "production" }),
+    /Missing required production secret\(s\): JWT_SECRET, SESSION_SECRET/
+  );
+
+  // 3. { RAILWAY_ENVIRONMENT_ID: "x" } with no secrets throws
+  assert.throws(
+    () => validateProductionSecrets({ RAILWAY_ENVIRONMENT_ID: "x" }),
+    /Missing required production secret\(s\): JWT_SECRET, SESSION_SECRET/
+  );
+
+  // 4. Two valid, different secrets of 32+ characters do not throw
+  assert.doesNotThrow(() => validateProductionSecrets({
+    NODE_ENV: "production",
+    JWT_SECRET: validSecretA,
+    SESSION_SECRET: validSecretB,
+  }));
+  assert.doesNotThrow(() => validateProductionSecrets({
+    RAILWAY_ENVIRONMENT_ID: "x",
+    JWT_SECRET: validSecretA,
+    SESSION_SECRET: validSecretB,
+  }));
+
+  // 5. Identical secrets throw
+  assert.throws(
+    () => validateProductionSecrets({
+      NODE_ENV: "production",
+      JWT_SECRET: validSecretA,
+      SESSION_SECRET: validSecretA,
+    }),
+    /JWT_SECRET and SESSION_SECRET must be different values/
+  );
+
+  // 6. A secret shorter than 32 characters throws
+  assert.throws(
+    () => validateProductionSecrets({
+      NODE_ENV: "production",
+      JWT_SECRET: "short-secret",
+      SESSION_SECRET: validSecretB,
+    }),
+    /JWT_SECRET and SESSION_SECRET must each be at least 32 characters in production/
+  );
+  assert.throws(
+    () => validateProductionSecrets({
+      RAILWAY_ENVIRONMENT_ID: "x",
+      JWT_SECRET: validSecretA,
+      SESSION_SECRET: "short-secret",
+    }),
+    /JWT_SECRET and SESSION_SECRET must each be at least 32 characters in production/
+  );
+});
